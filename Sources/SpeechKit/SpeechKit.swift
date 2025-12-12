@@ -1,2 +1,11 @@
-// The Swift Programming Language
-// https://docs.swift.org/swift-book
+// SpeechKit - Modular Voice API Framework
+
+@_exported import struct Foundation.Data
+@_exported import struct Foundation.Date
+@_exported import struct Foundation.UUID
+
+// MARK: - ElevenLabs
+
+public typealias SpeechService = ElevenLabsService
+public typealias SpeechModelID = ElevenLabsModelID
+public typealias SpeechError = ElevenLabsError
