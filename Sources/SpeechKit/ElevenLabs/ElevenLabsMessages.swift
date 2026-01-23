@@ -5,6 +5,7 @@ import Foundation
 public enum ElevenLabsModelID: String, Sendable, CaseIterable {
     case scribeV2Realtime = "scribe_v2_realtime"
     case scribeV1 = "scribe_v1"
+    case scribeV2 = "scribe_v2"
 }
 
 // MARK: - Outgoing Messages
@@ -135,6 +136,7 @@ public enum ElevenLabsError: Error, LocalizedError, Sendable {
     case fileReadFailed
     case uploadFailed(String)
     case unsupportedModel(String)
+    case securityScopeDenied
     
     public var errorDescription: String? {
         switch self {
@@ -160,6 +162,8 @@ public enum ElevenLabsError: Error, LocalizedError, Sendable {
             return "File upload failed: \(reason)"
         case .unsupportedModel(let modelId):
             return "Unsupported model for upload: \(modelId)"
+        case .securityScopeDenied:
+            return "Failed to access security-scoped resource"
         }
     }
 }

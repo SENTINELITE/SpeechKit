@@ -189,7 +189,7 @@ public final class ElevenLabsService {
         guard !apiKey.isEmpty else {
             throw ElevenLabsError.apiKeyMissing
         }
-        guard modelId == .scribeV1 else {
+        guard modelId == .scribeV1 || modelId == .scribeV2 else {
             throw ElevenLabsError.unsupportedModel(modelId.rawValue)
         }
         guard let uploadURL = fileUploadURL else {
@@ -230,6 +230,15 @@ public final class ElevenLabsService {
         } catch {
             throw ElevenLabsError.decodingFailed(error.localizedDescription)
         }
+    }
+
+    public func transcribeAudioFile(securityScopedURL: URL, modelId: ElevenLabsModelID = .scribeV1) async throws -> String {
+        let didStartAccess = securityScopedURL.startAccessingSecurityScopedResource()
+        guard didStartAccess else {
+            throw ElevenLabsError.securityScopeDenied
+        }
+        defer { securityScopedURL.stopAccessingSecurityScopedResource() }
+        return try await transcribeAudioFile(file: securityScopedURL, modelId: modelId)
     }
     
     // MARK: - Private Methods
