@@ -132,6 +132,9 @@ public enum ElevenLabsError: Error, LocalizedError, Sendable {
     case permissionDenied
     case audioEngineError(String)
     case apiKeyMissing
+    case fileReadFailed
+    case uploadFailed(String)
+    case unsupportedModel(String)
     
     public var errorDescription: String? {
         switch self {
@@ -151,6 +154,12 @@ public enum ElevenLabsError: Error, LocalizedError, Sendable {
             return "Audio engine error: \(reason)"
         case .apiKeyMissing:
             return "API key not configured"
+        case .fileReadFailed:
+            return "Failed to read audio file"
+        case .uploadFailed(let reason):
+            return "File upload failed: \(reason)"
+        case .unsupportedModel(let modelId):
+            return "Unsupported model for upload: \(modelId)"
         }
     }
 }
