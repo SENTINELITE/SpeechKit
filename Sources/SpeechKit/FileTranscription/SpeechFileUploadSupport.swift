@@ -7,6 +7,38 @@ enum SpeechMultipartFormPart: Sendable {
 }
 
 enum SpeechFileUploadSupport {
+    static func validateFileExtension(
+        _ fileURL: URL,
+        allowedExtensions: Set<String>,
+        provider: SpeechFileProvider
+    ) throws {
+        let fileExtension = fileURL.pathExtension.lowercased()
+        guard allowedExtensions.contains(fileExtension) else {
+            throw SpeechError.providerFailure(
+                provider: provider,
+                reason: "Unsupported file extension: \(fileExtension.isEmpty ? "(none)" : fileExtension)."
+            )
+        }
+    }
+
+    static func validateFileSize(
+        _ fileURL: URL,
+        maxUploadBytes: Int64,
+        provider: SpeechFileProvider
+    ) throws {
+        do {
+            let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+            if let fileSize = attributes[.size] as? NSNumber,
+               fileSize.int64Value > maxUploadBytes {
+                throw SpeechError.uploadFailed(provider: provider, reason: "Audio file exceeds \(maxUploadBytes) byte limit.")
+            }
+        } catch let error as SpeechError {
+            throw error
+        } catch {
+            throw SpeechError.providerFailure(provider: provider, reason: error.localizedDescription)
+        }
+    }
+
     static func makeMultipartBody(boundary: String, parts: [SpeechMultipartFormPart]) -> Data {
         var body = Data()
 

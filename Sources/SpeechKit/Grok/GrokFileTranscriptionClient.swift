@@ -14,9 +14,37 @@ public enum GrokTimestampGranularity: String, Sendable, CaseIterable {
     case word
 }
 
+public enum GrokLanguage: String, Sendable, CaseIterable {
+    case arabic = "ar"
+    case czech = "cs"
+    case danish = "da"
+    case dutch = "nl"
+    case english = "en"
+    case filipino = "fil"
+    case french = "fr"
+    case german = "de"
+    case hindi = "hi"
+    case indonesian = "id"
+    case italian = "it"
+    case japanese = "ja"
+    case korean = "ko"
+    case macedonian = "mk"
+    case malay = "ms"
+    case persian = "fa"
+    case polish = "pl"
+    case portuguese = "pt"
+    case romanian = "ro"
+    case russian = "ru"
+    case spanish = "es"
+    case swedish = "sv"
+    case thai = "th"
+    case turkish = "tr"
+    case vietnamese = "vi"
+}
+
 public struct GrokFileTranscriptionOptions: Sendable, Equatable {
     public var modelId: GrokModelID
-    public var language: String?
+    public var language: GrokLanguage?
     public var format: Bool
     public var multichannel: Bool
     public var channels: Int?
@@ -28,7 +56,7 @@ public struct GrokFileTranscriptionOptions: Sendable, Equatable {
 
     public init(
         modelId: GrokModelID = .stt,
-        language: String? = nil,
+        language: GrokLanguage? = nil,
         format: Bool = false,
         multichannel: Bool = false,
         channels: Int? = nil,
@@ -124,7 +152,7 @@ struct GrokFileTranscriptionClient {
         }
 
         try validate(options)
-        let audioData = try readFileData(from: file)
+        let audioData = try readFileData(from: file, options: options)
         let boundary = "SpeechKit-\(UUID().uuidString)"
         var parts: [SpeechMultipartFormPart] = [
             .file(
@@ -155,7 +183,7 @@ struct GrokFileTranscriptionClient {
         }
 
         if let language = options.language {
-            parts.append(.text(name: "language", value: language))
+            parts.append(.text(name: "language", value: language.rawValue))
         }
         if options.format {
             parts.append(.text(name: "format", value: "true"))
@@ -203,18 +231,32 @@ struct GrokFileTranscriptionClient {
         }
     }
 
-    private func readFileData(from fileURL: URL) throws -> Data {
+    private func readFileData(from fileURL: URL, options: GrokFileTranscriptionOptions) throws -> Data {
         do {
-            let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
-            if let fileSize = attributes[.size] as? NSNumber,
-               fileSize.int64Value > maxUploadBytes {
-                throw SpeechError.uploadFailed(provider: .grok, reason: "Audio file exceeds 500 MB limit.")
+            if fileURL.pathExtension.isEmpty {
+                throw SpeechError.providerFailure(provider: .grok, reason: "Unsupported file extension: (none).")
             }
+            if isRawAudio(fileURL) {
+                if options.audioFormat == nil || options.sampleRate == nil {
+                    throw SpeechError.providerFailure(provider: .grok, reason: "Raw audio requires audio_format and sample_rate.")
+                }
+            } else {
+                try SpeechFileUploadSupport.validateFileExtension(
+                    fileURL,
+                    allowedExtensions: ["wav", "mp3", "ogg", "opus", "flac", "aac", "mp4", "m4a", "mkv"],
+                    provider: .grok
+                )
+            }
+            try SpeechFileUploadSupport.validateFileSize(fileURL, maxUploadBytes: maxUploadBytes, provider: .grok)
             return try Data(contentsOf: fileURL)
         } catch let error as SpeechError {
             throw error
         } catch {
             throw SpeechError.providerFailure(provider: .grok, reason: error.localizedDescription)
         }
+    }
+
+    private func isRawAudio(_ fileURL: URL) -> Bool {
+        ["pcm", "mulaw", "alaw"].contains(fileURL.pathExtension.lowercased())
     }
 }

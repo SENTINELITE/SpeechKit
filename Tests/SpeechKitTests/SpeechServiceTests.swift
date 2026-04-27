@@ -21,7 +21,8 @@ struct SpeechServiceTests {
         let service = SpeechService(
             elevenLabs: ElevenLabsConfig(apiKey: "eleven"),
             cohere: CohereConfig(apiKey: "cohere"),
-            grok: GrokConfig(apiKey: "xai")
+            grok: GrokConfig(apiKey: "xai"),
+            aqua: AquaConfig(apiKey: "aqua")
         )
         let fileURL = temporaryAudioFileURL()
 
@@ -42,6 +43,17 @@ struct SpeechServiceTests {
         #expect(service.elevenLabs?.apiKey == "legacy-key")
         #expect(service.elevenLabs?.realtimeModelId == .scribeV2Realtime)
         #expect(service.elevenLabs?.fileModelId == .scribeV1)
+    }
+
+    @Test("provider configs support raw language codes")
+    func providerConfigsSupportRawLanguageCodes() throws {
+        let cohere = try CohereConfig(apiKey: "cohere", languageCode: "de")
+        let grok = try GrokConfig(apiKey: "xai", languageCode: "fil")
+        let aqua = try AquaConfig(apiKey: "aqua", languageCode: "ja")
+
+        #expect(cohere.language == .german)
+        #expect(grok.language == .filipino)
+        #expect(aqua.language == .japanese)
     }
 }
 
