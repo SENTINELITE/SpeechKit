@@ -44,6 +44,16 @@ struct FileTranscriptionClientTests {
         }
     }
 
+    @Test("Aqua rejects files over 25 MB before request creation")
+    func aquaRejectsOversizedFile() throws {
+        let client = AquaFileTranscriptionClient(apiKey: "aqua-key")
+        let fileURL = try temporarySparseFileURL(named: "large.mp3", size: 25 * 1024 * 1024 + 1)
+
+        #expect(throws: SpeechError.uploadFailed(provider: .aqua, reason: "Audio file exceeds 26214400 byte limit.")) {
+            _ = try client.makeRequest(file: fileURL)
+        }
+    }
+
     @Test("Aqua response decodes usage and request id")
     func aquaResponseDecodesUsageAndRequestID() throws {
         let data = Data(

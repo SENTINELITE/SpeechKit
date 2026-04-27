@@ -48,6 +48,7 @@ struct AquaFileTranscriptionClient {
     private let apiKey: String
     private let urlSession: URLSession
     private let uploadURL = URL(string: "https://api.aquavoice.com/api/v1/audio/transcriptions")
+    private let maxUploadBytes: Int64 = 25 * 1024 * 1024
     private let allowedExtensions: Set<String> = ["flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "wav", "webm"]
 
     init(apiKey: String, urlSession: URLSession = .shared) {
@@ -96,6 +97,7 @@ struct AquaFileTranscriptionClient {
         }
 
         try SpeechFileUploadSupport.validateFileExtension(file, allowedExtensions: allowedExtensions, provider: .aqua)
+        try SpeechFileUploadSupport.validateFileSize(file, maxUploadBytes: maxUploadBytes, provider: .aqua)
         let audioData = try readFileData(from: file)
         let boundary = "SpeechKit-\(UUID().uuidString)"
         var parts: [SpeechMultipartFormPart] = [
