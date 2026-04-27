@@ -41,8 +41,8 @@ struct FileTranscriptionClientTests {
         #expect(body.contains("name=\"file\"; filename=\"sample.wav\""))
     }
 
-    @Test("Grok multipart request includes options before file")
-    func grokRequestIncludesOptionsBeforeFile() throws {
+    @Test("Grok multipart request includes file before options")
+    func grokRequestIncludesFileBeforeOptions() throws {
         let client = GrokFileTranscriptionClient(apiKey: "xai-key")
         let fileURL = temporaryAudioFileURL(named: "sample.wav")
 
@@ -54,6 +54,7 @@ struct FileTranscriptionClientTests {
                 multichannel: true,
                 channels: 2,
                 diarize: true,
+                timestampGranularities: [.word],
                 audioFormat: .pcm,
                 sampleRate: 16000,
                 timeoutInterval: 900
@@ -63,6 +64,11 @@ struct FileTranscriptionClientTests {
 
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer xai-key")
         #expect(request.timeoutInterval == 900)
+        #expect(body.contains("name=\"file\"; filename=\"sample.wav\""))
+        #expect(body.contains("name=\"model\""))
+        #expect(body.contains("\r\n\r\ngrok-stt\r\n"))
+        #expect(body.contains("name=\"timestamp_granularities\""))
+        #expect(body.contains("\r\n\r\nword\r\n"))
         #expect(body.contains("name=\"format\""))
         #expect(body.contains("\r\n\r\ntrue\r\n"))
         #expect(body.contains("name=\"language\""))
@@ -75,15 +81,15 @@ struct FileTranscriptionClientTests {
         #expect(body.contains("\r\n\r\npcm\r\n"))
         #expect(body.contains("name=\"sample_rate\""))
         #expect(body.contains("\r\n\r\n16000\r\n"))
-        #expect(body.contains("name=\"file\"; filename=\"sample.wav\""))
-
         let fileFieldIndex = try #require(body.range(of: "name=\"file\"; filename=\"sample.wav\"")?.lowerBound)
+        let modelIndex = try #require(body.range(of: "name=\"model\"")?.lowerBound)
         let sampleRateIndex = try #require(body.range(of: "name=\"sample_rate\"")?.lowerBound)
-        #expect(sampleRateIndex < fileFieldIndex)
+        #expect(fileFieldIndex < modelIndex)
+        #expect(fileFieldIndex < sampleRateIndex)
     }
 
-    @Test("Grok multipart request omits default false fields")
-    func grokRequestOmitsDefaultFalseFields() throws {
+    @Test("Grok multipart request includes required defaults and omits default false fields")
+    func grokRequestIncludesRequiredDefaultsAndOmitsDefaultFalseFields() throws {
         let client = GrokFileTranscriptionClient(apiKey: "xai-key")
         let fileURL = temporaryAudioFileURL(named: "sample.wav")
 
@@ -91,6 +97,10 @@ struct FileTranscriptionClientTests {
         let body = try #require(request.httpBody).utf8String
 
         #expect(request.timeoutInterval == 600)
+        #expect(body.contains("name=\"model\""))
+        #expect(body.contains("\r\n\r\ngrok-stt\r\n"))
+        #expect(body.contains("name=\"timestamp_granularities\""))
+        #expect(body.contains("\r\n\r\nword\r\n"))
         #expect(!body.contains("name=\"format\""))
         #expect(!body.contains("name=\"multichannel\""))
         #expect(!body.contains("name=\"diarize\""))

@@ -6,31 +6,45 @@ public enum GrokAudioFormat: String, Sendable, CaseIterable {
     case alaw
 }
 
+public enum GrokModelID: String, Sendable, CaseIterable {
+    case stt = "grok-stt"
+}
+
+public enum GrokTimestampGranularity: String, Sendable, CaseIterable {
+    case word
+}
+
 public struct GrokFileTranscriptionOptions: Sendable, Equatable {
+    public var modelId: GrokModelID
     public var language: String?
     public var format: Bool
     public var multichannel: Bool
     public var channels: Int?
     public var diarize: Bool
+    public var timestampGranularities: [GrokTimestampGranularity]
     public var audioFormat: GrokAudioFormat?
     public var sampleRate: Int?
     public var timeoutInterval: TimeInterval
 
     public init(
+        modelId: GrokModelID = .stt,
         language: String? = nil,
         format: Bool = false,
         multichannel: Bool = false,
         channels: Int? = nil,
         diarize: Bool = false,
+        timestampGranularities: [GrokTimestampGranularity] = [.word],
         audioFormat: GrokAudioFormat? = nil,
         sampleRate: Int? = nil,
         timeoutInterval: TimeInterval = 10 * 60
     ) {
+        self.modelId = modelId
         self.language = language
         self.format = format
         self.multichannel = multichannel
         self.channels = channels
         self.diarize = diarize
+        self.timestampGranularities = timestampGranularities
         self.audioFormat = audioFormat
         self.sampleRate = sampleRate
         self.timeoutInterval = timeoutInterval
@@ -112,15 +126,15 @@ struct GrokFileTranscriptionClient {
         try validate(options)
         let audioData = try readFileData(from: file)
         let boundary = "SpeechKit-\(UUID().uuidString)"
-        var parts = makeOptionParts(options)
-        parts.append(
+        var parts: [SpeechMultipartFormPart] = [
             .file(
                 name: "file",
                 fileURL: file,
                 fileData: audioData,
                 contentType: SpeechFileUploadSupport.mimeType(for: file)
             )
-        )
+        ]
+        parts.append(contentsOf: makeOptionParts(options))
 
         var request = URLRequest(url: uploadURL)
         request.httpMethod = "POST"
@@ -132,7 +146,13 @@ struct GrokFileTranscriptionClient {
     }
 
     private func makeOptionParts(_ options: GrokFileTranscriptionOptions) -> [SpeechMultipartFormPart] {
-        var parts: [SpeechMultipartFormPart] = []
+        var parts: [SpeechMultipartFormPart] = [
+            .text(name: "model", value: options.modelId.rawValue)
+        ]
+
+        for granularity in options.timestampGranularities {
+            parts.append(.text(name: "timestamp_granularities", value: granularity.rawValue))
+        }
 
         if let language = options.language {
             parts.append(.text(name: "language", value: language))

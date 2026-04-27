@@ -38,25 +38,31 @@ public struct CohereConfig: Sendable, Equatable {
 
 public struct GrokConfig: Sendable, Equatable {
     public var apiKey: String
+    public var modelId: GrokModelID
     public var language: String?
     public var format: Bool
     public var multichannel: Bool
     public var diarize: Bool
+    public var timestampGranularities: [GrokTimestampGranularity]
     public var timeoutInterval: TimeInterval
 
     public init(
         apiKey: String,
+        modelId: GrokModelID = .stt,
         language: String? = nil,
         format: Bool = false,
         multichannel: Bool = false,
         diarize: Bool = false,
+        timestampGranularities: [GrokTimestampGranularity] = [.word],
         timeoutInterval: TimeInterval = 10 * 60
     ) {
         self.apiKey = apiKey
+        self.modelId = modelId
         self.language = language
         self.format = format
         self.multichannel = multichannel
         self.diarize = diarize
+        self.timestampGranularities = timestampGranularities
         self.timeoutInterval = timeoutInterval
     }
 }
@@ -71,11 +77,13 @@ public enum SpeechFileTranscriptionOptions: Sendable, Equatable {
     case elevenLabs(modelId: ElevenLabsModelID? = nil)
     case cohere(modelId: CohereModelID? = nil, language: String? = nil, temperature: Double? = nil)
     case grok(
+        modelId: GrokModelID? = nil,
         language: String? = nil,
         format: Bool? = nil,
         multichannel: Bool? = nil,
         channels: Int? = nil,
         diarize: Bool? = nil,
+        timestampGranularities: [GrokTimestampGranularity]? = nil,
         audioFormat: GrokAudioFormat? = nil,
         sampleRate: Int? = nil,
         timeoutInterval: TimeInterval? = nil
@@ -305,10 +313,12 @@ public final class SpeechService {
 
         let client = GrokFileTranscriptionClient(apiKey: grok.apiKey, urlSession: urlSession)
         let resolvedOptions = options ?? GrokFileTranscriptionOptions(
+            modelId: grok.modelId,
             language: grok.language,
             format: grok.format,
             multichannel: grok.multichannel,
             diarize: grok.diarize,
+            timestampGranularities: grok.timestampGranularities,
             timeoutInterval: grok.timeoutInterval
         )
 
@@ -373,21 +383,25 @@ public final class SpeechService {
         config: GrokConfig
     ) -> GrokFileTranscriptionOptions {
         guard case .grok(
+            let modelId,
             let language,
             let format,
             let multichannel,
             let channels,
             let diarize,
+            let timestampGranularities,
             let audioFormat,
             let sampleRate,
             let timeoutInterval
         ) = options else {
             return GrokFileTranscriptionOptions(
+                modelId: config.modelId,
                 language: config.language,
                 format: config.format,
                 multichannel: config.multichannel,
                 channels: nil,
                 diarize: config.diarize,
+                timestampGranularities: config.timestampGranularities,
                 audioFormat: nil,
                 sampleRate: nil,
                 timeoutInterval: config.timeoutInterval
@@ -395,11 +409,13 @@ public final class SpeechService {
         }
 
         return GrokFileTranscriptionOptions(
+            modelId: modelId ?? config.modelId,
             language: language ?? config.language,
             format: format ?? config.format,
             multichannel: multichannel ?? config.multichannel,
             channels: channels,
             diarize: diarize ?? config.diarize,
+            timestampGranularities: timestampGranularities ?? config.timestampGranularities,
             audioFormat: audioFormat,
             sampleRate: sampleRate,
             timeoutInterval: timeoutInterval ?? config.timeoutInterval
