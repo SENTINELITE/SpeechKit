@@ -14,6 +14,7 @@ public struct GrokFileTranscriptionOptions: Sendable, Equatable {
     public var diarize: Bool
     public var audioFormat: GrokAudioFormat?
     public var sampleRate: Int?
+    public var timeoutInterval: TimeInterval
 
     public init(
         language: String? = nil,
@@ -22,7 +23,8 @@ public struct GrokFileTranscriptionOptions: Sendable, Equatable {
         channels: Int? = nil,
         diarize: Bool = false,
         audioFormat: GrokAudioFormat? = nil,
-        sampleRate: Int? = nil
+        sampleRate: Int? = nil,
+        timeoutInterval: TimeInterval = 10 * 60
     ) {
         self.language = language
         self.format = format
@@ -31,6 +33,7 @@ public struct GrokFileTranscriptionOptions: Sendable, Equatable {
         self.diarize = diarize
         self.audioFormat = audioFormat
         self.sampleRate = sampleRate
+        self.timeoutInterval = timeoutInterval
     }
 }
 
@@ -121,6 +124,7 @@ struct GrokFileTranscriptionClient {
 
         var request = URLRequest(url: uploadURL)
         request.httpMethod = "POST"
+        request.timeoutInterval = options.timeoutInterval
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.httpBody = SpeechFileUploadSupport.makeMultipartBody(boundary: boundary, parts: parts)
@@ -128,17 +132,22 @@ struct GrokFileTranscriptionClient {
     }
 
     private func makeOptionParts(_ options: GrokFileTranscriptionOptions) -> [SpeechMultipartFormPart] {
-        var parts: [SpeechMultipartFormPart] = [
-            .text(name: "format", value: String(options.format)),
-            .text(name: "multichannel", value: String(options.multichannel)),
-            .text(name: "diarize", value: String(options.diarize))
-        ]
+        var parts: [SpeechMultipartFormPart] = []
 
         if let language = options.language {
             parts.append(.text(name: "language", value: language))
         }
+        if options.format {
+            parts.append(.text(name: "format", value: "true"))
+        }
+        if options.multichannel {
+            parts.append(.text(name: "multichannel", value: "true"))
+        }
         if let channels = options.channels {
             parts.append(.text(name: "channels", value: String(channels)))
+        }
+        if options.diarize {
+            parts.append(.text(name: "diarize", value: "true"))
         }
         if let audioFormat = options.audioFormat {
             parts.append(.text(name: "audio_format", value: audioFormat.rawValue))
@@ -167,6 +176,10 @@ struct GrokFileTranscriptionClient {
         if let channels = options.channels,
            !(2...8).contains(channels) {
             throw SpeechError.providerFailure(provider: .grok, reason: "channels must be between 2 and 8.")
+        }
+
+        if options.timeoutInterval <= 0 {
+            throw SpeechError.providerFailure(provider: .grok, reason: "timeoutInterval must be greater than 0.")
         }
     }
 

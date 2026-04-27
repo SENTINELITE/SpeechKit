@@ -42,19 +42,22 @@ public struct GrokConfig: Sendable, Equatable {
     public var format: Bool
     public var multichannel: Bool
     public var diarize: Bool
+    public var timeoutInterval: TimeInterval
 
     public init(
         apiKey: String,
         language: String? = nil,
         format: Bool = false,
         multichannel: Bool = false,
-        diarize: Bool = false
+        diarize: Bool = false,
+        timeoutInterval: TimeInterval = 10 * 60
     ) {
         self.apiKey = apiKey
         self.language = language
         self.format = format
         self.multichannel = multichannel
         self.diarize = diarize
+        self.timeoutInterval = timeoutInterval
     }
 }
 
@@ -74,7 +77,8 @@ public enum SpeechFileTranscriptionOptions: Sendable, Equatable {
         channels: Int? = nil,
         diarize: Bool? = nil,
         audioFormat: GrokAudioFormat? = nil,
-        sampleRate: Int? = nil
+        sampleRate: Int? = nil,
+        timeoutInterval: TimeInterval? = nil
     )
 
     var provider: SpeechFileProvider {
@@ -304,7 +308,8 @@ public final class SpeechService {
             language: grok.language,
             format: grok.format,
             multichannel: grok.multichannel,
-            diarize: grok.diarize
+            diarize: grok.diarize,
+            timeoutInterval: grok.timeoutInterval
         )
 
         do {
@@ -374,7 +379,8 @@ public final class SpeechService {
             let channels,
             let diarize,
             let audioFormat,
-            let sampleRate
+            let sampleRate,
+            let timeoutInterval
         ) = options else {
             return GrokFileTranscriptionOptions(
                 language: config.language,
@@ -383,7 +389,8 @@ public final class SpeechService {
                 channels: nil,
                 diarize: config.diarize,
                 audioFormat: nil,
-                sampleRate: nil
+                sampleRate: nil,
+                timeoutInterval: config.timeoutInterval
             )
         }
 
@@ -394,13 +401,21 @@ public final class SpeechService {
             channels: channels,
             diarize: diarize ?? config.diarize,
             audioFormat: audioFormat,
-            sampleRate: sampleRate
+            sampleRate: sampleRate,
+            timeoutInterval: timeoutInterval ?? config.timeoutInterval
         )
     }
 
     private func wrap(_ error: Error, for provider: SpeechFileProvider) -> SpeechError {
         if let speechError = error as? SpeechError {
             return speechError
+        }
+
+        if let urlError = error as? URLError {
+            if urlError.code == .timedOut {
+                return .providerFailure(provider: provider, reason: "The request timed out. Try a shorter audio file or increase the provider timeout.")
+            }
+            return .providerFailure(provider: provider, reason: urlError.localizedDescription)
         }
 
         if let elevenLabsError = error as? ElevenLabsError {
