@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import SwiftUI
 
@@ -22,8 +23,6 @@ public final class ElevenLabsService {
     private let audioManager = AudioCaptureManager()
     private let webSocket = ElevenLabsWebSocket()
     private var listeningTask: Task<Void, Never>?
-    private let fileUploadURL = URL(string: "https://api.elevenlabs.io/v1/speech-to-text")
-    
     // MARK: - Types
     
     public enum ConnectionState: Equatable, Sendable {
@@ -186,50 +185,8 @@ public final class ElevenLabsService {
     }
 
     public func transcribeAudioFile(file: URL, modelId: ElevenLabsModelID = .scribeV1) async throws -> String {
-        guard !apiKey.isEmpty else {
-            throw ElevenLabsError.apiKeyMissing
-        }
-        guard modelId == .scribeV1 || modelId == .scribeV2 else {
-            throw ElevenLabsError.unsupportedModel(modelId.rawValue)
-        }
-        guard let uploadURL = fileUploadURL else {
-            throw ElevenLabsError.invalidURL
-        }
-
-        let audioData: Data
-        do {
-            audioData = try Data(contentsOf: file)
-        } catch {
-            throw ElevenLabsError.fileReadFailed
-        }
-
-        let boundary = "SpeechKit-\(UUID().uuidString)"
-        var request = URLRequest(url: uploadURL)
-        request.httpMethod = "POST"
-        request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.httpBody = makeMultipartBody(
-            boundary: boundary,
-            fileURL: file,
-            fileData: audioData,
-            modelId: modelId
-        )
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw ElevenLabsError.uploadFailed("Invalid response")
-        }
-        guard (200...299).contains(httpResponse.statusCode) else {
-            let message = String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)"
-            throw ElevenLabsError.uploadFailed(message)
-        }
-
-        do {
-            let decoded = try JSONDecoder().decode(FileTranscriptionResponse.self, from: data)
-            return decoded.text
-        } catch {
-            throw ElevenLabsError.decodingFailed(error.localizedDescription)
-        }
+        let client = ElevenLabsFileTranscriptionClient(apiKey: apiKey)
+        return try await client.transcribeAudioFile(file: file, modelId: modelId)
     }
 
     public func transcribeAudioFile(securityScopedURL: URL, modelId: ElevenLabsModelID = .scribeV1) async throws -> String {
@@ -269,51 +226,4 @@ public final class ElevenLabsService {
         }
     }
 
-    private func makeMultipartBody(
-        boundary: String,
-        fileURL: URL,
-        fileData: Data,
-        modelId: ElevenLabsModelID
-    ) -> Data {
-        var body = Data()
-        body.append("--\(boundary)\r\n")
-        body.append("Content-Disposition: form-data; name=\"model_id\"\r\n\r\n")
-        body.append("\(modelId.rawValue)\r\n")
-        body.append("--\(boundary)\r\n")
-
-        let fileName = fileURL.lastPathComponent.isEmpty ? "audio" : fileURL.lastPathComponent
-        let mimeType = mimeType(for: fileURL)
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n")
-        body.append("Content-Type: \(mimeType)\r\n\r\n")
-        body.append(fileData)
-        body.append("\r\n")
-        body.append("--\(boundary)--\r\n")
-        return body
-    }
-
-    private func mimeType(for fileURL: URL) -> String {
-        switch fileURL.pathExtension.lowercased() {
-        case "wav":
-            return "audio/wav"
-        case "mp3":
-            return "audio/mpeg"
-        case "m4a":
-            return "audio/mp4"
-        case "aac":
-            return "audio/aac"
-        case "flac":
-            return "audio/flac"
-        case "ogg":
-            return "audio/ogg"
-        default:
-            return "application/octet-stream"
-        }
-    }
-}
-
-private extension Data {
-    mutating func append(_ string: String) {
-        guard let data = string.data(using: .utf8) else { return }
-        append(data)
-    }
 }

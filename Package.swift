@@ -19,5 +19,9 @@ let package = Package(
         .target(
             name: "SpeechKit"
         ),
+        .testTarget(
+            name: "SpeechKitTests",
+            dependencies: ["SpeechKit"]
+        ),
     ]
 )

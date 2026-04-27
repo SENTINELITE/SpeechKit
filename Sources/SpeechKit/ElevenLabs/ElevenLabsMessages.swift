@@ -137,6 +137,9 @@ public enum ElevenLabsError: Error, LocalizedError, Sendable {
     case uploadFailed(String)
     case unsupportedModel(String)
     case securityScopeDenied
+    case fileTooLarge(Int64)
+    case audioTooLong(TimeInterval)
+    case metadataReadFailed
     
     public var errorDescription: String? {
         switch self {
@@ -164,6 +167,12 @@ public enum ElevenLabsError: Error, LocalizedError, Sendable {
             return "Unsupported model for upload: \(modelId)"
         case .securityScopeDenied:
             return "Failed to access security-scoped resource"
+        case .fileTooLarge:
+            return "Audio file exceeds 3 GB limit"
+        case .audioTooLong:
+            return "Audio duration exceeds 10 hours limit"
+        case .metadataReadFailed:
+            return "Failed to read audio metadata"
         }
     }
 }

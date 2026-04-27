@@ -4,8 +4,5 @@
 @_exported import struct Foundation.Date
 @_exported import struct Foundation.UUID
 
-// MARK: - ElevenLabs
-
-public typealias SpeechService = ElevenLabsService
+@available(*, deprecated, message: "Use provider-scoped model types such as ElevenLabsModelID, CohereModelID, or GrokAudioFormat.")
 public typealias SpeechModelID = ElevenLabsModelID
-public typealias SpeechError = ElevenLabsError
