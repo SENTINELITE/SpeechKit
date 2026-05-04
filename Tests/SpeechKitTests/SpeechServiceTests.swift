@@ -35,16 +35,6 @@ struct SpeechServiceTests {
         }
     }
 
-    @MainActor
-    @Test("deprecated initializer configures ElevenLabs defaults")
-    func deprecatedInitializerConfiguresElevenLabs() {
-        let service = SpeechService(apiKey: "legacy-key", modelId: .scribeV2Realtime)
-
-        #expect(service.elevenLabs?.apiKey == "legacy-key")
-        #expect(service.elevenLabs?.realtimeModelId == .scribeV2Realtime)
-        #expect(service.elevenLabs?.fileModelId == .scribeV1)
-    }
-
     @Test("provider configs support raw language codes")
     func providerConfigsSupportRawLanguageCodes() throws {
         let cohere = try CohereConfig(apiKey: "cohere", languageCode: "de")
@@ -54,6 +44,16 @@ struct SpeechServiceTests {
         #expect(cohere.language == .german)
         #expect(grok.language == .filipino)
         #expect(aqua.language == .japanese)
+    }
+
+    @MainActor
+    @Test("ElevenLabs config applies realtime and file defaults")
+    func elevenLabsConfigAppliesDefaults() {
+        let service = SpeechService(elevenLabs: ElevenLabsConfig(apiKey: "eleven"))
+
+        #expect(service.elevenLabs?.apiKey == "eleven")
+        #expect(service.elevenLabs?.realtimeModelId == .scribeV2Realtime)
+        #expect(service.elevenLabs?.fileModelId == .scribeV1)
     }
 }
 

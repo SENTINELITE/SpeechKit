@@ -254,20 +254,6 @@ public final class SpeechService {
         applyRealtimeConfig()
     }
 
-    @available(*, deprecated, message: "Use init(elevenLabs:cohere:grok:aqua:) with provider-specific configuration.")
-    public convenience init(
-        apiKey: String,
-        modelId: ElevenLabsModelID = .scribeV2Realtime
-    ) {
-        self.init(
-            elevenLabs: ElevenLabsConfig(
-                apiKey: apiKey,
-                realtimeModelId: modelId,
-                fileModelId: .scribeV1
-            )
-        )
-    }
-
     init(
         elevenLabs: ElevenLabsConfig? = nil,
         cohere: CohereConfig? = nil,

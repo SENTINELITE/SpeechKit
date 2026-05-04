@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 
 @Observable
@@ -31,7 +31,7 @@ final class AudioCaptureManager: @unchecked Sendable {
     }
     
     func startCapture() throws -> AsyncStream<Data> {
-        #if os(iOS) || os(visionOS)
+        #if os(iOS) || os(watchOS) || os(visionOS)
         try configureAudioSession()
         #endif
         
@@ -113,7 +113,7 @@ final class AudioCaptureManager: @unchecked Sendable {
         isCapturing = false
     }
     
-    #if os(iOS) || os(visionOS)
+    #if os(iOS) || os(watchOS) || os(visionOS)
     private func configureAudioSession() throws {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
