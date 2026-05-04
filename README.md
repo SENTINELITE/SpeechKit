@@ -4,6 +4,12 @@ SpeechKit is a Swift package for adding speech-to-text to Swift and SwiftUI apps
 
 It supports realtime microphone transcription through ElevenLabs and file transcription through ElevenLabs, Aqua, Cohere, and Grok.
 
+## Sponsor
+> <img width="1500" height="500" alt="SpeechKit" src="https://github.com/user-attachments/assets/3f3b68e7-37fb-46c7-a139-2b513b2e184c" />
+> <br>
+> SpeechKit is independently built and maintained. Sponsorship helps fund provider integrations, realtime transcription support, documentation, examples, and long-term maintenance.
+
+
 ## Requirements
 
 - Swift 6.2+
