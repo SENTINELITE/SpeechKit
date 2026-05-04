@@ -30,7 +30,7 @@ struct SpeechServiceTests {
             _ = try await service.transcribeAudioFile(
                 provider: .grok,
                 file: fileURL,
-                options: .elevenLabs(modelId: .scribeV1)
+                options: .elevenLabs(modelID: .scribeV1)
             )
         }
     }
@@ -52,8 +52,8 @@ struct SpeechServiceTests {
         let service = SpeechService(elevenLabs: ElevenLabsConfig(apiKey: "eleven"))
 
         #expect(service.elevenLabs?.apiKey == "eleven")
-        #expect(service.elevenLabs?.realtimeModelId == .scribeV2Realtime)
-        #expect(service.elevenLabs?.fileModelId == .scribeV1)
+        #expect(service.elevenLabs?.realtimeModelID == .scribeV2Realtime)
+        #expect(service.elevenLabs?.fileModelID == .scribeV1)
     }
 }
 

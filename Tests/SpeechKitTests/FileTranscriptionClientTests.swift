@@ -54,7 +54,7 @@ struct FileTranscriptionClientTests {
         }
     }
 
-    @Test("Aqua response decodes usage and request id")
+    @Test("Aqua response decodes usage and request ID")
     func aquaResponseDecodesUsageAndRequestID() throws {
         let data = Data(
             """
@@ -67,7 +67,7 @@ struct FileTranscriptionClientTests {
         #expect(response.text == "hello")
         #expect(response.usage.type == "duration")
         #expect(response.usage.seconds == 170.11)
-        #expect(response.requestId == "req-123")
+        #expect(response.requestID == "req-123")
     }
 
     @Test("Cohere multipart request includes required fields")
@@ -77,7 +77,7 @@ struct FileTranscriptionClientTests {
 
         let request = try await client.makeRequest(
             file: fileURL,
-            modelId: .transcribe032026,
+            modelID: .transcribe032026,
             language: .english,
             temperature: 0.2
         )
@@ -101,7 +101,7 @@ struct FileTranscriptionClientTests {
         await #expect(throws: SpeechError.providerFailure(provider: .cohere, reason: "Unsupported file extension: m4a.")) {
             _ = try await client.makeRequest(
                 file: fileURL,
-                modelId: .transcribe032026,
+                modelID: .transcribe032026,
                 language: .english,
                 temperature: nil
             )
@@ -116,7 +116,7 @@ struct FileTranscriptionClientTests {
         await #expect(throws: SpeechError.uploadFailed(provider: .cohere, reason: "Audio file exceeds 26214400 byte limit.")) {
             _ = try await client.makeRequest(
                 file: fileURL,
-                modelId: .transcribe032026,
+                modelID: .transcribe032026,
                 language: .english,
                 temperature: nil
             )
@@ -130,7 +130,7 @@ struct FileTranscriptionClientTests {
 
         let request = try await client.makeRequest(
             file: fileURL,
-            modelId: .transcribe032026,
+            modelID: .transcribe032026,
             language: .french,
             temperature: nil
         )
@@ -141,11 +141,11 @@ struct FileTranscriptionClientTests {
     }
 
     @Test("ElevenLabs multipart request keeps model_id contract")
-    func elevenLabsRequestIncludesModelIdField() async throws {
+    func elevenLabsRequestIncludesModelIDField() async throws {
         let client = ElevenLabsFileTranscriptionClient(apiKey: "eleven-key")
         let fileURL = temporaryAudioFileURL(named: "sample.wav")
 
-        let request = try await client.makeRequest(file: fileURL, modelId: .scribeV1)
+        let request = try await client.makeRequest(file: fileURL, modelID: .scribeV1)
         let body = try #require(request.httpBody).utf8String
 
         #expect(request.value(forHTTPHeaderField: "xi-api-key") == "eleven-key")

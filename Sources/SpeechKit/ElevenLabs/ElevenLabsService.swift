@@ -2,21 +2,28 @@ import AVFoundation
 import Foundation
 import SwiftUI
 
+/// A SwiftUI-observable ElevenLabs realtime transcription service.
 @Observable
 @MainActor
 public final class ElevenLabsService {
     
     // MARK: - Public State
     
+    /// The current realtime connection state.
     public private(set) var connectionState: ConnectionState = .disconnected
+    /// The latest partial transcript text.
     public private(set) var partialTranscript: String = ""
+    /// The committed transcript entries.
     public private(set) var committedTranscripts: [TranscriptEntry] = []
+    /// The most recent realtime error, if any.
     public private(set) var lastError: Error?
     
     // MARK: - Configuration
     
+    /// The ElevenLabs API key used for realtime and file transcription.
     public var apiKey: String
-    public var modelId: ElevenLabsModelID
+    /// The ElevenLabs realtime model used when listening.
+    public var modelID: ElevenLabsModelID
     
     // MARK: - Private
     
@@ -25,13 +32,20 @@ public final class ElevenLabsService {
     private var listeningTask: Task<Void, Never>?
     // MARK: - Types
     
+    /// The realtime connection lifecycle state.
     public enum ConnectionState: Equatable, Sendable {
+        /// The service is disconnected.
         case disconnected
+        /// The service is opening a realtime connection.
         case connecting
-        case connected(sessionId: String)
+        /// The service is connected to a realtime session but not yet sending audio.
+        case connected(sessionID: String)
+        /// The service is connected and streaming microphone audio.
         case listening
+        /// The service is stopped because of an error.
         case error(String)
         
+        /// A Boolean value that indicates whether the service has an active realtime session.
         public var isActive: Bool {
             switch self {
             case .connected, .listening:
@@ -41,17 +55,23 @@ public final class ElevenLabsService {
             }
         }
         
+        /// A Boolean value that indicates whether the service is streaming microphone audio.
         public var isListening: Bool {
             if case .listening = self { return true }
             return false
         }
     }
     
+    /// A committed realtime transcript entry.
     public struct TranscriptEntry: Identifiable, Equatable, Sendable {
+        /// The stable identity of the entry.
         public let id: UUID
+        /// The committed transcript text.
         public let text: String
+        /// The time when the entry was created.
         public let timestamp: Date
         
+        /// Creates a transcript entry.
         public init(id: UUID = UUID(), text: String, timestamp: Date = Date()) {
             self.id = id
             self.text = text
@@ -59,9 +79,13 @@ public final class ElevenLabsService {
         }
     }
 
+    /// A detailed ElevenLabs file transcription response.
     public struct FileTranscriptionResponse: Decodable, Sendable {
+        /// The transcribed text.
         public let text: String
+        /// The detected language code, when ElevenLabs returns one.
         public let languageCode: String?
+        /// Optional word-level timestamps.
         public let words: [WordTimestamp]?
 
         private enum CodingKeys: String, CodingKey {
@@ -73,19 +97,22 @@ public final class ElevenLabsService {
     
     // MARK: - Computed Properties
     
+    /// The committed transcript text joined with spaces.
     public var fullTranscript: String {
         committedTranscripts.map(\.text).joined(separator: " ")
     }
     
     // MARK: - Initialization
     
-    public init(apiKey: String = "", modelId: ElevenLabsModelID = .scribeV2Realtime) {
+    /// Creates an ElevenLabs realtime transcription service.
+    public init(apiKey: String = "", modelID: ElevenLabsModelID = .scribeV2Realtime) {
         self.apiKey = apiKey
-        self.modelId = modelId
+        self.modelID = modelID
     }
     
     // MARK: - Public Methods
     
+    /// Starts realtime microphone transcription.
     public func startListening() async {
         guard !apiKey.isEmpty else {
             connectionState = .error("API key not configured")
@@ -106,7 +133,7 @@ public final class ElevenLabsService {
         
         listeningTask = Task {
             do {
-                let messageStream = try await webSocket.connect(apiKey: apiKey, modelId: modelId)
+                let messageStream = try await webSocket.connect(apiKey: apiKey, modelID: modelID)
                 
                 var sendTask: Task<Void, Never>?
                 
@@ -115,7 +142,7 @@ public final class ElevenLabsService {
                     
                     switch message {
                     case .sessionStarted(let session):
-                        connectionState = .connected(sessionId: session.sessionId)
+                        connectionState = .connected(sessionID: session.sessionID)
                         
                         do {
                             let audioStream = try audioManager.startCapture()
@@ -164,6 +191,7 @@ public final class ElevenLabsService {
         }
     }
     
+    /// Stops realtime microphone transcription and disconnects the WebSocket.
     public func stopListening() async {
         listeningTask?.cancel()
         listeningTask = nil
@@ -179,23 +207,30 @@ public final class ElevenLabsService {
         connectionState = .disconnected
     }
     
+    /// Clears committed and partial realtime transcript text.
     public func clearTranscripts() {
         committedTranscripts.removeAll()
         partialTranscript = ""
     }
 
-    public func transcribeAudioFile(file: URL, modelId: ElevenLabsModelID = .scribeV1) async throws -> String {
+    /// Transcribes an audio file with ElevenLabs Scribe.
+    ///
+    /// - Throws: ``ElevenLabsError`` when the API key is missing, the file fails validation, or the upload fails.
+    public func transcribeAudioFile(file: URL, modelID: ElevenLabsModelID = .scribeV1) async throws -> String {
         let client = ElevenLabsFileTranscriptionClient(apiKey: apiKey)
-        return try await client.transcribeAudioFile(file: file, modelId: modelId)
+        return try await client.transcribeAudioFile(file: file, modelID: modelID)
     }
 
-    public func transcribeAudioFile(securityScopedURL: URL, modelId: ElevenLabsModelID = .scribeV1) async throws -> String {
+    /// Transcribes a security-scoped audio file URL with ElevenLabs Scribe.
+    ///
+    /// - Throws: ``ElevenLabsError`` when the URL cannot be accessed, the API key is missing, the file fails validation, or the upload fails.
+    public func transcribeAudioFile(securityScopedURL: URL, modelID: ElevenLabsModelID = .scribeV1) async throws -> String {
         let didStartAccess = securityScopedURL.startAccessingSecurityScopedResource()
         guard didStartAccess else {
             throw ElevenLabsError.securityScopeDenied
         }
         defer { securityScopedURL.stopAccessingSecurityScopedResource() }
-        return try await transcribeAudioFile(file: securityScopedURL, modelId: modelId)
+        return try await transcribeAudioFile(file: securityScopedURL, modelID: modelID)
     }
     
     // MARK: - Private Methods

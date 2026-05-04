@@ -1,61 +1,107 @@
 import Foundation
 
+/// Raw audio formats supported by Grok transcription requests.
 public enum GrokAudioFormat: String, Sendable, CaseIterable {
+    /// Linear PCM raw audio.
     case pcm
+    /// mu-law raw audio.
     case mulaw
+    /// A-law raw audio.
     case alaw
 }
 
+/// Grok speech-to-text model identifiers supported by SpeechKit.
 public enum GrokModelID: String, Sendable, CaseIterable {
+    /// Grok speech-to-text.
     case stt = "grok-stt"
 }
 
+/// Timestamp granularities supported by Grok transcription.
 public enum GrokTimestampGranularity: String, Sendable, CaseIterable {
+    /// Word-level timestamps.
     case word
 }
 
+/// Grok language hints for file transcription.
 public enum GrokLanguage: String, Sendable, CaseIterable {
+    /// Arabic.
     case arabic = "ar"
+    /// Czech.
     case czech = "cs"
+    /// Danish.
     case danish = "da"
+    /// Dutch.
     case dutch = "nl"
+    /// English.
     case english = "en"
+    /// Filipino.
     case filipino = "fil"
+    /// French.
     case french = "fr"
+    /// German.
     case german = "de"
+    /// Hindi.
     case hindi = "hi"
+    /// Indonesian.
     case indonesian = "id"
+    /// Italian.
     case italian = "it"
+    /// Japanese.
     case japanese = "ja"
+    /// Korean.
     case korean = "ko"
+    /// Macedonian.
     case macedonian = "mk"
+    /// Malay.
     case malay = "ms"
+    /// Persian.
     case persian = "fa"
+    /// Polish.
     case polish = "pl"
+    /// Portuguese.
     case portuguese = "pt"
+    /// Romanian.
     case romanian = "ro"
+    /// Russian.
     case russian = "ru"
+    /// Spanish.
     case spanish = "es"
+    /// Swedish.
     case swedish = "sv"
+    /// Thai.
     case thai = "th"
+    /// Turkish.
     case turkish = "tr"
+    /// Vietnamese.
     case vietnamese = "vi"
 }
 
+/// Options for a Grok file transcription request.
 public struct GrokFileTranscriptionOptions: Sendable, Equatable {
-    public var modelId: GrokModelID
+    /// The Grok speech-to-text model to use.
+    public var modelID: GrokModelID
+    /// An optional language hint.
     public var language: GrokLanguage?
+    /// A Boolean value that indicates whether Grok should format the transcript.
     public var format: Bool
+    /// A Boolean value that indicates whether Grok should process multichannel audio.
     public var multichannel: Bool
+    /// The number of audio channels for multichannel processing.
     public var channels: Int?
+    /// A Boolean value that indicates whether Grok should identify speakers.
     public var diarize: Bool
+    /// The timestamp granularities to request.
     public var timestampGranularities: [GrokTimestampGranularity]
+    /// The raw audio format, required for raw audio uploads.
     public var audioFormat: GrokAudioFormat?
+    /// The raw audio sample rate, required for raw audio uploads.
     public var sampleRate: Int?
+    /// The network timeout for the upload request.
     public var timeoutInterval: TimeInterval
 
+    /// Creates Grok file transcription options.
     public init(
-        modelId: GrokModelID = .stt,
+        modelID: GrokModelID = .stt,
         language: GrokLanguage? = nil,
         format: Bool = false,
         multichannel: Bool = false,
@@ -66,7 +112,7 @@ public struct GrokFileTranscriptionOptions: Sendable, Equatable {
         sampleRate: Int? = nil,
         timeoutInterval: TimeInterval = 10 * 60
     ) {
-        self.modelId = modelId
+        self.modelID = modelID
         self.language = language
         self.format = format
         self.multichannel = multichannel
@@ -79,24 +125,39 @@ public struct GrokFileTranscriptionOptions: Sendable, Equatable {
     }
 }
 
+/// A word-level Grok timestamp.
 public struct GrokWordTimestamp: Decodable, Sendable, Equatable {
+    /// The word or token text.
     public let text: String
+    /// The start time, in seconds.
     public let start: Double
+    /// The end time, in seconds.
     public let end: Double
+    /// The optional speaker index.
     public let speaker: Int?
 }
 
+/// A Grok transcript for one audio channel.
 public struct GrokTranscriptionChannel: Decodable, Sendable, Equatable {
+    /// The zero-based channel index.
     public let index: Int
+    /// The transcribed channel text.
     public let text: String
+    /// Optional word-level timestamps for this channel.
     public let words: [GrokWordTimestamp]?
 }
 
+/// A detailed Grok file transcription response.
 public struct GrokFileTranscriptionResponse: Decodable, Sendable, Equatable {
+    /// The transcribed text.
     public let text: String
+    /// The detected or requested language code.
     public let language: String?
+    /// The audio duration, in seconds.
     public let duration: Double?
+    /// Optional word-level timestamps.
     public let words: [GrokWordTimestamp]?
+    /// Optional per-channel transcripts.
     public let channels: [GrokTranscriptionChannel]?
 }
 
@@ -175,7 +236,7 @@ struct GrokFileTranscriptionClient {
 
     private func makeOptionParts(_ options: GrokFileTranscriptionOptions) -> [SpeechMultipartFormPart] {
         var parts: [SpeechMultipartFormPart] = [
-            .text(name: "model", value: options.modelId.rawValue)
+            .text(name: "model", value: options.modelID.rawValue)
         ]
 
         for granularity in options.timestampGranularities {

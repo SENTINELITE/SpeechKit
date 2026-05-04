@@ -29,6 +29,10 @@ Then import it where you need speech features:
 import SpeechKit
 ```
 
+## Documentation
+
+Open the package in Xcode and choose `Product > Build Documentation` to view the DocC reference and guides. The README keeps the common setup paths short; the DocC catalog is the canonical detailed API documentation.
+
 ## Quick Start
 
 Create one `SpeechService` and put it in SwiftUI's environment.

@@ -1,23 +1,40 @@
 import Foundation
 
+/// Cohere transcription model identifiers supported by SpeechKit.
 public enum CohereModelID: String, Sendable, CaseIterable {
+    /// Cohere Transcribe model released in March 2026.
     case transcribe032026 = "cohere-transcribe-03-2026"
 }
 
+/// Cohere language hints for file transcription.
 public enum CohereLanguage: String, Sendable, CaseIterable {
+    /// English.
     case english = "en"
+    /// German.
     case german = "de"
+    /// French.
     case french = "fr"
+    /// Italian.
     case italian = "it"
+    /// Spanish.
     case spanish = "es"
+    /// Portuguese.
     case portuguese = "pt"
+    /// Greek.
     case greek = "el"
+    /// Dutch.
     case dutch = "nl"
+    /// Polish.
     case polish = "pl"
+    /// Vietnamese.
     case vietnamese = "vi"
+    /// Chinese.
     case chinese = "zh"
+    /// Arabic.
     case arabic = "ar"
+    /// Japanese.
     case japanese = "ja"
+    /// Korean.
     case korean = "ko"
 }
 
@@ -39,11 +56,11 @@ struct CohereFileTranscriptionClient {
 
     func transcribeAudioFile(
         file: URL,
-        modelId: CohereModelID,
+        modelID: CohereModelID,
         language: CohereLanguage,
         temperature: Double?
     ) async throws -> String {
-        let request = try await makeRequest(file: file, modelId: modelId, language: language, temperature: temperature)
+        let request = try await makeRequest(file: file, modelID: modelID, language: language, temperature: temperature)
         let (data, response) = try await urlSession.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SpeechError.invalidResponse(provider: .cohere)
@@ -63,7 +80,7 @@ struct CohereFileTranscriptionClient {
 
     func makeRequest(
         file: URL,
-        modelId: CohereModelID,
+        modelID: CohereModelID,
         language: CohereLanguage,
         temperature: Double?
     ) async throws -> URLRequest {
@@ -79,7 +96,7 @@ struct CohereFileTranscriptionClient {
         let audioData = try readFileData(from: file)
         let boundary = "SpeechKit-\(UUID().uuidString)"
         var parts: [SpeechMultipartFormPart] = [
-            .text(name: "model", value: modelId.rawValue),
+            .text(name: "model", value: modelID.rawValue),
             .text(name: "language", value: language.rawValue),
             .file(
                 name: "file",

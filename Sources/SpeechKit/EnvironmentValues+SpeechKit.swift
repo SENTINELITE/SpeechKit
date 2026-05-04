@@ -7,6 +7,7 @@ private struct SpeechServiceKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
+    /// The speech service available to SwiftUI views in the environment.
     public var speechService: SpeechService {
         get { self[SpeechServiceKey.self] }
         set { self[SpeechServiceKey.self] = newValue }

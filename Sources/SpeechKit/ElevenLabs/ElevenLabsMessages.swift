@@ -2,9 +2,13 @@ import Foundation
 
 // MARK: - Model ID
 
+/// ElevenLabs model identifiers supported by SpeechKit.
 public enum ElevenLabsModelID: String, Sendable, CaseIterable {
+    /// ElevenLabs Scribe v2 realtime transcription.
     case scribeV2Realtime = "scribe_v2_realtime"
+    /// ElevenLabs Scribe v1 file transcription.
     case scribeV1 = "scribe_v1"
+    /// ElevenLabs Scribe v2 file transcription.
     case scribeV2 = "scribe_v2"
 }
 
@@ -62,11 +66,11 @@ enum ElevenLabsMessage: Decodable, Sendable {
 }
 
 struct SessionStarted: Decodable, Sendable {
-    let sessionId: String
+    let sessionID: String
     let config: SessionConfig
     
     private enum CodingKeys: String, CodingKey {
-        case sessionId = "session_id"
+        case sessionID = "session_id"
         case config
     }
 }
@@ -75,7 +79,7 @@ struct SessionConfig: Decodable, Sendable {
     let sampleRate: Int
     let audioFormat: String
     let languageCode: String?
-    let modelId: String
+    let modelID: String
     let vadCommitStrategy: Bool
     let vadSilenceThresholdSecs: Double
     let vadThreshold: Double
@@ -85,7 +89,7 @@ struct SessionConfig: Decodable, Sendable {
         case sampleRate = "sample_rate"
         case audioFormat = "audio_format"
         case languageCode = "language_code"
-        case modelId = "model_id"
+        case modelID = "model_id"
         case vadCommitStrategy = "vad_commit_strategy"
         case vadSilenceThresholdSecs = "vad_silence_threshold_secs"
         case vadThreshold = "vad_threshold"
@@ -113,34 +117,58 @@ struct CommittedTranscriptWithTimestamps: Decodable, Sendable {
     }
 }
 
+/// A word-level timestamp returned by ElevenLabs transcription.
 public struct WordTimestamp: Decodable, Sendable {
+    /// The word or token text.
     public let text: String
+    /// The start time, in seconds.
     public let start: Double
+    /// The end time, in seconds.
     public let end: Double
+    /// The timestamp token type reported by ElevenLabs.
     public let type: String
+    /// The optional token log probability.
     public let logprob: Double?
+    /// Optional character-level data reported by ElevenLabs.
     public let characters: [String]?
 }
 
 // MARK: - Errors
 
+/// Errors returned by ElevenLabs-specific realtime and upload APIs.
 public enum ElevenLabsError: Error, LocalizedError, Sendable {
+    /// SpeechKit could not construct a valid ElevenLabs URL.
     case invalidURL
+    /// The realtime connection failed.
     case connectionFailed(String)
+    /// SpeechKit could not encode an outgoing realtime message.
     case encodingFailed
+    /// SpeechKit could not decode an incoming realtime or file response.
     case decodingFailed(String)
+    /// The realtime WebSocket disconnected.
     case disconnected
+    /// The user denied microphone permission.
     case permissionDenied
+    /// The audio engine failed.
     case audioEngineError(String)
+    /// The ElevenLabs API key is empty.
     case apiKeyMissing
+    /// SpeechKit could not read the audio file.
     case fileReadFailed
+    /// ElevenLabs rejected or failed a file upload.
     case uploadFailed(String)
+    /// The selected model is not supported for the requested operation.
     case unsupportedModel(String)
+    /// SpeechKit could not access a security-scoped file URL.
     case securityScopeDenied
+    /// The file exceeds ElevenLabs upload limits.
     case fileTooLarge(Int64)
+    /// The audio duration exceeds ElevenLabs upload limits.
     case audioTooLong(TimeInterval)
+    /// SpeechKit could not read audio metadata.
     case metadataReadFailed
     
+    /// A localized description of the error.
     public var errorDescription: String? {
         switch self {
         case .invalidURL:
@@ -163,8 +191,8 @@ public enum ElevenLabsError: Error, LocalizedError, Sendable {
             return "Failed to read audio file"
         case .uploadFailed(let reason):
             return "File upload failed: \(reason)"
-        case .unsupportedModel(let modelId):
-            return "Unsupported model for upload: \(modelId)"
+        case .unsupportedModel(let modelID):
+            return "Unsupported model for upload: \(modelID)"
         case .securityScopeDenied:
             return "Failed to access security-scoped resource"
         case .fileTooLarge:

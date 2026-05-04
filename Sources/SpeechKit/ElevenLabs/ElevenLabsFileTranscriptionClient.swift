@@ -12,8 +12,8 @@ struct ElevenLabsFileTranscriptionClient {
         self.urlSession = urlSession
     }
 
-    func transcribeAudioFile(file: URL, modelId: ElevenLabsModelID) async throws -> String {
-        let request = try await makeRequest(file: file, modelId: modelId)
+    func transcribeAudioFile(file: URL, modelID: ElevenLabsModelID) async throws -> String {
+        let request = try await makeRequest(file: file, modelID: modelID)
         let (data, response) = try await urlSession.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ElevenLabsError.uploadFailed("Invalid response")
@@ -31,12 +31,12 @@ struct ElevenLabsFileTranscriptionClient {
         }
     }
 
-    func makeRequest(file: URL, modelId: ElevenLabsModelID) async throws -> URLRequest {
+    func makeRequest(file: URL, modelID: ElevenLabsModelID) async throws -> URLRequest {
         guard !apiKey.isEmpty else {
             throw ElevenLabsError.apiKeyMissing
         }
-        guard modelId == .scribeV1 || modelId == .scribeV2 else {
-            throw ElevenLabsError.unsupportedModel(modelId.rawValue)
+        guard modelID == .scribeV1 || modelID == .scribeV2 else {
+            throw ElevenLabsError.unsupportedModel(modelID.rawValue)
         }
         guard let uploadURL else {
             throw ElevenLabsError.invalidURL
@@ -57,7 +57,7 @@ struct ElevenLabsFileTranscriptionClient {
         request.httpBody = SpeechFileUploadSupport.makeMultipartBody(
             boundary: boundary,
             parts: [
-                .text(name: "model_id", value: modelId.rawValue),
+                .text(name: "model_id", value: modelID.rawValue),
                 .file(
                     name: "file",
                     fileURL: file,

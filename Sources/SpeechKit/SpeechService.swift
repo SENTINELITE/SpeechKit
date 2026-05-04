@@ -1,66 +1,90 @@
 import Foundation
 import SwiftUI
 
+/// Configuration for ElevenLabs realtime and file transcription.
 public struct ElevenLabsConfig: Sendable, Equatable {
+    /// The ElevenLabs API key used for realtime and file transcription requests.
     public var apiKey: String
-    public var realtimeModelId: ElevenLabsModelID
-    public var fileModelId: ElevenLabsModelID
+    /// The ElevenLabs model used by ``SpeechService/startListening()``.
+    public var realtimeModelID: ElevenLabsModelID
+    /// The ElevenLabs model used by file transcription APIs.
+    public var fileModelID: ElevenLabsModelID
 
+    /// Creates an ElevenLabs configuration.
     public init(
         apiKey: String,
-        realtimeModelId: ElevenLabsModelID = .scribeV2Realtime,
-        fileModelId: ElevenLabsModelID = .scribeV1
+        realtimeModelID: ElevenLabsModelID = .scribeV2Realtime,
+        fileModelID: ElevenLabsModelID = .scribeV1
     ) {
         self.apiKey = apiKey
-        self.realtimeModelId = realtimeModelId
-        self.fileModelId = fileModelId
+        self.realtimeModelID = realtimeModelID
+        self.fileModelID = fileModelID
     }
 }
 
+/// Configuration for Cohere file transcription.
 public struct CohereConfig: Sendable, Equatable {
+    /// The Cohere API key used for file transcription requests.
     public var apiKey: String
-    public var fileModelId: CohereModelID
+    /// The Cohere transcription model used for file uploads.
+    public var fileModelID: CohereModelID
+    /// The language hint sent with Cohere transcription requests.
     public var language: CohereLanguage
+    /// An optional model temperature for transcription output.
     public var temperature: Double?
 
+    /// Creates a Cohere configuration with a typed language value.
     public init(
         apiKey: String,
-        fileModelId: CohereModelID = .transcribe032026,
+        fileModelID: CohereModelID = .transcribe032026,
         language: CohereLanguage = .english,
         temperature: Double? = nil
     ) {
         self.apiKey = apiKey
-        self.fileModelId = fileModelId
+        self.fileModelID = fileModelID
         self.language = language
         self.temperature = temperature
     }
 
+    /// Creates a Cohere configuration from a raw language code.
+    ///
+    /// - Throws: ``SpeechError/providerFailure(provider:reason:)`` when `languageCode` is not supported.
     public init(
         apiKey: String,
-        fileModelId: CohereModelID = .transcribe032026,
+        fileModelID: CohereModelID = .transcribe032026,
         languageCode: String,
         temperature: Double? = nil
     ) throws {
         guard let language = CohereLanguage(rawValue: languageCode) else {
             throw SpeechError.providerFailure(provider: .cohere, reason: "Unsupported language: \(languageCode).")
         }
-        self.init(apiKey: apiKey, fileModelId: fileModelId, language: language, temperature: temperature)
+        self.init(apiKey: apiKey, fileModelID: fileModelID, language: language, temperature: temperature)
     }
 }
 
+/// Configuration for Grok file transcription.
 public struct GrokConfig: Sendable, Equatable {
+    /// The xAI API key used for Grok transcription requests.
     public var apiKey: String
-    public var modelId: GrokModelID
+    /// The Grok speech-to-text model used for file uploads.
+    public var modelID: GrokModelID
+    /// An optional language hint.
     public var language: GrokLanguage?
+    /// A Boolean value that indicates whether Grok should format the transcript.
     public var format: Bool
+    /// A Boolean value that indicates whether Grok should process multichannel audio.
     public var multichannel: Bool
+    /// A Boolean value that indicates whether Grok should identify speakers.
     public var diarize: Bool
+    /// The timestamp granularities to request from Grok.
     public var timestampGranularities: [GrokTimestampGranularity]
+    /// The network timeout for Grok upload requests.
     public var timeoutInterval: TimeInterval
 
+    /// Creates a Grok configuration with a typed language value.
     public init(
         apiKey: String,
-        modelId: GrokModelID = .stt,
+        modelID: GrokModelID = .stt,
         language: GrokLanguage? = nil,
         format: Bool = false,
         multichannel: Bool = false,
@@ -69,7 +93,7 @@ public struct GrokConfig: Sendable, Equatable {
         timeoutInterval: TimeInterval = 10 * 60
     ) {
         self.apiKey = apiKey
-        self.modelId = modelId
+        self.modelID = modelID
         self.language = language
         self.format = format
         self.multichannel = multichannel
@@ -78,9 +102,12 @@ public struct GrokConfig: Sendable, Equatable {
         self.timeoutInterval = timeoutInterval
     }
 
+    /// Creates a Grok configuration from an optional raw language code.
+    ///
+    /// - Throws: ``SpeechError/providerFailure(provider:reason:)`` when `languageCode` is not supported.
     public init(
         apiKey: String,
-        modelId: GrokModelID = .stt,
+        modelID: GrokModelID = .stt,
         languageCode: String?,
         format: Bool = false,
         multichannel: Bool = false,
@@ -96,7 +123,7 @@ public struct GrokConfig: Sendable, Equatable {
         }
         self.init(
             apiKey: apiKey,
-            modelId: modelId,
+            modelID: modelID,
             language: language,
             format: format,
             multichannel: multichannel,
@@ -107,24 +134,32 @@ public struct GrokConfig: Sendable, Equatable {
     }
 }
 
+/// Configuration for Aqua file transcription.
 public struct AquaConfig: Sendable, Equatable {
+    /// The Aqua API key used for file transcription requests.
     public var apiKey: String
-    public var fileModelId: AquaModelID
+    /// The Aqua transcription model used for file uploads.
+    public var fileModelID: AquaModelID
+    /// An optional language hint.
     public var language: AquaLanguage?
 
+    /// Creates an Aqua configuration with a typed language value.
     public init(
         apiKey: String,
-        fileModelId: AquaModelID = .avalonV15,
+        fileModelID: AquaModelID = .avalonV15,
         language: AquaLanguage? = nil
     ) {
         self.apiKey = apiKey
-        self.fileModelId = fileModelId
+        self.fileModelID = fileModelID
         self.language = language
     }
 
+    /// Creates an Aqua configuration from an optional raw language code.
+    ///
+    /// - Throws: ``SpeechError/providerFailure(provider:reason:)`` when `languageCode` is not supported.
     public init(
         apiKey: String,
-        fileModelId: AquaModelID = .avalonV15,
+        fileModelID: AquaModelID = .avalonV15,
         languageCode: String?
     ) throws {
         let language = try languageCode.map { languageCode in
@@ -133,23 +168,33 @@ public struct AquaConfig: Sendable, Equatable {
             }
             return language
         }
-        self.init(apiKey: apiKey, fileModelId: fileModelId, language: language)
+        self.init(apiKey: apiKey, fileModelID: fileModelID, language: language)
     }
 }
 
+/// A provider that can transcribe uploaded audio files.
 public enum SpeechFileProvider: String, Sendable, CaseIterable {
+    /// ElevenLabs Scribe file transcription.
     case elevenLabs
+    /// Aqua Avalon file transcription.
     case aqua
+    /// Cohere Transcribe file transcription.
     case cohere
+    /// Grok speech-to-text file transcription.
     case grok
 }
 
+/// Provider-specific options for a single file transcription request.
 public enum SpeechFileTranscriptionOptions: Sendable, Equatable {
-    case elevenLabs(modelId: ElevenLabsModelID? = nil)
-    case aqua(modelId: AquaModelID? = nil, language: AquaLanguage? = nil)
-    case cohere(modelId: CohereModelID? = nil, language: CohereLanguage? = nil, temperature: Double? = nil)
+    /// Options for an ElevenLabs file transcription request.
+    case elevenLabs(modelID: ElevenLabsModelID? = nil)
+    /// Options for an Aqua file transcription request.
+    case aqua(modelID: AquaModelID? = nil, language: AquaLanguage? = nil)
+    /// Options for a Cohere file transcription request.
+    case cohere(modelID: CohereModelID? = nil, language: CohereLanguage? = nil, temperature: Double? = nil)
+    /// Options for a Grok file transcription request.
     case grok(
-        modelId: GrokModelID? = nil,
+        modelID: GrokModelID? = nil,
         language: GrokLanguage? = nil,
         format: Bool? = nil,
         multichannel: Bool? = nil,
@@ -175,15 +220,24 @@ public enum SpeechFileTranscriptionOptions: Sendable, Equatable {
     }
 }
 
+/// Errors returned by provider-neutral SpeechKit APIs.
 public enum SpeechError: Error, LocalizedError, Sendable, Equatable {
+    /// The requested provider has no configuration on the service.
     case providerNotConfigured(SpeechFileProvider)
+    /// The requested provider does not support the requested capability.
     case unsupportedCapability(provider: SpeechFileProvider, capability: String)
+    /// The request used options for a different provider.
     case invalidOptionsForProvider(expected: SpeechFileProvider, received: SpeechFileProvider)
+    /// The provider returned a response that SpeechKit could not interpret.
     case invalidResponse(provider: SpeechFileProvider)
+    /// The provider rejected or failed a file upload.
     case uploadFailed(provider: SpeechFileProvider, reason: String)
+    /// SpeechKit could not decode the provider response.
     case decodingFailed(provider: SpeechFileProvider, reason: String)
+    /// The provider request failed for a reason that does not fit a narrower case.
     case providerFailure(provider: SpeechFileProvider, reason: String)
 
+    /// A localized description of the error.
     public var errorDescription: String? {
         switch self {
         case .providerNotConfigured(let provider):
@@ -204,14 +258,19 @@ public enum SpeechError: Error, LocalizedError, Sendable, Equatable {
     }
 }
 
+/// A SwiftUI-observable service for realtime microphone transcription and audio file transcription.
 @Observable
 @MainActor
 public final class SpeechService {
+    /// The ElevenLabs configuration used for realtime and ElevenLabs file transcription.
     public var elevenLabs: ElevenLabsConfig? {
         didSet { applyRealtimeConfig() }
     }
+    /// The Cohere configuration used for Cohere file transcription.
     public var cohere: CohereConfig?
+    /// The Grok configuration used for Grok file transcription.
     public var grok: GrokConfig?
+    /// The Aqua configuration used for Aqua file transcription.
     public var aqua: AquaConfig?
 
     private let elevenLabsRealtimeService: ElevenLabsService
@@ -219,26 +278,32 @@ public final class SpeechService {
     private var fallbackConnectionState: ElevenLabsService.ConnectionState?
     private var fallbackLastError: Error?
 
+    /// The current realtime ElevenLabs connection state.
     public var connectionState: ElevenLabsService.ConnectionState {
         fallbackConnectionState ?? elevenLabsRealtimeService.connectionState
     }
 
+    /// The latest partial realtime transcript text.
     public var partialTranscript: String {
         elevenLabsRealtimeService.partialTranscript
     }
 
+    /// The committed realtime transcript entries.
     public var committedTranscripts: [ElevenLabsService.TranscriptEntry] {
         elevenLabsRealtimeService.committedTranscripts
     }
 
+    /// The most recent realtime transcription error, if any.
     public var lastError: Error? {
         fallbackLastError ?? elevenLabsRealtimeService.lastError
     }
 
+    /// The committed realtime transcript text joined with spaces.
     public var fullTranscript: String {
         elevenLabsRealtimeService.fullTranscript
     }
 
+    /// Creates a speech service with any provider configurations your app needs.
     public init(
         elevenLabs: ElevenLabsConfig? = nil,
         cohere: CohereConfig? = nil,
@@ -271,6 +336,7 @@ public final class SpeechService {
         applyRealtimeConfig()
     }
 
+    /// Starts realtime microphone transcription with the configured ElevenLabs provider.
     public func startListening() async {
         guard let elevenLabs else {
             fallbackConnectionState = .error("ElevenLabs is not configured")
@@ -281,22 +347,27 @@ public final class SpeechService {
         fallbackConnectionState = nil
         fallbackLastError = nil
         elevenLabsRealtimeService.apiKey = elevenLabs.apiKey
-        elevenLabsRealtimeService.modelId = elevenLabs.realtimeModelId
+        elevenLabsRealtimeService.modelID = elevenLabs.realtimeModelID
         await elevenLabsRealtimeService.startListening()
     }
 
+    /// Stops realtime microphone transcription and disconnects from ElevenLabs.
     public func stopListening() async {
         fallbackConnectionState = nil
         fallbackLastError = nil
         await elevenLabsRealtimeService.stopListening()
     }
 
+    /// Clears committed and partial realtime transcript text.
     public func clearTranscripts() {
         fallbackConnectionState = nil
         fallbackLastError = nil
         elevenLabsRealtimeService.clearTranscripts()
     }
 
+    /// Transcribes an audio file with a configured provider.
+    ///
+    /// - Throws: ``SpeechError`` when the provider is missing, options do not match the provider, upload validation fails, or the provider request fails.
     public func transcribeAudioFile(
         provider: SpeechFileProvider,
         file: URL,
@@ -308,11 +379,11 @@ public final class SpeechService {
                 throw SpeechError.providerNotConfigured(.elevenLabs)
             }
             try validate(options: options, for: .elevenLabs)
-            let resolvedModelId = resolvedElevenLabsModelId(from: options, config: elevenLabs)
+            let resolvedModelID = resolvedElevenLabsModelID(from: options, config: elevenLabs)
             let client = ElevenLabsFileTranscriptionClient(apiKey: elevenLabs.apiKey, urlSession: urlSession)
 
             do {
-                return try await client.transcribeAudioFile(file: file, modelId: resolvedModelId)
+                return try await client.transcribeAudioFile(file: file, modelID: resolvedModelID)
             } catch {
                 throw wrap(error, for: .elevenLabs)
             }
@@ -342,7 +413,7 @@ public final class SpeechService {
             do {
                 return try await client.transcribeAudioFile(
                     file: file,
-                    modelId: resolvedOptions.modelId,
+                    modelID: resolvedOptions.modelID,
                     language: resolvedOptions.language,
                     temperature: resolvedOptions.temperature
                 )
@@ -369,6 +440,9 @@ public final class SpeechService {
         }
     }
 
+    /// Transcribes a security-scoped audio file URL with a configured provider.
+    ///
+    /// - Throws: ``SpeechError`` when the file cannot be accessed, the provider is missing, options do not match the provider, upload validation fails, or the provider request fails.
     public func transcribeAudioFile(
         provider: SpeechFileProvider,
         securityScopedURL: URL,
@@ -382,6 +456,9 @@ public final class SpeechService {
         return try await transcribeAudioFile(provider: provider, file: securityScopedURL, options: options)
     }
 
+    /// Transcribes an audio file with Aqua and returns Aqua's detailed response.
+    ///
+    /// - Throws: ``SpeechError`` when Aqua is missing, upload validation fails, or the provider request fails.
     public func transcribeAquaAudioFile(
         file: URL,
         options: AquaFileTranscriptionOptions? = nil
@@ -392,7 +469,7 @@ public final class SpeechService {
 
         let client = AquaFileTranscriptionClient(apiKey: aqua.apiKey, urlSession: urlSession)
         let resolvedOptions = options ?? AquaFileTranscriptionOptions(
-            modelId: aqua.fileModelId,
+            modelID: aqua.fileModelID,
             language: aqua.language
         )
 
@@ -403,6 +480,9 @@ public final class SpeechService {
         }
     }
 
+    /// Transcribes a security-scoped audio file URL with Aqua and returns Aqua's detailed response.
+    ///
+    /// - Throws: ``SpeechError`` when the file cannot be accessed, Aqua is missing, upload validation fails, or the provider request fails.
     public func transcribeAquaAudioFile(
         securityScopedURL: URL,
         options: AquaFileTranscriptionOptions? = nil
@@ -415,6 +495,9 @@ public final class SpeechService {
         return try await transcribeAquaAudioFile(file: securityScopedURL, options: options)
     }
 
+    /// Transcribes an audio file with Grok and returns Grok's detailed response.
+    ///
+    /// - Throws: ``SpeechError`` when Grok is missing, upload validation fails, option validation fails, or the provider request fails.
     public func transcribeGrokAudioFile(
         file: URL,
         options: GrokFileTranscriptionOptions? = nil
@@ -425,7 +508,7 @@ public final class SpeechService {
 
         let client = GrokFileTranscriptionClient(apiKey: grok.apiKey, urlSession: urlSession)
         let resolvedOptions = options ?? GrokFileTranscriptionOptions(
-            modelId: grok.modelId,
+            modelID: grok.modelID,
             language: grok.language,
             format: grok.format,
             multichannel: grok.multichannel,
@@ -441,6 +524,9 @@ public final class SpeechService {
         }
     }
 
+    /// Transcribes a security-scoped audio file URL with Grok and returns Grok's detailed response.
+    ///
+    /// - Throws: ``SpeechError`` when the file cannot be accessed, Grok is missing, upload validation fails, option validation fails, or the provider request fails.
     public func transcribeGrokAudioFile(
         securityScopedURL: URL,
         options: GrokFileTranscriptionOptions? = nil
@@ -455,7 +541,7 @@ public final class SpeechService {
 
     private func applyRealtimeConfig() {
         elevenLabsRealtimeService.apiKey = elevenLabs?.apiKey ?? ""
-        elevenLabsRealtimeService.modelId = elevenLabs?.realtimeModelId ?? .scribeV2Realtime
+        elevenLabsRealtimeService.modelID = elevenLabs?.realtimeModelID ?? .scribeV2Realtime
     }
 
     private func validate(options: SpeechFileTranscriptionOptions?, for provider: SpeechFileProvider) throws {
@@ -465,26 +551,26 @@ public final class SpeechService {
         }
     }
 
-    private func resolvedElevenLabsModelId(
+    private func resolvedElevenLabsModelID(
         from options: SpeechFileTranscriptionOptions?,
         config: ElevenLabsConfig
     ) -> ElevenLabsModelID {
-        guard case .elevenLabs(let modelId) = options else {
-            return config.fileModelId
+        guard case .elevenLabs(let modelID) = options else {
+            return config.fileModelID
         }
-        return modelId ?? config.fileModelId
+        return modelID ?? config.fileModelID
     }
 
     private func resolvedAquaOptions(
         from options: SpeechFileTranscriptionOptions?,
         config: AquaConfig
     ) -> AquaFileTranscriptionOptions {
-        guard case .aqua(let modelId, let language) = options else {
-            return AquaFileTranscriptionOptions(modelId: config.fileModelId, language: config.language)
+        guard case .aqua(let modelID, let language) = options else {
+            return AquaFileTranscriptionOptions(modelID: config.fileModelID, language: config.language)
         }
 
         return AquaFileTranscriptionOptions(
-            modelId: modelId ?? config.fileModelId,
+            modelID: modelID ?? config.fileModelID,
             language: language ?? config.language
         )
     }
@@ -492,13 +578,13 @@ public final class SpeechService {
     private func resolvedCohereOptions(
         from options: SpeechFileTranscriptionOptions?,
         config: CohereConfig
-    ) -> (modelId: CohereModelID, language: CohereLanguage, temperature: Double?) {
-        guard case .cohere(let modelId, let language, let temperature) = options else {
-            return (config.fileModelId, config.language, config.temperature)
+    ) -> (modelID: CohereModelID, language: CohereLanguage, temperature: Double?) {
+        guard case .cohere(let modelID, let language, let temperature) = options else {
+            return (config.fileModelID, config.language, config.temperature)
         }
 
         return (
-            modelId ?? config.fileModelId,
+            modelID ?? config.fileModelID,
             language ?? config.language,
             temperature ?? config.temperature
         )
@@ -509,7 +595,7 @@ public final class SpeechService {
         config: GrokConfig
     ) -> GrokFileTranscriptionOptions {
         guard case .grok(
-            let modelId,
+            let modelID,
             let language,
             let format,
             let multichannel,
@@ -521,7 +607,7 @@ public final class SpeechService {
             let timeoutInterval
         ) = options else {
             return GrokFileTranscriptionOptions(
-                modelId: config.modelId,
+                modelID: config.modelID,
                 language: config.language,
                 format: config.format,
                 multichannel: config.multichannel,
@@ -535,7 +621,7 @@ public final class SpeechService {
         }
 
         return GrokFileTranscriptionOptions(
-            modelId: modelId ?? config.modelId,
+            modelID: modelID ?? config.modelID,
             language: language ?? config.language,
             format: format ?? config.format,
             multichannel: multichannel ?? config.multichannel,

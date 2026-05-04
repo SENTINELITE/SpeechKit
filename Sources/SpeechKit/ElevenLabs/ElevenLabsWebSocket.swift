@@ -13,8 +13,8 @@ actor ElevenLabsWebSocket {
         webSocketTask?.state == .running
     }
     
-    func connect(apiKey: String, modelId: ElevenLabsModelID) async throws -> AsyncThrowingStream<ElevenLabsMessage, Error> {
-        guard let url = URL(string: "\(baseURL)?model_id=\(modelId.rawValue)") else {
+    func connect(apiKey: String, modelID: ElevenLabsModelID) async throws -> AsyncThrowingStream<ElevenLabsMessage, Error> {
+        guard let url = URL(string: "\(baseURL)?model_id=\(modelID.rawValue)") else {
             throw ElevenLabsError.invalidURL
         }
         
