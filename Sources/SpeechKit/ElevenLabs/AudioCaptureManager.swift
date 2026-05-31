@@ -4,14 +4,27 @@ import Foundation
 @Observable
 final class AudioCaptureManager: @unchecked Sendable {
     private(set) var isCapturing = false
+    private(set) var currentLevel = 0.0
     
     private var audioEngine: AVAudioEngine?
     private var continuation: AsyncStream<Data>.Continuation?
     private var currentStream: AsyncStream<Data>?
     private var targetSampleRate: Double
+    private let recordedAudioLock = NSLock()
+    private var recordedPCMData = Data()
 
     init(targetSampleRate: Double = 16000) {
         self.targetSampleRate = targetSampleRate
+    }
+
+    var recordedWAVData: Data? {
+        recordedAudioLock.lock()
+        let pcmData = recordedPCMData
+        let sampleRate = targetSampleRate
+        recordedAudioLock.unlock()
+
+        guard !pcmData.isEmpty else { return nil }
+        return Self.makeWAVData(pcmData: pcmData, sampleRate: sampleRate)
     }
 
     func setTargetSampleRate(_ targetSampleRate: Double) {
@@ -43,6 +56,8 @@ final class AudioCaptureManager: @unchecked Sendable {
         if isCapturing, let currentStream {
             return currentStream
         }
+
+        resetRecordedAudio()
 
         #if os(iOS) || os(watchOS) || os(visionOS)
         try configureAudioSession()
@@ -107,10 +122,12 @@ final class AudioCaptureManager: @unchecked Sendable {
             guard status != .error, error == nil, convertedBuffer.frameLength > 0 else { return }
             
             if let channelData = convertedBuffer.int16ChannelData {
+                updateLevel(from: channelData[0], frameCount: Int(convertedBuffer.frameLength))
                 let data = Data(
                     bytes: channelData[0],
                     count: Int(convertedBuffer.frameLength) * MemoryLayout<Int16>.size
                 )
+                self.appendRecordedAudio(data)
                 self.continuation?.yield(data)
             }
         }
@@ -145,6 +162,38 @@ final class AudioCaptureManager: @unchecked Sendable {
         continuation = nil
         currentStream = nil
         isCapturing = false
+        currentLevel = 0
+    }
+
+    private func resetRecordedAudio() {
+        recordedAudioLock.lock()
+        recordedPCMData.removeAll(keepingCapacity: true)
+        recordedAudioLock.unlock()
+    }
+
+    private func appendRecordedAudio(_ data: Data) {
+        recordedAudioLock.lock()
+        recordedPCMData.append(data)
+        recordedAudioLock.unlock()
+    }
+
+    private func updateLevel(from samples: UnsafePointer<Int16>, frameCount: Int) {
+        guard frameCount > 0 else { return }
+
+        var sumSquares = 0.0
+        for index in 0..<frameCount {
+            let sample = Double(samples[index]) / Double(Int16.max)
+            sumSquares += sample * sample
+        }
+
+        let rms = sqrt(sumSquares / Double(frameCount))
+        let normalized = min(max(pow(rms * 8, 0.72), 0), 1)
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let smoothing = normalized > self.currentLevel ? 0.16 : 0.58
+            self.currentLevel += (normalized - self.currentLevel) * smoothing
+        }
     }
     
     #if os(iOS) || os(watchOS) || os(visionOS)
@@ -154,4 +203,41 @@ final class AudioCaptureManager: @unchecked Sendable {
         try session.setActive(true, options: .notifyOthersOnDeactivation)
     }
     #endif
+
+    private static func makeWAVData(pcmData: Data, sampleRate: Double) -> Data {
+        let channelCount: UInt16 = 1
+        let bitsPerSample: UInt16 = 16
+        let byteRate = UInt32(sampleRate) * UInt32(channelCount) * UInt32(bitsPerSample / 8)
+        let blockAlign = channelCount * (bitsPerSample / 8)
+        let dataSize = UInt32(pcmData.count)
+        let riffSize = UInt32(36) + dataSize
+
+        var wavData = Data()
+        wavData.appendASCII("RIFF")
+        wavData.appendLittleEndian(riffSize)
+        wavData.appendASCII("WAVE")
+        wavData.appendASCII("fmt ")
+        wavData.appendLittleEndian(UInt32(16))
+        wavData.appendLittleEndian(UInt16(1))
+        wavData.appendLittleEndian(channelCount)
+        wavData.appendLittleEndian(UInt32(sampleRate))
+        wavData.appendLittleEndian(byteRate)
+        wavData.appendLittleEndian(blockAlign)
+        wavData.appendLittleEndian(bitsPerSample)
+        wavData.appendASCII("data")
+        wavData.appendLittleEndian(dataSize)
+        wavData.append(pcmData)
+        return wavData
+    }
+}
+
+private extension Data {
+    mutating func appendASCII(_ string: String) {
+        append(contentsOf: string.utf8)
+    }
+
+    mutating func appendLittleEndian<T: FixedWidthInteger>(_ value: T) {
+        var littleEndianValue = value.littleEndian
+        Swift.withUnsafeBytes(of: &littleEndianValue) { append(contentsOf: $0) }
+    }
 }

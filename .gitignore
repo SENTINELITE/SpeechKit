@@ -7,12 +7,14 @@
 /Packages/
 .swiftpm/configuration/registries.json
 .swiftpm/xcode/package.xcworkspace/
+.swiftpm/xcode/xcshareddata/
 .swiftpm/xcode/xcuserdata/
 
 # Xcode
 xcuserdata/
 DerivedData/
 *.xcuserstate
+/SpeechKit.xcworkspace/
 
 # Local credentials
 .netrc

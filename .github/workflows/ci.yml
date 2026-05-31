@@ -40,6 +40,23 @@ jobs:
       - name: Test with warnings as errors
         run: swift test -Xswiftc -warnings-as-errors
 
+      - name: Build package documentation
+        run: |
+          mkdir -p '${{ runner.temp }}/SymbolGraphs' '${{ runner.temp }}/ClangModuleCache'
+          CLANG_MODULE_CACHE_PATH='${{ runner.temp }}/ClangModuleCache' swift build \
+            --target SpeechKit \
+            -Xswiftc -warnings-as-errors \
+            -Xswiftc -emit-symbol-graph \
+            -Xswiftc -emit-symbol-graph-dir \
+            -Xswiftc '${{ runner.temp }}/SymbolGraphs'
+          xcrun docc convert Sources/SpeechKit/SpeechKit.docc \
+            --additional-symbol-graph-dir '${{ runner.temp }}/SymbolGraphs' \
+            --output-dir '${{ runner.temp }}/SpeechKit.doccarchive' \
+            --fallback-display-name SpeechKit \
+            --fallback-bundle-identifier com.sentinelite.SpeechKit \
+            --fallback-bundle-version 1.0.0 \
+            --warnings-as-errors
+
   platform-build:
     name: ${{ matrix.name }} build
     runs-on: macos-26
@@ -84,3 +101,40 @@ jobs:
             -derivedDataPath '${{ runner.temp }}/DerivedData/${{ matrix.derived-data }}' \
             CODE_SIGNING_ALLOWED=NO \
             OTHER_SWIFT_FLAGS="-warnings-as-errors"
+
+  demo-app:
+    name: SpeechKitDemo iOS build/docs
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Toolchain versions
+        run: |
+          xcodebuild -version
+          xcode-select -p
+          swift --version
+
+      - name: Build demo app
+        run: |
+          xcodebuild build \
+            -project Examples/SpeechKitDemo/SpeechKitDemo.xcodeproj \
+            -scheme SpeechKitDemo \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath '${{ runner.temp }}/DerivedData/SpeechKitDemo' \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Build demo documentation
+        run: |
+          xcodebuild docbuild \
+            -project Examples/SpeechKitDemo/SpeechKitDemo.xcodeproj \
+            -scheme SpeechKitDemo \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath '${{ runner.temp }}/DerivedData/SpeechKitDemoDocs' \
+            CODE_SIGNING_ALLOWED=NO

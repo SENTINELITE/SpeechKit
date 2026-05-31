@@ -36,6 +36,16 @@ public final class GrokRealtimeService {
         transcriptEntries.map(\.text).joined(separator: " ")
     }
 
+    /// The latest normalized microphone input level for the active realtime capture.
+    public var realtimeAudioLevel: Double {
+        audioManager.currentLevel
+    }
+
+    /// The latest realtime microphone recording as WAV data, if capture has produced audio.
+    public var realtimeRecordingData: Data? {
+        audioManager.recordedWAVData
+    }
+
     /// Creates a Grok realtime transcription service.
     public init(apiKey: String = "", options: GrokRealtimeOptions = GrokRealtimeOptions()) {
         self.apiKey = apiKey

@@ -57,6 +57,30 @@ extension SpeechService {
         }
     }
 
+    /// The latest normalized microphone input level for the active realtime provider.
+    public var realtimeAudioLevel: Double {
+        switch activeRealtimeProvider {
+        case .elevenLabs:
+            return elevenLabsRealtimeService.realtimeAudioLevel
+        case .openAI:
+            return openAIRealtimeService.realtimeAudioLevel
+        case .grok:
+            return grokRealtimeService.realtimeAudioLevel
+        }
+    }
+
+    /// The latest realtime microphone recording as WAV data, if capture has produced audio.
+    public var realtimeRecordingData: Data? {
+        switch activeRealtimeProvider {
+        case .elevenLabs:
+            return elevenLabsRealtimeService.realtimeRecordingData
+        case .openAI:
+            return openAIRealtimeService.realtimeRecordingData
+        case .grok:
+            return grokRealtimeService.realtimeRecordingData
+        }
+    }
+
     /// The committed realtime transcript entries.
     public var transcriptEntries: [SpeechTranscriptEntry] {
         switch activeRealtimeProvider {

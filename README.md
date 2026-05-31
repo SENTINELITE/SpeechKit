@@ -3,7 +3,7 @@
 [![CI](https://github.com/SENTINELITE/SpeechKit/actions/workflows/ci.yml/badge.svg)](https://github.com/SENTINELITE/SpeechKit/actions/workflows/ci.yml)
 ![Swift](https://img.shields.io/badge/Swift-6.2-orange.svg)
 ![Platforms](https://img.shields.io/badge/platforms-iOS%2018%20%7C%20macOS%2015%20%7C%20watchOS%2011%20%7C%20visionOS%202-lightgrey.svg)
-![Status](https://img.shields.io/badge/status-0.9.0%20preview-blue.svg)
+![Status](https://img.shields.io/badge/status-1.0.0-blue.svg)
 
 SpeechKit is a Swift package for adding speech-to-text to Swift and SwiftUI apps with a small async/await API.
 
@@ -12,11 +12,18 @@ It supports two workflows:
 - Realtime microphone transcription with ElevenLabs, OpenAI, and xAI Grok.
 - File transcription with ElevenLabs, Aqua, Cohere, Grok, and OpenAI.
 
+## Highlights
+
+- One `SpeechService` facade for SwiftUI apps.
+- Provider-neutral realtime transcript state.
+- Provider-neutral file transcription for simple text results.
+- Provider-specific options and detailed responses when you need timestamps, diarization, usage metadata, or model-specific controls.
+- Security-scoped file overloads for document picker workflows.
+- A runnable iOS demo app for trying realtime transcription, recorded dictation uploads, and file transcription.
+
 ## Status
 
-SpeechKit `0.9.0` is a pre-1.0 validation release for testing the package integration, provider support, and documentation before the official `1.0.0` release.
-
-The public API is being tidied before `1.0.0`, so source-breaking changes may still ship before the stable release.
+SpeechKit `1.0.0` is the first stable release of the package API for production integration. Future source-breaking API changes will ship in a new major version.
 
 ## Sponsor
 > <img width="1500" height="500" alt="SpeechKit" src="https://github.com/user-attachments/assets/3f3b68e7-37fb-46c7-a139-2b513b2e184c" />
@@ -59,6 +66,30 @@ Then import it where you need speech features:
 ```swift
 import SpeechKit
 ```
+
+## Try the Demo App
+
+This repository includes `SpeechKitDemo`, a SwiftUI iOS app that exercises the package in a real app target. Use it to try realtime transcription, record-and-upload dictation, standalone file transcription, provider selection, and API-key settings.
+
+To run it on your device:
+
+1. Clone this repository and open `Examples/SpeechKitDemo/SpeechKitDemo.xcodeproj` in Xcode.
+2. Select the `SpeechKitDemo` scheme.
+3. Select your connected iPhone or iPad as the run destination.
+4. If Xcode asks for signing changes, select your development team in the `SpeechKitDemo` target's Signing & Capabilities settings. You may also need to change the bundle identifier to one that is unique to your team.
+5. Build and run with `Product > Run`.
+6. In the app, open Settings, add the provider API keys you want to test, then choose Realtime or Dictation from the controls menu.
+
+The demo project references the local package at the repository root, so edits under `Sources/SpeechKit` are picked up by the demo while you develop. The demo keeps its app-only code and dependencies under `Examples/SpeechKitDemo` so package consumers only receive the `SpeechKit` library product.
+
+## Built with SpeechKit
+
+These apps use SpeechKit in real workflows:
+
+- SpeechKit Demo: the included sample app for realtime transcription, recorded dictation uploads, and file transcription.
+- Marker: a session marker and chaptering app that uses SpeechKit for speech-driven marker and transcript workflows.
+
+If your app uses SpeechKit, open a pull request adding it here with a short description and a link.
 
 ## API Key Safety
 
@@ -362,12 +393,6 @@ The `options` value must match the selected file provider. Passing `.cohere(...)
 
 Open the package in Xcode and choose `Product > Build Documentation` to view the DocC reference and provider how-to guides.
 
-## Repository Metadata
+## License
 
-Suggested GitHub description:
-
-> Swift speech-to-text package for realtime microphone and audio file transcription across ElevenLabs, OpenAI, xAI Grok, Aqua, and Cohere.
-
-Suggested GitHub topics:
-
-`swift`, `swift-package`, `swiftui`, `speech-to-text`, `transcription`, `realtime-transcription`, `audio`, `openai`, `elevenlabs`, `xai`, `grok`, `cohere`, `aqua`, `ios`, `macos`, `watchos`, `visionos`
+SpeechKit is available under the Apache License 2.0. See [LICENSE](LICENSE) for details.
