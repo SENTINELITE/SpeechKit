@@ -1,10 +1,10 @@
 # Realtime Transcription
 
-Stream microphone audio to ElevenLabs and observe partial and committed transcript text.
+Stream microphone audio to ElevenLabs, OpenAI, or xAI Grok and observe partial and committed transcript text.
 
 ## Overview
 
-Realtime transcription requires an ``ElevenLabsConfig``. Call ``SpeechService/startListening()`` and ``SpeechService/stopListening()`` from an asynchronous context.
+Realtime transcription requires a provider configuration for the selected realtime provider. Call ``SpeechService/startListening(provider:)`` and ``SpeechService/stopListening()`` from an asynchronous context. Calling ``SpeechService/startListening()`` without a provider starts ElevenLabs transcription. ``SpeechService`` is the recommended app-facing API; provider-specific realtime services are available when an app intentionally needs direct provider control.
 
 ```swift
 struct TranscriptView: View {
@@ -12,19 +12,19 @@ struct TranscriptView: View {
 
     var body: some View {
         VStack(alignment: .leading) {
-            Text(speech.fullTranscript)
+            Text(speech.transcriptText)
 
-            if !speech.partialTranscript.isEmpty {
-                Text(speech.partialTranscript)
+            if let partial = speech.partialTranscriptEntry {
+                Text(partial.text)
                     .foregroundStyle(.secondary)
             }
 
-            Button(speech.connectionState.isListening ? "Stop" : "Start") {
+            Button(speech.realtimeConnectionState.isListening ? "Stop" : "Start") {
                 Task {
-                    if speech.connectionState.isActive {
+                    if speech.realtimeConnectionState.isActive {
                         await speech.stopListening()
                     } else {
-                        await speech.startListening()
+                        await speech.startListening(provider: .grok)
                     }
                 }
             }
@@ -33,25 +33,61 @@ struct TranscriptView: View {
 }
 ```
 
-``SpeechService`` exposes committed entries through ``SpeechService/committedTranscripts`` and the joined text through ``SpeechService/fullTranscript``. Call ``SpeechService/clearTranscripts()`` when the user starts a new dictation session.
+``SpeechService`` exposes committed entries through ``SpeechService/transcriptEntries``, the active partial entry through ``SpeechService/partialTranscriptEntry``, and the joined text through ``SpeechService/transcriptText``. Call ``SpeechService/clearTranscript()`` when the user starts a new dictation session.
+
+Start a specific realtime provider by passing ``SpeechRealtimeProvider``:
+
+```swift
+await speech.startListening(provider: .openAI)
+await speech.startListening(provider: .grok)
+```
+
+Configure provider-specific realtime defaults when creating ``SpeechService``:
+
+```swift
+let speech = SpeechService(
+    openAI: OpenAIConfiguration(
+        apiKey: "<OPENAI_API_KEY>",
+        realtimeTranscriptionModelID: .gpt4oTranscribe,
+        realtimeDelay: .milliseconds(300),
+        realtimeCommitInterval: 1
+    ),
+    grok: GrokConfiguration(
+        apiKey: "<XAI_API_KEY>",
+        realtimeOptions: GrokRealtimeOptions(
+            language: .english,
+            keyTerms: ["SpeechKit"]
+        )
+    )
+)
+```
+
+For provider-by-provider setup examples, see <doc:ProviderHowToGuides>.
 
 ## Failure Handling
 
-When ElevenLabs is not configured, ``SpeechService/startListening()`` sets ``SpeechService/connectionState`` to ``ElevenLabsService/ConnectionState/error(_:)`` and exposes ``SpeechError/providerNotConfigured(_:)`` through ``SpeechService/lastError``. ElevenLabs-specific failures surface as ``ElevenLabsError`` when using ``ElevenLabsService`` directly.
+When a realtime provider is not configured, ``SpeechService/startListening(provider:)`` sets ``SpeechService/realtimeConnectionState`` to ``SpeechRealtimeConnectionState/error(_:)`` and exposes ``SpeechError/realtimeProviderNotConfigured(_:)`` through ``SpeechService/lastError``. Provider-specific failures still surface when using provider services directly.
 
 ## Topics
 
 ### Realtime State
 
+- ``SpeechService/realtimeConnectionState``
 - ``SpeechService/connectionState``
-- ``SpeechService/partialTranscript``
-- ``SpeechService/committedTranscripts``
-- ``SpeechService/fullTranscript``
+- ``SpeechService/partialTranscriptEntry``
+- ``SpeechService/partialTranscriptText``
+- ``SpeechService/transcriptEntries``
+- ``SpeechService/transcriptText``
 - ``SpeechService/lastError``
+- ``SpeechError/realtimeProviderNotConfigured(_:)``
+- ``SpeechRealtimeProvider``
+- ``SpeechRealtimeConnectionState``
+- ``SpeechTranscriptEntry``
+- ``SpeechTranscriptWord``
 
 ### Realtime Operations
 
 - ``SpeechService/startListening()``
+- ``SpeechService/startListening(provider:)``
 - ``SpeechService/stopListening()``
-- ``SpeechService/clearTranscripts()``
-
+- ``SpeechService/clearTranscript()``

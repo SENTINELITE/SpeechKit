@@ -108,7 +108,7 @@ struct CommittedTranscript: Decodable, Sendable {
 struct CommittedTranscriptWithTimestamps: Decodable, Sendable {
     let text: String
     let languageCode: String?
-    let words: [WordTimestamp]?
+    let words: [ElevenLabsWordTimestamp]?
     
     private enum CodingKeys: String, CodingKey {
         case text
@@ -118,7 +118,7 @@ struct CommittedTranscriptWithTimestamps: Decodable, Sendable {
 }
 
 /// A word-level timestamp returned by ElevenLabs transcription.
-public struct WordTimestamp: Decodable, Sendable {
+public struct ElevenLabsWordTimestamp: Decodable, Sendable {
     /// The word or token text.
     public let text: String
     /// The start time, in seconds.
@@ -131,6 +131,17 @@ public struct WordTimestamp: Decodable, Sendable {
     public let logprob: Double?
     /// Optional character-level data reported by ElevenLabs.
     public let characters: [String]?
+}
+
+extension SpeechTranscriptWord {
+    init(_ word: ElevenLabsWordTimestamp) {
+        self.init(
+            text: word.text,
+            start: word.start,
+            end: word.end,
+            confidence: word.logprob
+        )
+    }
 }
 
 // MARK: - Errors

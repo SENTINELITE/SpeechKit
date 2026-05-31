@@ -10,7 +10,7 @@ enum SpeechFileUploadSupport {
     static func validateFileExtension(
         _ fileURL: URL,
         allowedExtensions: Set<String>,
-        provider: SpeechFileProvider
+        provider: SpeechFileTranscriptionProvider
     ) throws {
         let fileExtension = fileURL.pathExtension.lowercased()
         guard allowedExtensions.contains(fileExtension) else {
@@ -24,7 +24,7 @@ enum SpeechFileUploadSupport {
     static func validateFileSize(
         _ fileURL: URL,
         maxUploadBytes: Int64,
-        provider: SpeechFileProvider
+        provider: SpeechFileTranscriptionProvider
     ) throws {
         do {
             let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)

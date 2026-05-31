@@ -1,5 +1,17 @@
 import Foundation
 
+struct ElevenLabsFileTranscriptionResponse: Decodable, Sendable {
+    let text: String
+    let languageCode: String?
+    let words: [ElevenLabsWordTimestamp]?
+
+    private enum CodingKeys: String, CodingKey {
+        case text
+        case languageCode = "language_code"
+        case words
+    }
+}
+
 struct ElevenLabsFileTranscriptionClient {
     private let apiKey: String
     private let urlSession: URLSession
@@ -24,7 +36,7 @@ struct ElevenLabsFileTranscriptionClient {
         }
 
         do {
-            let decoded = try JSONDecoder().decode(ElevenLabsService.FileTranscriptionResponse.self, from: data)
+            let decoded = try JSONDecoder().decode(ElevenLabsFileTranscriptionResponse.self, from: data)
             return decoded.text
         } catch {
             throw ElevenLabsError.decodingFailed(error.localizedDescription)

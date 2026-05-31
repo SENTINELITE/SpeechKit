@@ -1,112 +1,102 @@
-import AVFoundation
 import Foundation
-import OSLog
 import SwiftUI
 
-/// A SwiftUI-observable ElevenLabs realtime transcription service.
+/// A SwiftUI-observable Grok realtime transcription service.
 @Observable
 @MainActor
-public final class ElevenLabsService {
-    
-    // MARK: - Public State
-    
+public final class GrokRealtimeService {
     /// The current realtime connection state.
     public private(set) var connectionState: SpeechRealtimeConnectionState = .disconnected
     /// The latest partial transcript text.
     public private(set) var partialTranscriptText: String = ""
+    /// The latest partial transcript entry.
+    public private(set) var partialTranscriptEntry: SpeechTranscriptEntry?
     /// The committed transcript entries.
     public private(set) var transcriptEntries: [SpeechTranscriptEntry] = []
     /// The most recent realtime error, if any.
     public private(set) var lastError: Error?
-    
-    // MARK: - Configuration
-    
-    /// The ElevenLabs API key used for realtime and file transcription.
-    public var apiKey: String
-    /// The ElevenLabs realtime model used when listening.
-    public var realtimeModelID: ElevenLabsModelID
-    
-    // MARK: - Private
-    
-    private let audioManager = AudioCaptureManager()
-    private let webSocket = ElevenLabsWebSocket()
-    private var listeningTask: Task<Void, Never>?
-    private var lifecycleRunID = UUID()
-    private static let logger = Logger(subsystem: "com.sentinelite.SpeechKit", category: "ElevenLabsRealtime")
-    // MARK: - Types
-    
-    /// A nested name for the shared realtime connection state.
-    public typealias ConnectionState = SpeechRealtimeConnectionState
-    
-    /// A committed realtime transcript entry.
-    /// A nested name for normalized realtime transcript entries.
-    public typealias TranscriptEntry = SpeechTranscriptEntry
 
-    // MARK: - Computed Properties
-    
+    /// The Grok API key used for realtime transcription.
+    public var apiKey: String
+    /// Options for the Grok realtime transcription session.
+    public var options: GrokRealtimeOptions {
+        didSet {
+            audioManager.setTargetSampleRate(Double(options.sampleRate))
+        }
+    }
+
+    private let audioManager: AudioCaptureManager
+    private let webSocket = GrokRealtimeWebSocket()
+    private var listeningTask: Task<Void, Never>?
+    private var committedFingerprints: Set<String> = []
+    private var lifecycleRunID = UUID()
+
     /// The committed transcript text joined with spaces.
     public var transcriptText: String {
         transcriptEntries.map(\.text).joined(separator: " ")
     }
 
-    // MARK: - Initialization
-    
-    /// Creates an ElevenLabs realtime transcription service.
-    public init(apiKey: String = "", realtimeModelID: ElevenLabsModelID = .scribeV2Realtime) {
+    /// Creates a Grok realtime transcription service.
+    public init(apiKey: String = "", options: GrokRealtimeOptions = GrokRealtimeOptions()) {
         self.apiKey = apiKey
-        self.realtimeModelID = realtimeModelID
+        self.options = options
+        self.audioManager = AudioCaptureManager(targetSampleRate: Double(options.sampleRate))
     }
-    
-    // MARK: - Public Methods
-    
+
     /// Starts realtime microphone transcription.
     public func startListening() async {
         guard !connectionState.isLifecycleActive else { return }
 
         guard !apiKey.isEmpty else {
-            connectionState = .error("API key not configured")
-            lastError = ElevenLabsError.apiKeyMissing
+            connectionState = .error("Grok is not configured")
+            lastError = GrokRealtimeError.apiKeyMissing
+            return
+        }
+
+        do {
+            try options.validate()
+        } catch {
+            connectionState = .error(error.localizedDescription)
+            lastError = error
             return
         }
 
         let runID = beginLifecycleRun()
         connectionState = .connecting
         partialTranscriptText = ""
+        partialTranscriptEntry = nil
         lastError = nil
-        
+
         let hasPermission = await audioManager.requestPermission()
         guard isCurrentLifecycleRun(runID) else { return }
         guard hasPermission else {
             connectionState = .error("Microphone permission denied")
-            lastError = ElevenLabsError.permissionDenied
+            lastError = SpeechAudioCaptureError.permissionDenied
             return
         }
 
         let apiKey = apiKey
-        let realtimeModelID = realtimeModelID
-        
+        let options = options
+
         listeningTask = Task {
             do {
-                let messageStream = try await webSocket.connect(apiKey: apiKey, modelID: realtimeModelID)
+                let messageStream = try await webSocket.connect(apiKey: apiKey, options: options)
                 guard isCurrentLifecycleRun(runID) else {
                     await webSocket.disconnect()
                     return
                 }
-                
                 var sendTask: Task<Void, Never>?
-                
+
                 for try await message in messageStream {
                     if Task.isCancelled { break }
                     guard isCurrentLifecycleRun(runID) else { break }
-                    
+
                     switch message {
-                    case .sessionStarted(let session):
-                        connectionState = .connected(sessionID: session.sessionID)
-                        
+                    case .transcriptCreated(let created):
+                        connectionState = .connected(sessionID: created.sessionID ?? "")
                         do {
                             let audioStream = try audioManager.startCapture()
                             connectionState = .listening
-                            
                             sendTask = Task {
                                 await sendAudioChunks(audioStream, runID: runID)
                             }
@@ -116,47 +106,37 @@ public final class ElevenLabsService {
                                 connectionState = .error("Failed to start audio capture")
                             }
                         }
-                        
-                    case .partialTranscript(let partial):
-                        partialTranscriptText = partial.text
-                        
-                    case .committedTranscript(let committed):
-                        if !committed.text.isEmpty {
-                            let entry = SpeechTranscriptEntry(provider: .elevenLabs, text: committed.text)
-                            transcriptEntries.append(entry)
-                            partialTranscriptText = ""
-                        }
-                        
-                    case .committedTranscriptWithTimestamps(let committed):
-                        if !committed.text.isEmpty {
-                            let entry = SpeechTranscriptEntry(
-                                provider: .elevenLabs,
-                                text: committed.text,
-                                words: committed.words?.map(SpeechTranscriptWord.init) ?? []
-                            )
-                            transcriptEntries.append(entry)
-                            partialTranscriptText = ""
-                        }
-                        
-                    case .unknown(let type):
-                        Self.logger.debug("Ignoring unknown ElevenLabs realtime message type: \(type, privacy: .public)")
+
+                    case .transcriptPartial(let transcript):
+                        handleTranscript(transcript)
+
+                    case .transcriptDone(let transcript):
+                        commitTranscriptIfNeeded(transcript, forceUtteranceFinal: true)
+                        partialTranscriptText = ""
+                        partialTranscriptEntry = nil
+
+                    case .error(let message):
+                        lastError = GrokRealtimeError.connectionFailed(message)
+                        connectionState = .error(message)
+
+                    case .unknown:
+                        break
                     }
                 }
-                
+
                 sendTask?.cancel()
-                
             } catch {
                 if !Task.isCancelled, isCurrentLifecycleRun(runID) {
                     lastError = error
                     connectionState = .error(error.localizedDescription)
                 }
             }
-            
+
             await cleanupAfterStop(runID: runID)
         }
     }
-    
-    /// Stops realtime microphone transcription and disconnects the WebSocket.
+
+    /// Stops realtime microphone transcription and disconnects from Grok.
     public func stopListening() async {
         guard connectionState.isLifecycleActive || listeningTask != nil || audioManager.isCapturing else {
             connectionState = .disconnected
@@ -167,22 +147,24 @@ public final class ElevenLabsService {
         connectionState = .stopping
         listeningTask?.cancel()
         listeningTask = nil
-        
+
         do {
-            try await webSocket.sendEndOfStream()
+            try await webSocket.sendAudioDone()
         } catch {
-            // Ignore errors when stopping
+            // Ignore errors when stopping.
         }
-        
+
         await webSocket.disconnect()
         audioManager.stopCapture()
         connectionState = .disconnected
     }
-    
+
     /// Clears committed and partial realtime transcript text.
     public func clearTranscript() {
         transcriptEntries.removeAll()
         partialTranscriptText = ""
+        partialTranscriptEntry = nil
+        committedFingerprints.removeAll()
     }
 
     /// Sets lifecycle state for tests that exercise facade orchestration without opening audio devices.
@@ -190,16 +172,62 @@ public final class ElevenLabsService {
         connectionState = state
     }
 
-    // MARK: - Private Methods
-    
+    private func handleTranscript(_ transcript: GrokTranscript) {
+        if transcript.isFinal == true {
+            commitTranscriptIfNeeded(transcript, forceUtteranceFinal: false)
+            partialTranscriptText = ""
+            partialTranscriptEntry = nil
+        } else {
+            let entry = makeEntry(from: transcript, isFinal: false, isUtteranceFinal: false)
+            partialTranscriptEntry = entry
+            partialTranscriptText = entry.text
+        }
+    }
+
+    private func commitTranscriptIfNeeded(_ transcript: GrokTranscript, forceUtteranceFinal: Bool) {
+        let entry = makeEntry(
+            from: transcript,
+            isFinal: true,
+            isUtteranceFinal: forceUtteranceFinal || transcript.speechFinal == true
+        )
+        guard !entry.text.isEmpty else { return }
+
+        let sourceID = entry.sourceID ?? ""
+        let start = entry.start.map { String($0) } ?? ""
+        let duration = entry.duration.map { String($0) } ?? ""
+        let channelIndex = entry.channelIndex.map { String($0) } ?? ""
+        let fingerprint = [sourceID, entry.text, start, duration, channelIndex].joined(separator: "|")
+
+        guard !committedFingerprints.contains(fingerprint) else { return }
+        committedFingerprints.insert(fingerprint)
+        transcriptEntries.append(entry)
+    }
+
+    private func makeEntry(
+        from transcript: GrokTranscript,
+        isFinal: Bool,
+        isUtteranceFinal: Bool
+    ) -> SpeechTranscriptEntry {
+        SpeechTranscriptEntry(
+            provider: .grok,
+            text: transcript.text,
+            start: transcript.start,
+            duration: transcript.duration,
+            isFinal: isFinal,
+            isUtteranceFinal: isUtteranceFinal,
+            channelIndex: transcript.channelIndex,
+            speaker: transcript.speaker,
+            words: transcript.words?.map(SpeechTranscriptWord.init) ?? []
+        )
+    }
+
     private func sendAudioChunks(_ stream: AsyncStream<Data>, runID: UUID) async {
         for await audioData in stream {
             if Task.isCancelled { break }
             guard isCurrentLifecycleRun(runID) else { break }
-            
-            let chunk = InputAudioChunk(audioData: audioData)
+
             do {
-                try await webSocket.send(chunk)
+                try await webSocket.sendAudio(audioData)
             } catch {
                 if !Task.isCancelled, isCurrentLifecycleRun(runID) {
                     await MainActor.run {
@@ -210,7 +238,7 @@ public final class ElevenLabsService {
             }
         }
     }
-    
+
     private func cleanupAfterStop(runID: UUID) async {
         guard isCurrentLifecycleRun(runID) else { return }
         audioManager.stopCapture()
@@ -233,5 +261,4 @@ public final class ElevenLabsService {
     private func isCurrentLifecycleRun(_ runID: UUID) -> Bool {
         lifecycleRunID == runID
     }
-
 }

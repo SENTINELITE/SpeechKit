@@ -4,13 +4,14 @@ Configure only the transcription providers your app uses.
 
 ## Overview
 
-``SpeechService`` accepts optional provider configuration values. Realtime transcription requires ``ElevenLabsConfig``. File transcription requires configuration for the selected provider.
+``SpeechService`` accepts optional provider configuration values. Realtime transcription requires a configuration for the selected provider. File transcription requires configuration for the selected provider.
 
 ```swift
 let speech = SpeechService(
-    aqua: AquaConfig(apiKey: "<AQUA_API_KEY>"),
-    cohere: CohereConfig(apiKey: "<COHERE_API_KEY>"),
-    grok: GrokConfig(apiKey: "<XAI_API_KEY>")
+    aqua: AquaConfiguration(apiKey: "<AQUA_API_KEY>"),
+    cohere: CohereConfiguration(apiKey: "<COHERE_API_KEY>"),
+    grok: GrokConfiguration(apiKey: "<XAI_API_KEY>"),
+    openAI: OpenAIConfiguration(apiKey: "<OPENAI_API_KEY>")
 )
 ```
 
@@ -18,32 +19,46 @@ Each configuration type supplies provider defaults. Request-level options overri
 
 ```swift
 let speech = SpeechService(
-    elevenLabs: ElevenLabsConfig(
+    elevenLabs: ElevenLabsConfiguration(
         apiKey: "<ELEVENLABS_API_KEY>",
         realtimeModelID: .scribeV2Realtime,
-        fileModelID: .scribeV1
+        fileTranscriptionModelID: .scribeV1
+    ),
+    openAI: OpenAIConfiguration(
+        apiKey: "<OPENAI_API_KEY>",
+        realtimeTranscriptionModelID: .gpt4oTranscribe,
+        realtimeDelay: .milliseconds(300),
+        realtimeCommitInterval: 1
+    ),
+    grok: GrokConfiguration(
+        apiKey: "<XAI_API_KEY>",
+        realtimeOptions: GrokRealtimeOptions(
+            language: .english,
+            keyTerms: ["SpeechKit"]
+        )
     )
 )
 ```
 
 ## Raw Language Codes
 
-Provider configs also include throwing initializers that accept raw language codes when your app stores codes as strings.
+Provider configurations also include throwing initializers that accept raw language codes when your app stores codes as strings.
 
 ```swift
-let cohere = try CohereConfig(apiKey: "<COHERE_API_KEY>", languageCode: "de")
-let grok = try GrokConfig(apiKey: "<XAI_API_KEY>", languageCode: "fil")
-let aqua = try AquaConfig(apiKey: "<AQUA_API_KEY>", languageCode: "ja")
+let cohere = try CohereConfiguration(apiKey: "<COHERE_API_KEY>", languageCode: "de")
+let grok = try GrokConfiguration(apiKey: "<XAI_API_KEY>", languageCode: "fil")
+let aqua = try AquaConfiguration(apiKey: "<AQUA_API_KEY>", languageCode: "ja")
 ```
 
 ## Topics
 
 ### Configurations
 
-- ``ElevenLabsConfig``
-- ``AquaConfig``
-- ``CohereConfig``
-- ``GrokConfig``
+- ``ElevenLabsConfiguration``
+- ``AquaConfiguration``
+- ``CohereConfiguration``
+- ``GrokConfiguration``
+- ``OpenAIConfiguration``
 
 ### Model Identifiers
 
@@ -51,10 +66,19 @@ let aqua = try AquaConfig(apiKey: "<AQUA_API_KEY>", languageCode: "ja")
 - ``AquaModelID``
 - ``CohereModelID``
 - ``GrokModelID``
+- ``OpenAIFileTranscriptionModelID``
+- ``OpenAIRealtimeTranscriptionModelID``
+- ``OpenAIRealtimeSessionModelID``
+
+### Realtime Options
+
+- ``GrokRealtimeOptions``
+- ``GrokRealtimeAudioEncoding``
+- ``OpenAIRealtimeSessionOptions``
+- ``OpenAIRealtimeDelay``
 
 ### Language Hints
 
 - ``AquaLanguage``
 - ``CohereLanguage``
 - ``GrokLanguage``
-

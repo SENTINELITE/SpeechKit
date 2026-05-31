@@ -13,8 +13,8 @@ import SwiftUI
 @main
 struct DemoApp: App {
     @State private var speech = SpeechService(
-        elevenLabs: ElevenLabsConfig(apiKey: "<ELEVENLABS_API_KEY>"),
-        cohere: CohereConfig(apiKey: "<COHERE_API_KEY>")
+        elevenLabs: ElevenLabsConfiguration(apiKey: "<ELEVENLABS_API_KEY>"),
+        cohere: CohereConfiguration(apiKey: "<COHERE_API_KEY>")
     )
 
     var body: some Scene {
@@ -33,7 +33,7 @@ struct ContentView: View {
     @Environment(\.speechService) private var speech
 
     var body: some View {
-        Text(speech.fullTranscript)
+        Text(speech.transcriptText)
     }
 }
 ```

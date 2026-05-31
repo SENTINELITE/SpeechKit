@@ -21,7 +21,7 @@ let response = try await speech.transcribeGrokAudioFile(
 )
 ```
 
-If access cannot be started, SpeechKit throws ``SpeechError/providerFailure(provider:reason:)`` from provider-neutral APIs or ``ElevenLabsError/securityScopeDenied`` when using ``ElevenLabsService`` directly.
+If access cannot be started, SpeechKit throws ``SpeechError/providerFailure(provider:reason:)`` from provider-neutral APIs.
 
 ## Topics
 
@@ -33,5 +33,4 @@ If access cannot be started, SpeechKit throws ``SpeechError/providerFailure(prov
 
 - ``SpeechService/transcribeAquaAudioFile(securityScopedURL:options:)``
 - ``SpeechService/transcribeGrokAudioFile(securityScopedURL:options:)``
-- ``ElevenLabsService/transcribeAudioFile(securityScopedURL:modelID:)``
-
+- ``SpeechService/transcribeOpenAIAudioFile(securityScopedURL:options:)``

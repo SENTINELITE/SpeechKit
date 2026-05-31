@@ -154,6 +154,289 @@ struct FileTranscriptionClientTests {
         #expect(body.contains("name=\"file\"; filename=\"sample.wav\""))
     }
 
+    @Test("OpenAI multipart request includes model, response format, and optional fields")
+    func openAIRequestIncludesModelResponseFormatAndOptionalFields() throws {
+        let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
+        let fileURL = temporaryAudioFileURL(named: "sample.webm")
+
+        let request = try client.makeRequest(
+            file: fileURL,
+            options: OpenAIFileTranscriptionOptions(
+                modelID: .gpt4oTranscribe,
+                language: "en",
+                prompt: "Use product spellings.",
+                temperature: 0.2,
+                includeLogprobs: true,
+                timeoutInterval: 45
+            )
+        )
+        let body = try #require(request.httpBody).utf8String
+
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer openai-key")
+        #expect(request.timeoutInterval == 45)
+        #expect(body.contains("name=\"file\"; filename=\"sample.webm\""))
+        #expect(body.contains("name=\"model\""))
+        #expect(body.contains("\r\n\r\ngpt-4o-transcribe\r\n"))
+        #expect(body.contains("name=\"response_format\""))
+        #expect(body.contains("\r\n\r\njson\r\n"))
+        #expect(body.contains("name=\"language\""))
+        #expect(body.contains("\r\n\r\nen\r\n"))
+        #expect(body.contains("name=\"prompt\""))
+        #expect(body.contains("Use product spellings."))
+        #expect(body.contains("name=\"temperature\""))
+        #expect(body.contains("\r\n\r\n0.2\r\n"))
+        #expect(body.contains("name=\"include[]\""))
+        #expect(body.contains("\r\n\r\nlogprobs\r\n"))
+    }
+
+    @Test("OpenAI Whisper timestamp request uses verbose JSON")
+    func openAIWhisperTimestampRequestUsesVerboseJSON() throws {
+        let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
+        let fileURL = temporaryAudioFileURL(named: "sample.wav")
+
+        let request = try client.makeRequest(
+            file: fileURL,
+            options: OpenAIFileTranscriptionOptions(
+                modelID: .whisper1,
+                timestampGranularities: [.word, .segment]
+            )
+        )
+        let body = try #require(request.httpBody).utf8String
+
+        #expect(body.contains("name=\"response_format\""))
+        #expect(body.contains("\r\n\r\nverbose_json\r\n"))
+        #expect(body.contains("name=\"timestamp_granularities[]\""))
+        #expect(body.contains("\r\n\r\nword\r\n"))
+        #expect(body.contains("\r\n\r\nsegment\r\n"))
+    }
+
+    @Test("OpenAI diarize model requests diarized JSON")
+    func openAIDiarizeModelRequestsDiarizedJSON() throws {
+        let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
+        let fileURL = temporaryAudioFileURL(named: "sample.mp3")
+
+        let request = try client.makeRequest(
+            file: fileURL,
+            options: OpenAIFileTranscriptionOptions(modelID: .gpt4oTranscribeDiarize)
+        )
+        let body = try #require(request.httpBody).utf8String
+
+        #expect(body.contains("name=\"response_format\""))
+        #expect(body.contains("\r\n\r\ndiarized_json\r\n"))
+        #expect(body.contains("name=\"chunking_strategy\""))
+        #expect(body.contains("\r\n\r\nauto\r\n"))
+    }
+
+    @Test("OpenAI diarize request includes VAD chunking and known speakers")
+    func openAIDiarizeRequestIncludesVADChunkingAndKnownSpeakers() throws {
+        let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
+        let fileURL = temporaryAudioFileURL(named: "sample.wav")
+
+        let request = try client.makeRequest(
+            file: fileURL,
+            options: OpenAIFileTranscriptionOptions(
+                modelID: .gpt4oTranscribeDiarize,
+                diarizationChunkingStrategy: .serverVAD(
+                    OpenAIDiarizationVADOptions(
+                        threshold: 0.4,
+                        prefixPaddingMilliseconds: 250,
+                        silenceDurationMilliseconds: 600
+                    )
+                ),
+                knownSpeakers: [
+                    OpenAIKnownSpeaker(name: "agent", referenceDataURL: "data:audio/wav;base64,AAA"),
+                    OpenAIKnownSpeaker(name: "customer", referenceDataURL: "data:audio/wav;base64,BBB")
+                ]
+            )
+        )
+        let body = try #require(request.httpBody).utf8String
+
+        #expect(body.contains("name=\"chunking_strategy\""))
+        #expect(body.contains("\"type\":\"server_vad\""))
+        #expect(body.contains("\"threshold\":0.4"))
+        #expect(body.contains("\"prefix_padding_ms\":250"))
+        #expect(body.contains("\"silence_duration_ms\":600"))
+        #expect(body.contains("name=\"known_speaker_names[]\""))
+        #expect(body.contains("\r\n\r\nagent\r\n"))
+        #expect(body.contains("\r\n\r\ncustomer\r\n"))
+        #expect(body.contains("name=\"known_speaker_references[]\""))
+        #expect(body.contains("\r\n\r\ndata:audio/wav;base64,AAA\r\n"))
+        #expect(body.contains("\r\n\r\ndata:audio/wav;base64,BBB\r\n"))
+    }
+
+    @Test("OpenAI rejects unsupported file extension before request creation")
+    func openAIRejectsUnsupportedFileExtension() {
+        let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
+        let fileURL = temporaryAudioFileURL(named: "sample.flac")
+
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "Unsupported file extension: flac.")) {
+            _ = try client.makeRequest(file: fileURL)
+        }
+    }
+
+    @Test("OpenAI rejects files over 25 MB before request creation")
+    func openAIRejectsOversizedFile() throws {
+        let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
+        let fileURL = try temporarySparseFileURL(named: "large.mp3", size: 25 * 1024 * 1024 + 1)
+
+        #expect(throws: SpeechError.uploadFailed(provider: .openAI, reason: "Audio file exceeds 26214400 byte limit.")) {
+            _ = try client.makeRequest(file: fileURL)
+        }
+    }
+
+    @Test("OpenAI rejects timestamp granularities for GPT models")
+    func openAIRejectsTimestampGranularitiesForGPTModels() {
+        let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
+        let fileURL = temporaryAudioFileURL(named: "sample.wav")
+
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "timestampGranularities are only supported with whisper-1.")) {
+            _ = try client.makeRequest(
+                file: fileURL,
+                options: OpenAIFileTranscriptionOptions(timestampGranularities: [.word])
+            )
+        }
+    }
+
+    @Test("OpenAI rejects diarize-only options with non-diarize models")
+    func openAIRejectsDiarizeOnlyOptionsWithNonDiarizeModels() {
+        let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
+        let fileURL = temporaryAudioFileURL(named: "sample.wav")
+
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "knownSpeakers require gpt-4o-transcribe-diarize.")) {
+            _ = try client.makeRequest(
+                file: fileURL,
+                options: OpenAIFileTranscriptionOptions(
+                    knownSpeakers: [OpenAIKnownSpeaker(name: "agent", referenceDataURL: "data:audio/wav;base64,AAA")]
+                )
+            )
+        }
+    }
+
+    @Test("OpenAI rejects unsupported diarize prompt and logprobs")
+    func openAIRejectsUnsupportedDiarizePromptAndLogprobs() {
+        let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
+        let fileURL = temporaryAudioFileURL(named: "sample.wav")
+
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "prompt is not supported with gpt-4o-transcribe-diarize.")) {
+            _ = try client.makeRequest(
+                file: fileURL,
+                options: OpenAIFileTranscriptionOptions(
+                    modelID: .gpt4oTranscribeDiarize,
+                    prompt: "Use product spelling."
+                )
+            )
+        }
+
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "includeLogprobs is not supported with gpt-4o-transcribe-diarize.")) {
+            _ = try client.makeRequest(
+                file: fileURL,
+                options: OpenAIFileTranscriptionOptions(
+                    modelID: .gpt4oTranscribeDiarize,
+                    includeLogprobs: true
+                )
+            )
+        }
+    }
+
+    @Test("OpenAI rejects invalid diarize VAD and speaker references")
+    func openAIRejectsInvalidDiarizeVADAndSpeakerReferences() {
+        let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
+        let fileURL = temporaryAudioFileURL(named: "sample.wav")
+
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "knownSpeakers supports at most 4 speakers.")) {
+            _ = try client.makeRequest(
+                file: fileURL,
+                options: OpenAIFileTranscriptionOptions(
+                    modelID: .gpt4oTranscribeDiarize,
+                    knownSpeakers: (0..<5).map { index in
+                        OpenAIKnownSpeaker(name: "speaker\(index)", referenceDataURL: "data:audio/wav;base64,AAA")
+                    }
+                )
+            )
+        }
+
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "diarization VAD threshold must be between 0 and 1.")) {
+            _ = try client.makeRequest(
+                file: fileURL,
+                options: OpenAIFileTranscriptionOptions(
+                    modelID: .gpt4oTranscribeDiarize,
+                    diarizationChunkingStrategy: .serverVAD(OpenAIDiarizationVADOptions(threshold: 1.5))
+                )
+            )
+        }
+
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "knownSpeakers referenceDataURL must be an audio data URL.")) {
+            _ = try client.makeRequest(
+                file: fileURL,
+                options: OpenAIFileTranscriptionOptions(
+                    modelID: .gpt4oTranscribeDiarize,
+                    knownSpeakers: [OpenAIKnownSpeaker(name: "agent", referenceDataURL: "data:text/plain;base64,AAA")]
+                )
+            )
+        }
+    }
+
+    @Test("OpenAI detailed response decodes metadata")
+    func openAIDetailedResponseDecodesMetadata() throws {
+        let data = Data(
+            """
+            {
+              "text":"hello",
+              "language":"en",
+              "duration":1.2,
+              "usage":{"type":"tokens","input_tokens":10,"output_tokens":2,"total_tokens":12},
+              "logprobs":[{"token":"hello","logprob":-0.1,"bytes":[104,101]}],
+              "words":[{"word":"hello","start":0.0,"end":0.5}],
+              "segments":[{"id":0,"start":0.0,"end":0.5,"text":"hello"}],
+              "diarized_segments":[{"speaker":"speaker_0","start":0.0,"end":0.5,"text":"hello"}]
+            }
+            """.utf8
+        )
+
+        let response = try JSONDecoder().decode(OpenAIFileTranscriptionResponse.self, from: data)
+
+        #expect(response.text == "hello")
+        #expect(response.language == "en")
+        #expect(response.usage?.totalTokens == 12)
+        #expect(response.logprobs?.first?.token == "hello")
+        #expect(response.words?.first?.word == "hello")
+        #expect(response.segments?.first?.text == "hello")
+        #expect(response.diarizedSegments?.first?.speaker == "speaker_0")
+    }
+
+    @Test("OpenAI current diarized response decodes speaker segments without losing timestamp segments")
+    func openAICurrentDiarizedResponseDecodesSpeakerSegments() throws {
+        let data = Data(
+            """
+            {
+              "task": "transcribe",
+              "duration": 42.7,
+              "text": "Agent: hello",
+              "usage": {"type":"tokens","total_tokens":12},
+              "segments": [
+                {
+                  "type": "transcript.text.segment",
+                  "id": "seg_001",
+                  "speaker": "agent",
+                  "start": 0.0,
+                  "end": 1.5,
+                  "text": "Agent: hello"
+                }
+              ]
+            }
+            """.utf8
+        )
+
+        let response = try JSONDecoder().decode(OpenAIFileTranscriptionResponse.self, from: data)
+
+        #expect(response.text == "Agent: hello")
+        #expect(response.segments?.first?.text == "Agent: hello")
+        #expect(response.segments?.first?.id == nil)
+        #expect(response.diarizedSegments?.first?.speaker == "agent")
+        #expect(response.diarizedSegments?.first?.start == 0.0)
+        #expect(response.diarizedSegments?.first?.end == 1.5)
+    }
+
     @Test("Grok multipart request includes file before options")
     func grokRequestIncludesFileBeforeOptions() throws {
         let client = GrokFileTranscriptionClient(apiKey: "xai-key")

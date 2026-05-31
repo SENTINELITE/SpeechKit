@@ -7,7 +7,16 @@ final class AudioCaptureManager: @unchecked Sendable {
     
     private var audioEngine: AVAudioEngine?
     private var continuation: AsyncStream<Data>.Continuation?
-    private let targetSampleRate: Double = 16000
+    private var currentStream: AsyncStream<Data>?
+    private var targetSampleRate: Double
+
+    init(targetSampleRate: Double = 16000) {
+        self.targetSampleRate = targetSampleRate
+    }
+
+    func setTargetSampleRate(_ targetSampleRate: Double) {
+        self.targetSampleRate = targetSampleRate
+    }
     
     func requestPermission() async -> Bool {
         #if os(macOS)
@@ -31,6 +40,10 @@ final class AudioCaptureManager: @unchecked Sendable {
     }
     
     func startCapture() throws -> AsyncStream<Data> {
+        if isCapturing, let currentStream {
+            return currentStream
+        }
+
         #if os(iOS) || os(watchOS) || os(visionOS)
         try configureAudioSession()
         #endif
@@ -42,7 +55,8 @@ final class AudioCaptureManager: @unchecked Sendable {
         let inputFormat = inputNode.outputFormat(forBus: 0)
         
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
-            throw ElevenLabsError.audioEngineError("Invalid input format: \(inputFormat)")
+            self.audioEngine = nil
+            throw SpeechAudioCaptureError.audioEngineError("Invalid input format: \(inputFormat)")
         }
         
         guard let targetFormat = AVAudioFormat(
@@ -51,11 +65,13 @@ final class AudioCaptureManager: @unchecked Sendable {
             channels: 1,
             interleaved: true
         ) else {
-            throw ElevenLabsError.audioEngineError("Failed to create target audio format")
+            self.audioEngine = nil
+            throw SpeechAudioCaptureError.audioEngineError("Failed to create target audio format")
         }
         
         guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
-            throw ElevenLabsError.audioEngineError("Failed to create audio converter from \(inputFormat) to \(targetFormat)")
+            self.audioEngine = nil
+            throw SpeechAudioCaptureError.audioEngineError("Failed to create audio converter from \(inputFormat) to \(targetFormat)")
         }
         
         let stream = AsyncStream<Data> { continuation in
@@ -67,6 +83,7 @@ final class AudioCaptureManager: @unchecked Sendable {
                 }
             }
         }
+        currentStream = stream
         
         let captureBufferSize = AVAudioFrameCount(inputFormat.sampleRate * 0.1)
         
@@ -98,18 +115,35 @@ final class AudioCaptureManager: @unchecked Sendable {
             }
         }
         
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            inputNode.removeTap(onBus: 0)
+            self.audioEngine = nil
+            self.continuation?.finish()
+            self.continuation = nil
+            self.currentStream = nil
+            isCapturing = false
+            throw error
+        }
         isCapturing = true
         
         return stream
     }
     
     func stopCapture() {
+        guard audioEngine != nil || continuation != nil || isCapturing else {
+            isCapturing = false
+            currentStream = nil
+            return
+        }
+
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioEngine = nil
         continuation?.finish()
         continuation = nil
+        currentStream = nil
         isCapturing = false
     }
     
