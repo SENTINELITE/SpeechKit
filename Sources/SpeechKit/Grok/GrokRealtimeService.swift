@@ -30,6 +30,9 @@ public final class GrokRealtimeService {
     private var listeningTask: Task<Void, Never>?
     private var committedFingerprints: Set<String> = []
     private var lifecycleRunID = UUID()
+    private var isGracefulStopPending = false
+    private var gracefulStopWaiter: CheckedContinuation<Void, Never>?
+    private let gracefulStopTimeoutNanoseconds: UInt64 = 2_000_000_000
 
     /// The committed transcript text joined with spaces.
     public var transcriptText: String {
@@ -124,10 +127,12 @@ public final class GrokRealtimeService {
                         commitTranscriptIfNeeded(transcript, forceUtteranceFinal: true)
                         partialTranscriptText = ""
                         partialTranscriptEntry = nil
+                        finishGracefulStopWaiter()
 
                     case .error(let message):
                         lastError = GrokRealtimeError.connectionFailed(message)
                         connectionState = .error(message)
+                        finishGracefulStopWaiter()
 
                     case .unknown:
                         break
@@ -135,11 +140,13 @@ public final class GrokRealtimeService {
                 }
 
                 sendTask?.cancel()
+                finishGracefulStopWaiter()
             } catch {
                 if !Task.isCancelled, isCurrentLifecycleRun(runID) {
                     lastError = error
                     connectionState = .error(error.localizedDescription)
                 }
+                finishGracefulStopWaiter()
             }
 
             await cleanupAfterStop(runID: runID)
@@ -153,17 +160,21 @@ public final class GrokRealtimeService {
             return
         }
 
-        invalidateLifecycleRun()
         connectionState = .stopping
-        listeningTask?.cancel()
-        listeningTask = nil
+        audioManager.stopCapture()
+        commitPartialTranscriptBeforeStop()
+        isGracefulStopPending = true
 
         do {
             try await webSocket.sendAudioDone()
         } catch {
-            // Ignore errors when stopping.
+            finishGracefulStopWaiter()
         }
 
+        await waitForGracefulStop()
+        invalidateLifecycleRun()
+        listeningTask?.cancel()
+        listeningTask = nil
         await webSocket.disconnect()
         audioManager.stopCapture()
         connectionState = .disconnected
@@ -200,6 +211,32 @@ public final class GrokRealtimeService {
             isFinal: true,
             isUtteranceFinal: forceUtteranceFinal || transcript.speechFinal == true
         )
+        appendCommittedEntryIfNeeded(entry)
+    }
+
+    private func commitPartialTranscriptBeforeStop() {
+        guard let partialEntry = partialTranscriptEntry else { return }
+
+        let entry = SpeechTranscriptEntry(
+            provider: partialEntry.provider,
+            sourceID: partialEntry.sourceID,
+            text: partialEntry.text,
+            timestamp: partialEntry.timestamp,
+            start: partialEntry.start,
+            duration: partialEntry.duration,
+            isFinal: true,
+            isUtteranceFinal: true,
+            channelIndex: partialEntry.channelIndex,
+            speaker: partialEntry.speaker,
+            words: partialEntry.words
+        )
+
+        appendCommittedEntryIfNeeded(entry)
+        partialTranscriptText = ""
+        partialTranscriptEntry = nil
+    }
+
+    private func appendCommittedEntryIfNeeded(_ entry: SpeechTranscriptEntry) {
         guard !entry.text.isEmpty else { return }
 
         let sourceID = entry.sourceID ?? ""
@@ -211,6 +248,37 @@ public final class GrokRealtimeService {
         guard !committedFingerprints.contains(fingerprint) else { return }
         committedFingerprints.insert(fingerprint)
         transcriptEntries.append(entry)
+    }
+
+    private func waitForGracefulStop() async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { [weak self] in
+                await withCheckedContinuation { continuation in
+                    Task { @MainActor in
+                        guard let self, self.isGracefulStopPending else {
+                            continuation.resume()
+                            return
+                        }
+
+                        self.gracefulStopWaiter = continuation
+                    }
+                }
+            }
+
+            group.addTask { [gracefulStopTimeoutNanoseconds] in
+                try? await Task.sleep(nanoseconds: gracefulStopTimeoutNanoseconds)
+            }
+
+            await group.next()
+            finishGracefulStopWaiter()
+            group.cancelAll()
+        }
+    }
+
+    private func finishGracefulStopWaiter() {
+        isGracefulStopPending = false
+        gracefulStopWaiter?.resume()
+        gracefulStopWaiter = nil
     }
 
     private func makeEntry(

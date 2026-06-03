@@ -115,7 +115,7 @@ struct RealtimeTranscriptionView: View {
         }
 
         guard hasSelectedProviderKey else { return }
-        inputPreview.stop()
+        inputPreview.stop(deactivateAudioSession: false)
         speech.clearTranscript()
         resetRealtimeWords()
         await speech.startListening(provider: configuration.realtimeProvider.speechProvider)

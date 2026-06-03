@@ -225,14 +225,16 @@ final class DemoInputPreviewMonitor {
         isPreviewing = true
     }
 
-    /// Stops the passive meter and releases the audio session.
-    func stop() {
+    /// Stops the passive meter and optionally releases the audio session.
+    func stop(deactivateAudioSession: Bool = true) {
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioEngine = nil
         isPreviewing = false
         currentLevel = 0
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        if deactivateAudioSession {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
     }
 
     /// Smooths preview level changes for UI animation.
