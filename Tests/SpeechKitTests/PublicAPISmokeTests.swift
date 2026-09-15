@@ -5,6 +5,7 @@ import Testing
 @Suite("Public API Smoke Tests")
 struct PublicAPISmokeTests {
     @Test("OpenAI diarization public options are constructible")
+    @available(*, deprecated, message: "Covers OpenAI models scheduled for shutdown.")
     func openAIDiarizationPublicOptionsAreConstructible() {
         let speaker = OpenAIKnownSpeaker(
             name: "agent",
@@ -67,6 +68,31 @@ struct PublicAPISmokeTests {
         #expect(fileOptions.modelID == .gptTranscribe)
         #expect(realtimeOptions.transcriptionModelID == .gptLiveTranscribe)
         #expect(config.languages == ["en", "fr"])
+    }
+
+    @Test("Model allCases keep deprecated models in declaration order")
+    func modelAllCasesIncludeDeprecatedModels() {
+        #expect(OpenAIFileTranscriptionModelID.allCases.map(\.rawValue) == [
+            "whisper-1",
+            "gpt-4o-transcribe",
+            "gpt-4o-mini-transcribe",
+            "gpt-4o-mini-transcribe-2025-12-15",
+            "gpt-transcribe",
+            "gpt-4o-transcribe-diarize",
+        ])
+        #expect(OpenAIRealtimeTranscriptionModelID.allCases.map(\.rawValue) == [
+            "gpt-live-transcribe",
+            "gpt-transcribe",
+            "gpt-4o-transcribe",
+            "gpt-4o-mini-transcribe",
+            "gpt-4o-transcribe-latest",
+            "whisper-1",
+        ])
+        #expect(ElevenLabsModelID.allCases.map(\.rawValue) == [
+            "scribe_v2_realtime",
+            "scribe_v1",
+            "scribe_v2",
+        ])
     }
 
     @Test("ElevenLabs detailed file transcription response is public")

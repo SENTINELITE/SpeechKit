@@ -3,16 +3,31 @@ import Foundation
 /// OpenAI file transcription model identifiers supported by SpeechKit.
 public enum OpenAIFileTranscriptionModelID: String, Sendable, CaseIterable {
     /// OpenAI Whisper transcription.
+    ///
+    /// OpenAI shuts this model down on February 26, 2027.
+    @available(*, deprecated, message: "OpenAI shuts down whisper-1 on February 26, 2027. Use gptTranscribe.")
     case whisper1 = "whisper-1"
     /// GPT-4o transcription.
+    ///
+    /// OpenAI shuts this model down on February 26, 2027.
+    @available(*, deprecated, message: "OpenAI shuts down gpt-4o-transcribe on February 26, 2027. Use gptTranscribe.")
     case gpt4oTranscribe = "gpt-4o-transcribe"
     /// GPT-4o mini transcription.
+    ///
+    /// OpenAI shuts this model down on February 26, 2027.
+    @available(*, deprecated, message: "OpenAI shuts down gpt-4o-mini-transcribe on February 26, 2027. Use gptTranscribe.")
     case gpt4oMiniTranscribe = "gpt-4o-mini-transcribe"
     /// GPT-4o mini transcription snapshot.
+    ///
+    /// OpenAI shuts this model down on February 26, 2027.
+    @available(*, deprecated, message: "OpenAI shuts down gpt-4o-mini-transcribe on February 26, 2027. Use gptTranscribe.")
     case gpt4oMiniTranscribe20251215 = "gpt-4o-mini-transcribe-2025-12-15"
     /// OpenAI's recommended high-accuracy transcription model for completed audio files.
     case gptTranscribe = "gpt-transcribe"
     /// GPT-4o transcription with speaker diarization.
+    ///
+    /// OpenAI shuts this model down on February 26, 2027.
+    @available(*, deprecated, message: "OpenAI shuts down gpt-4o-transcribe-diarize on February 26, 2027.")
     case gpt4oTranscribeDiarize = "gpt-4o-transcribe-diarize"
 }
 
@@ -23,22 +38,68 @@ public enum OpenAIRealtimeTranscriptionModelID: String, Sendable, CaseIterable {
     /// OpenAI's high-accuracy transcription model for committed Realtime turns.
     case gptTranscribe = "gpt-transcribe"
     /// GPT-4o realtime transcription.
+    ///
+    /// OpenAI shuts this model down on February 26, 2027.
+    @available(*, deprecated, message: "OpenAI shuts down gpt-4o-transcribe on February 26, 2027. Use gptLiveTranscribe or gptTranscribe.")
     case gpt4oTranscribe = "gpt-4o-transcribe"
     /// GPT-4o mini realtime transcription.
+    ///
+    /// OpenAI shuts this model down on February 26, 2027.
+    @available(*, deprecated, message: "OpenAI shuts down gpt-4o-mini-transcribe on February 26, 2027. Use gptLiveTranscribe or gptTranscribe.")
     case gpt4oMiniTranscribe = "gpt-4o-mini-transcribe"
     /// GPT-4o realtime transcription latest alias.
+    ///
+    /// OpenAI no longer documents this alias, and the GPT-4o transcription family it points to shuts down on February 26, 2027.
+    @available(*, deprecated, message: "gpt-4o-transcribe-latest is undocumented and its GPT-4o transcription family shuts down on February 26, 2027. Use gptLiveTranscribe or gptTranscribe.")
     case gpt4oTranscribeLatest = "gpt-4o-transcribe-latest"
     /// OpenAI Whisper transcription.
+    ///
+    /// OpenAI shuts this model down on February 26, 2027.
+    @available(*, deprecated, message: "OpenAI shuts down whisper-1 on February 26, 2027. Use gptLiveTranscribe or gptTranscribe.")
     case whisper1 = "whisper-1"
 }
 
 extension OpenAIFileTranscriptionModelID {
+    // Synthesized conformance is unavailable once cases are deprecated. Raw values
+    // keep the list free of deprecation warnings.
+    public static let allCases: [Self] = [
+        "whisper-1",
+        "gpt-4o-transcribe",
+        "gpt-4o-mini-transcribe",
+        "gpt-4o-mini-transcribe-2025-12-15",
+        "gpt-transcribe",
+        "gpt-4o-transcribe-diarize",
+    ].compactMap(Self.init(rawValue:))
+
     var usesLanguageList: Bool {
         self == .gptTranscribe
+    }
+
+    var isDiarizationModel: Bool {
+        rawValue == "gpt-4o-transcribe-diarize"
+    }
+
+    var supportsTimestampGranularities: Bool {
+        rawValue == "whisper-1"
+    }
+
+    var supportsLogprobs: Bool {
+        ["gpt-4o-transcribe", "gpt-4o-mini-transcribe", "gpt-4o-mini-transcribe-2025-12-15"].contains(rawValue)
     }
 }
 
 extension OpenAIRealtimeTranscriptionModelID {
+    // Synthesized conformance is unavailable once cases are deprecated. Raw values
+    // keep the list free of deprecation warnings.
+    public static let allCases: [Self] = [
+        "gpt-live-transcribe",
+        "gpt-transcribe",
+        "gpt-4o-transcribe",
+        "gpt-4o-mini-transcribe",
+        "gpt-4o-transcribe-latest",
+        "whisper-1",
+    ].compactMap(Self.init(rawValue:))
+
     var usesLanguageList: Bool {
         self == .gptLiveTranscribe || self == .gptTranscribe
     }
@@ -47,6 +108,9 @@ extension OpenAIRealtimeTranscriptionModelID {
 /// OpenAI Realtime connection model identifiers supported by SpeechKit.
 public enum OpenAIRealtimeSessionModelID: String, Sendable, CaseIterable {
     /// OpenAI Realtime model used to host realtime transcription sessions.
+    ///
+    /// OpenAI shuts this model down on January 20, 2027. Its listed replacement, `gpt-realtime-2.1`,
+    /// does not support transcription sessions.
     case gptRealtime = "gpt-realtime"
 }
 
@@ -492,7 +556,7 @@ struct OpenAIFileTranscriptionClient {
             }
         }
 
-        if options.modelID == .gpt4oTranscribeDiarize {
+        if options.modelID.isDiarizationModel {
             if options.prompt != nil {
                 throw SpeechError.providerFailure(provider: .openAI, reason: "prompt is not supported with gpt-4o-transcribe-diarize.")
             }
@@ -511,14 +575,11 @@ struct OpenAIFileTranscriptionClient {
             }
         }
 
-        if !options.timestampGranularities.isEmpty, options.modelID != .whisper1 {
+        if !options.timestampGranularities.isEmpty, !options.modelID.supportsTimestampGranularities {
             throw SpeechError.providerFailure(provider: .openAI, reason: "timestampGranularities are only supported with whisper-1.")
         }
 
-        if options.includeLogprobs,
-           options.modelID != .gpt4oTranscribe,
-           options.modelID != .gpt4oMiniTranscribe,
-           options.modelID != .gpt4oMiniTranscribe20251215 {
+        if options.includeLogprobs, !options.modelID.supportsLogprobs {
             throw SpeechError.providerFailure(provider: .openAI, reason: "includeLogprobs is only supported with GPT-4o transcription models.")
         }
 
@@ -555,7 +616,7 @@ struct OpenAIFileTranscriptionClient {
     }
 
     private func responseFormat(for options: OpenAIFileTranscriptionOptions) -> String {
-        if options.modelID == .gpt4oTranscribeDiarize {
+        if options.modelID.isDiarizationModel {
             return "diarized_json"
         }
         if !options.timestampGranularities.isEmpty {
@@ -567,7 +628,7 @@ struct OpenAIFileTranscriptionClient {
     private func effectiveDiarizationChunkingStrategy(
         for options: OpenAIFileTranscriptionOptions
     ) -> OpenAIDiarizationChunkingStrategy? {
-        guard options.modelID == .gpt4oTranscribeDiarize else {
+        guard options.modelID.isDiarizationModel else {
             return nil
         }
         return options.diarizationChunkingStrategy ?? .auto

@@ -7,9 +7,26 @@ public enum ElevenLabsModelID: String, Sendable, CaseIterable {
     /// ElevenLabs Scribe v2 realtime transcription.
     case scribeV2Realtime = "scribe_v2_realtime"
     /// ElevenLabs Scribe v1 file transcription.
+    ///
+    /// ElevenLabs scheduled this model for removal on July 9, 2026.
+    @available(*, deprecated, message: "ElevenLabs scheduled scribe_v1 for removal on July 9, 2026. Use scribeV2.")
     case scribeV1 = "scribe_v1"
     /// ElevenLabs Scribe v2 file transcription.
     case scribeV2 = "scribe_v2"
+}
+
+extension ElevenLabsModelID {
+    // Synthesized conformance is unavailable once cases are deprecated. Raw values
+    // keep the list free of deprecation warnings.
+    public static let allCases: [Self] = [
+        "scribe_v2_realtime",
+        "scribe_v1",
+        "scribe_v2",
+    ].compactMap(Self.init(rawValue:))
+
+    var supportsFileTranscription: Bool {
+        rawValue == "scribe_v1" || rawValue == "scribe_v2"
+    }
 }
 
 // MARK: - Outgoing Messages

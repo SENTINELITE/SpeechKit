@@ -145,12 +145,12 @@ struct FileTranscriptionClientTests {
         let client = ElevenLabsFileTranscriptionClient(apiKey: "eleven-key")
         let fileURL = temporaryAudioFileURL(named: "sample.wav")
 
-        let request = try await client.makeRequest(file: fileURL, modelID: .scribeV1)
+        let request = try await client.makeRequest(file: fileURL, modelID: .scribeV2)
         let body = try #require(request.httpBody).utf8String
 
         #expect(request.value(forHTTPHeaderField: "xi-api-key") == "eleven-key")
         #expect(body.contains("name=\"model_id\""))
-        #expect(body.contains("scribe_v1"))
+        #expect(body.contains("scribe_v2"))
         #expect(body.contains("name=\"file\"; filename=\"sample.wav\""))
     }
 
@@ -185,6 +185,7 @@ struct FileTranscriptionClientTests {
     }
 
     @Test("OpenAI multipart request includes model, response format, and optional fields")
+    @available(*, deprecated, message: "Covers OpenAI models scheduled for shutdown.")
     func openAIRequestIncludesModelResponseFormatAndOptionalFields() throws {
         let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
         let fileURL = temporaryAudioFileURL(named: "sample.webm")
@@ -265,6 +266,7 @@ struct FileTranscriptionClientTests {
     }
 
     @Test("OpenAI Whisper timestamp request uses verbose JSON")
+    @available(*, deprecated, message: "Covers OpenAI models scheduled for shutdown.")
     func openAIWhisperTimestampRequestUsesVerboseJSON() throws {
         let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
         let fileURL = temporaryAudioFileURL(named: "sample.wav")
@@ -286,6 +288,7 @@ struct FileTranscriptionClientTests {
     }
 
     @Test("OpenAI diarize model requests diarized JSON")
+    @available(*, deprecated, message: "Covers OpenAI models scheduled for shutdown.")
     func openAIDiarizeModelRequestsDiarizedJSON() throws {
         let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
         let fileURL = temporaryAudioFileURL(named: "sample.mp3")
@@ -303,6 +306,7 @@ struct FileTranscriptionClientTests {
     }
 
     @Test("OpenAI diarize request includes VAD chunking and known speakers")
+    @available(*, deprecated, message: "Covers OpenAI models scheduled for shutdown.")
     func openAIDiarizeRequestIncludesVADChunkingAndKnownSpeakers() throws {
         let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
         let fileURL = temporaryAudioFileURL(named: "sample.wav")
@@ -388,6 +392,7 @@ struct FileTranscriptionClientTests {
     }
 
     @Test("OpenAI rejects unsupported diarize prompt and logprobs")
+    @available(*, deprecated, message: "Covers OpenAI models scheduled for shutdown.")
     func openAIRejectsUnsupportedDiarizePromptAndLogprobs() {
         let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
         let fileURL = temporaryAudioFileURL(named: "sample.wav")
@@ -414,6 +419,7 @@ struct FileTranscriptionClientTests {
     }
 
     @Test("OpenAI rejects invalid diarize VAD and speaker references")
+    @available(*, deprecated, message: "Covers OpenAI models scheduled for shutdown.")
     func openAIRejectsInvalidDiarizeVADAndSpeakerReferences() {
         let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
         let fileURL = temporaryAudioFileURL(named: "sample.wav")

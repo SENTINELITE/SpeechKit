@@ -45,6 +45,7 @@ public final class GrokRealtimeService {
     private var isGracefulStopPending = false
     private var gracefulStopWaiter: CheckedContinuation<Void, Never>?
     private let gracefulStopTimeoutNanoseconds: UInt64 = 2_000_000_000
+    private var gracefulStopTimeoutTask: Task<Void, Never>?
 
     /// The committed transcript text joined with spaces.
     public var transcriptText: String {
@@ -318,28 +319,21 @@ public final class GrokRealtimeService {
     }
 
     private func waitForGracefulStop() async {
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { [weak self] in
-                await withCheckedContinuation { continuation in
-                    Task { @MainActor in
-                        guard let self, self.isGracefulStopPending else {
-                            continuation.resume()
-                            return
-                        }
+        guard isGracefulStopPending else { return }
 
-                        self.gracefulStopWaiter = continuation
-                    }
-                }
-            }
-
-            group.addTask { [gracefulStopTimeoutNanoseconds] in
+        // Stay on the main actor for the whole wait. A detached child task that
+        // captured `self` was rejected as a data race by the Xcode 26.2 compiler.
+        await withCheckedContinuation { continuation in
+            gracefulStopWaiter = continuation
+            gracefulStopTimeoutTask = Task { @MainActor [weak self, gracefulStopTimeoutNanoseconds] in
                 try? await Task.sleep(nanoseconds: gracefulStopTimeoutNanoseconds)
+                guard !Task.isCancelled else { return }
+                self?.finishGracefulStopWaiter()
             }
-
-            await group.next()
-            finishGracefulStopWaiter()
-            group.cancelAll()
         }
+
+        gracefulStopTimeoutTask?.cancel()
+        gracefulStopTimeoutTask = nil
     }
 
     private func finishGracefulStopWaiter() {

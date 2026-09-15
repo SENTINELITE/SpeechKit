@@ -116,7 +116,7 @@ if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
 }
 ```
 
-OpenAI diarization uses ``OpenAIFileTranscriptionModelID/gpt4oTranscribeDiarize``. SpeechKit requests `diarized_json`, defaults diarization chunking to ``OpenAIDiarizationChunkingStrategy/auto``, and decodes speaker-bearing `segments` into ``OpenAIFileTranscriptionResponse/diarizedSegments``.
+OpenAI diarization uses ``OpenAIFileTranscriptionModelID/gpt4oTranscribeDiarize``. SpeechKit requests `diarized_json`, defaults diarization chunking to ``OpenAIDiarizationChunkingStrategy/auto``, and decodes speaker-bearing `segments` into ``OpenAIFileTranscriptionResponse/diarizedSegments``. The diarize model is deprecated because OpenAI shuts it down on February 26, 2027.
 
 ```swift
 let openAIDiarizedResponse = try await speech.transcribeOpenAIAudioFile(

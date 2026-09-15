@@ -4,7 +4,9 @@ All notable changes to SpeechKit will be documented in this file.
 
 SpeechKit follows semantic versioning. Source-breaking changes ship in a new major version.
 
-## [Unreleased]
+## [2.0.0] - 2026-09-15
+
+This is a major release because `SpeechFileTranscriptionProvider`, `SpeechRealtimeProvider`, and `SpeechFileTranscriptionOptions` gained cases. Every other change is additive.
 
 ### Added
 
@@ -23,10 +25,17 @@ SpeechKit follows semantic versioning. Source-breaking changes ship in a new maj
 ### Changed
 
 - OpenAI configuration defaults now use `gpt-transcribe` for files and `gpt-live-transcribe` for Realtime transcription.
+- ElevenLabs configuration now defaults file transcription to `scribe_v2`.
 - Gemini Live token connections now send the credential in an `Authorization: Token` header instead of the socket URL. API-key connections still use the `key` query parameter.
 - `SpeechFileTranscriptionProvider`, `SpeechRealtimeProvider`, and `SpeechFileTranscriptionOptions` gained `meta` and `gemini` cases, so exhaustive switches over these types in adopting code need updating.
 - `apiKey` on every provider configuration and realtime service is now a computed projection of the new `credential` property: reading it returns the key of an `.apiKey` credential and an empty string for a `.token` credential, and writing it replaces `credential` with `.apiKey`.
 - Token-backed configurations compare equal by `SpeechTokenProvider.id`.
+
+### Deprecated
+
+- OpenAI `whisper-1`, `gpt-4o-transcribe`, `gpt-4o-mini-transcribe` (including the `2025-12-15` snapshot), and `gpt-4o-transcribe-diarize` model IDs, which OpenAI shuts down on February 26, 2027. Use `gpt-transcribe` or `gpt-live-transcribe`.
+- OpenAI `gpt-4o-transcribe-latest` Realtime model ID, which OpenAI no longer documents.
+- ElevenLabs `scribe_v1`, which ElevenLabs scheduled for removal on July 9, 2026. Use `scribe_v2`.
 
 ### Fixed
 
@@ -37,6 +46,7 @@ SpeechKit follows semantic versioning. Source-breaking changes ship in a new maj
 - Gemini realtime errors are redacted before publication so an API key carried in the Live socket URL cannot reach `lastError`.
 - Cancelling a Gemini background transcription or Files API upload now rethrows `CancellationError` instead of a provider failure.
 - Meta raw PCM uploads are duration-checked from their byte count before upload, since AVFoundation cannot measure headerless audio.
+- Grok, Meta, and Gemini realtime services compile under Xcode 26.2 again: the graceful-stop wait no longer captures the service in a nonisolated child task, which that compiler reported as a data race.
 
 ## [1.0.0] - 2026-05-31
 

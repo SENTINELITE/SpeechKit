@@ -27,7 +27,7 @@ public struct ElevenLabsConfiguration: Sendable, Equatable {
     public init(
         apiKey: String,
         realtimeModelID: ElevenLabsModelID = .scribeV2Realtime,
-        fileTranscriptionModelID: ElevenLabsModelID = .scribeV1,
+        fileTranscriptionModelID: ElevenLabsModelID = .scribeV2,
         fileEndpoint: URL? = nil,
         realtimeEndpoint: URL? = nil
     ) {
@@ -44,7 +44,7 @@ public struct ElevenLabsConfiguration: Sendable, Equatable {
     public init(
         credential: SpeechCredential,
         realtimeModelID: ElevenLabsModelID = .scribeV2Realtime,
-        fileTranscriptionModelID: ElevenLabsModelID = .scribeV1,
+        fileTranscriptionModelID: ElevenLabsModelID = .scribeV2,
         fileEndpoint: URL? = nil,
         realtimeEndpoint: URL? = nil
     ) {

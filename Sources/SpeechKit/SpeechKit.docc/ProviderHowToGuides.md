@@ -12,7 +12,7 @@ File transcription uploads an audio file and returns text or provider-specific m
 let speech = SpeechService(
     elevenLabs: ElevenLabsConfiguration(
         apiKey: "<ELEVENLABS_API_KEY>",
-        fileTranscriptionModelID: .scribeV1
+        fileTranscriptionModelID: .scribeV2
     )
 )
 

@@ -44,7 +44,7 @@ struct FileProviderOptionsView: View {
         switch configuration.fileProvider {
         case .elevenLabs:
             Picker("Model", selection: $configuration.elevenLabsFileModel) {
-                ForEach([ElevenLabsModelID.scribeV1, ElevenLabsModelID.scribeV2], id: \.self) { model in
+                ForEach(ElevenLabsModelID.allCases.filter { $0 != .scribeV2Realtime }, id: \.self) { model in
                     Text(model.rawValue).tag(model)
                 }
             }

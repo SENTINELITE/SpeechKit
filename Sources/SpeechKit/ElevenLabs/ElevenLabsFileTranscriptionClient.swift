@@ -77,7 +77,7 @@ struct ElevenLabsFileTranscriptionClient {
         guard !secret.isEmpty else {
             throw ElevenLabsError.apiKeyMissing
         }
-        guard modelID == .scribeV1 || modelID == .scribeV2 else {
+        guard modelID.supportsFileTranscription else {
             throw ElevenLabsError.unsupportedModel(modelID.rawValue)
         }
         guard let uploadURL else {

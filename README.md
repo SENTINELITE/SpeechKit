@@ -3,7 +3,7 @@
 [![CI](https://github.com/SENTINELITE/SpeechKit/actions/workflows/ci.yml/badge.svg)](https://github.com/SENTINELITE/SpeechKit/actions/workflows/ci.yml)
 ![Swift](https://img.shields.io/badge/Swift-6.2-orange.svg)
 ![Platforms](https://img.shields.io/badge/platforms-iOS%2018%20%7C%20macOS%2015%20%7C%20watchOS%2011%20%7C%20visionOS%202-lightgrey.svg)
-![Status](https://img.shields.io/badge/status-1.0.0-blue.svg)
+![Status](https://img.shields.io/badge/status-2.0.0-blue.svg)
 
 SpeechKit is a Swift package for adding speech-to-text to Swift and SwiftUI apps with a small async/await API.
 
@@ -25,7 +25,7 @@ It supports two workflows:
 
 ## Status
 
-SpeechKit `1.0.0` is the first stable release of the package API for production integration. Future source-breaking API changes will ship in a new major version.
+SpeechKit `2.0.0` is the current stable release. It adds Meta and Gemini providers, short-lived credentials, and endpoint overrides. It is a major version because the provider enums gained cases, which affects exhaustive switches in adopting code. Future source-breaking API changes will ship in a new major version.
 
 ## Sponsor the project
 > <img width="1500" height="500" alt="SpeechKit" src="https://github.com/user-attachments/assets/3f3b68e7-37fb-46c7-a139-2b513b2e184c" />
@@ -390,7 +390,7 @@ Use ElevenLabs Scribe for straightforward file transcription.
 let speech = SpeechService(
     elevenLabs: ElevenLabsConfiguration(
         apiKey: "<ELEVENLABS_API_KEY>",
-        fileTranscriptionModelID: .scribeV1
+        fileTranscriptionModelID: .scribeV2
     )
 )
 
@@ -461,7 +461,7 @@ print(response.words ?? [])
 
 ### File: OpenAI
 
-OpenAI file transcription defaults to `gpt-transcribe`, which supports prompts, keyword hints, multiple expected input languages, and detected-language output. Whisper remains available for timestamps, and `gpt-4o-transcribe-diarize` remains available for speaker labels.
+OpenAI file transcription defaults to `gpt-transcribe`, which supports prompts, keyword hints, multiple expected input languages, and detected-language output. Whisper remains available for timestamps, and `gpt-4o-transcribe-diarize` remains available for speaker labels, but both are deprecated because OpenAI shuts them down on February 26, 2027.
 
 ```swift
 let speech = SpeechService(

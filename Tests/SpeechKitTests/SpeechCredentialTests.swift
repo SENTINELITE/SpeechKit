@@ -156,7 +156,7 @@ struct SpeechCredentialTests {
         )
         let fileURL = credentialTemporaryAudioFileURL(named: "credential-eleven.wav")
 
-        let request = try await client.makeRequest(file: fileURL, modelID: .scribeV1)
+        let request = try await client.makeRequest(file: fileURL, modelID: .scribeV2)
 
         #expect(request.value(forHTTPHeaderField: "xi-api-key") == "eleven-token")
     }

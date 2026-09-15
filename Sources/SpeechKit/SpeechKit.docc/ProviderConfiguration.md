@@ -38,7 +38,7 @@ let speech = SpeechService(
     elevenLabs: ElevenLabsConfiguration(
         apiKey: "<ELEVENLABS_API_KEY>",
         realtimeModelID: .scribeV2Realtime,
-        fileTranscriptionModelID: .scribeV1
+        fileTranscriptionModelID: .scribeV2
     ),
     openAI: OpenAIConfiguration(
         apiKey: "<OPENAI_API_KEY>",

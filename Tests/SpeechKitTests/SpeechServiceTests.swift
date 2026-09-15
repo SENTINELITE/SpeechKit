@@ -31,7 +31,7 @@ struct SpeechServiceTests {
             _ = try await service.transcribeAudioFile(
                 provider: .openAI,
                 file: fileURL,
-                options: .elevenLabs(modelID: .scribeV1)
+                options: .elevenLabs(modelID: .scribeV2)
             )
         }
     }
@@ -65,7 +65,7 @@ struct SpeechServiceTests {
 
         #expect(service.elevenLabs?.apiKey == "eleven")
         #expect(service.elevenLabs?.realtimeModelID == .scribeV2Realtime)
-        #expect(service.elevenLabs?.fileTranscriptionModelID == .scribeV1)
+        #expect(service.elevenLabs?.fileTranscriptionModelID == .scribeV2)
     }
 
     @MainActor
@@ -83,6 +83,7 @@ struct SpeechServiceTests {
 
     @MainActor
     @Test("OpenAI provider-neutral options resolve diarization controls")
+    @available(*, deprecated, message: "Covers OpenAI models scheduled for shutdown.")
     func openAIProviderNeutralOptionsResolveDiarizationControls() {
         let knownSpeaker = OpenAIKnownSpeaker(name: "agent", referenceDataURL: "data:audio/wav;base64,AAA")
         let config = OpenAIConfiguration(
@@ -468,6 +469,7 @@ struct SpeechServiceTests {
     }
 
     @Test("OpenAI realtime session update encodes transcription session")
+    @available(*, deprecated, message: "Covers OpenAI models scheduled for shutdown.")
     func openAIRealtimeSessionUpdateEncodesTranscriptionSession() throws {
         let message = OpenAIRealtimeSessionUpdateMessage(
             options: OpenAIRealtimeSessionOptions(
