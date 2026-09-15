@@ -95,7 +95,57 @@ struct SettingsSheet: View {
 
             Toggle("Grok diarization", isOn: $configuration.grokDiarize)
             Toggle("Grok filler words", isOn: $configuration.grokRealtimeFillerWords)
+
+            metaRealtimeControls
+            geminiRealtimeControls
         }
+    }
+
+    /// Controls the Meta realtime session defaults.
+    @ViewBuilder
+    private var metaRealtimeControls: some View {
+        Picker("Meta mode", selection: $configuration.metaMode) {
+            ForEach(MetaTranscriptionMode.allCases, id: \.self) { mode in
+                Text(mode.rawValue).tag(mode)
+            }
+        }
+
+        Picker("Meta partials", selection: $configuration.metaRealtimePartialMode) {
+            ForEach(MetaPartialMode.allCases, id: \.self) { partialMode in
+                Text(partialMode.rawValue).tag(partialMode)
+            }
+        }
+
+        Picker("Meta language bias", selection: $configuration.metaLanguage) {
+            Text("Default").tag(MetaLanguage?.none)
+            ForEach(MetaLanguage.allCases, id: \.self) { language in
+                Text(language.displayName).tag(MetaLanguage?.some(language))
+            }
+        }
+    }
+
+    /// Controls the Gemini Live session defaults.
+    @ViewBuilder
+    private var geminiRealtimeControls: some View {
+        Picker("Gemini live model", selection: $configuration.geminiRealtimeModel) {
+            ForEach(GeminiRealtimeModelID.allCases, id: \.self) { model in
+                Text(model.rawValue).tag(model)
+            }
+        }
+
+        Picker("Gemini mode", selection: $configuration.geminiMode) {
+            ForEach(GeminiTranscriptionMode.allCases, id: \.self) { mode in
+                Text(mode.rawValue).tag(mode)
+            }
+        }
+
+        TextField("Gemini language codes", text: $configuration.geminiLanguageCodes)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+
+        Text("Gemini Live does not support diarization or word timestamps.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 
     /// Controls defaults used by both file import and recorded-upload samples.

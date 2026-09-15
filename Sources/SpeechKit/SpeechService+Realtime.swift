@@ -13,6 +13,10 @@ extension SpeechService {
             return openAIRealtimeService.connectionState
         case .grok:
             return grokRealtimeService.connectionState
+        case .meta:
+            return metaRealtimeService.connectionState
+        case .gemini:
+            return geminiRealtimeService.connectionState
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -37,6 +41,10 @@ extension SpeechService {
             return openAIRealtimeService.partialTranscriptText
         case .grok:
             return grokRealtimeService.partialTranscriptText
+        case .meta:
+            return metaRealtimeService.partialTranscriptText
+        case .gemini:
+            return geminiRealtimeService.partialTranscriptText
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -68,6 +76,10 @@ extension SpeechService {
             )
         case .grok:
             return grokRealtimeService.partialTranscriptEntry
+        case .meta:
+            return metaRealtimeService.partialTranscriptEntry
+        case .gemini:
+            return geminiRealtimeService.partialTranscriptEntry
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -87,6 +99,10 @@ extension SpeechService {
             return openAIRealtimeService.realtimeAudioLevel
         case .grok:
             return grokRealtimeService.realtimeAudioLevel
+        case .meta:
+            return metaRealtimeService.realtimeAudioLevel
+        case .gemini:
+            return geminiRealtimeService.realtimeAudioLevel
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -106,6 +122,10 @@ extension SpeechService {
             return openAIRealtimeService.realtimeRecordingData
         case .grok:
             return grokRealtimeService.realtimeRecordingData
+        case .meta:
+            return metaRealtimeService.realtimeRecordingData
+        case .gemini:
+            return geminiRealtimeService.realtimeRecordingData
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -125,6 +145,10 @@ extension SpeechService {
             return openAIRealtimeService.transcriptEntries
         case .grok:
             return grokRealtimeService.transcriptEntries
+        case .meta:
+            return metaRealtimeService.transcriptEntries
+        case .gemini:
+            return geminiRealtimeService.transcriptEntries
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -147,6 +171,10 @@ extension SpeechService {
             return openAIRealtimeService.lastError
         case .grok:
             return grokRealtimeService.lastError
+        case .meta:
+            return metaRealtimeService.lastError
+        case .gemini:
+            return geminiRealtimeService.lastError
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -184,6 +212,10 @@ extension SpeechService {
             await startOpenAIListening()
         case .grok:
             await startGrokListening()
+        case .meta:
+            await startMetaListening()
+        case .gemini:
+            await startGeminiListening()
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -205,7 +237,8 @@ extension SpeechService {
 
         fallbackConnectionState = nil
         fallbackLastError = nil
-        elevenLabsRealtimeService.apiKey = elevenLabs.apiKey
+        elevenLabsRealtimeService.credential = elevenLabs.credential
+        elevenLabsRealtimeService.realtimeEndpoint = elevenLabs.realtimeEndpoint
         elevenLabsRealtimeService.realtimeModelID = elevenLabs.realtimeModelID
         await elevenLabsRealtimeService.startListening()
     }
@@ -219,7 +252,8 @@ extension SpeechService {
 
         fallbackConnectionState = nil
         fallbackLastError = nil
-        openAIRealtimeService.apiKey = openAI.apiKey
+        openAIRealtimeService.credential = openAI.credential
+        openAIRealtimeService.realtimeEndpoint = openAI.realtimeEndpoint
         openAIRealtimeService.options = resolvedOpenAIRealtimeOptions(from: openAI)
         await openAIRealtimeService.startListening()
     }
@@ -233,9 +267,40 @@ extension SpeechService {
 
         fallbackConnectionState = nil
         fallbackLastError = nil
-        grokRealtimeService.apiKey = grok.apiKey
+        grokRealtimeService.credential = grok.credential
+        grokRealtimeService.realtimeEndpoint = grok.realtimeEndpoint
         grokRealtimeService.options = grok.realtimeOptions
         await grokRealtimeService.startListening()
+    }
+
+    func startMetaListening() async {
+        guard let meta else {
+            fallbackConnectionState = .error("Meta is not configured")
+            fallbackLastError = SpeechError.realtimeProviderNotConfigured(.meta)
+            return
+        }
+
+        fallbackConnectionState = nil
+        fallbackLastError = nil
+        metaRealtimeService.credential = meta.credential
+        metaRealtimeService.realtimeEndpoint = meta.realtimeEndpoint
+        metaRealtimeService.options = meta.realtimeOptions
+        await metaRealtimeService.startListening()
+    }
+
+    func startGeminiListening() async {
+        guard let gemini else {
+            fallbackConnectionState = .error("Gemini is not configured")
+            fallbackLastError = SpeechError.realtimeProviderNotConfigured(.gemini)
+            return
+        }
+
+        fallbackConnectionState = nil
+        fallbackLastError = nil
+        geminiRealtimeService.credential = gemini.credential
+        geminiRealtimeService.realtimeEndpoint = gemini.realtimeEndpoint
+        geminiRealtimeService.options = resolvedGeminiRealtimeOptions(from: gemini)
+        await geminiRealtimeService.startListening()
     }
 
     /// Stops realtime microphone transcription and disconnects from the active provider.
@@ -253,6 +318,10 @@ extension SpeechService {
             await openAIRealtimeService.stopListening()
         case .grok:
             await grokRealtimeService.stopListening()
+        case .meta:
+            await metaRealtimeService.stopListening()
+        case .gemini:
+            await geminiRealtimeService.stopListening()
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -273,6 +342,10 @@ extension SpeechService {
             openAIRealtimeService.clearTranscript()
         case .grok:
             grokRealtimeService.clearTranscript()
+        case .meta:
+            metaRealtimeService.clearTranscript()
+        case .gemini:
+            geminiRealtimeService.clearTranscript()
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {

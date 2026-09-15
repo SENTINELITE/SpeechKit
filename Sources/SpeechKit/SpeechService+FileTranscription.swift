@@ -16,7 +16,11 @@ extension SpeechService {
             }
             try validate(options: options, for: .elevenLabs)
             let resolvedModelID = resolvedElevenLabsModelID(from: options, config: elevenLabs)
-            let client = ElevenLabsFileTranscriptionClient(apiKey: elevenLabs.apiKey, urlSession: urlSession)
+            let client = ElevenLabsFileTranscriptionClient(
+                credential: elevenLabs.credential,
+                endpoint: elevenLabs.fileEndpoint,
+                urlSession: urlSession
+            )
 
             do {
                 return try await client.transcribeAudioFile(file: file, modelID: resolvedModelID)
@@ -30,7 +34,7 @@ extension SpeechService {
             }
             try validate(options: options, for: .aqua)
             let resolvedOptions = resolvedAquaOptions(from: options, config: aqua)
-            let client = AquaFileTranscriptionClient(apiKey: aqua.apiKey, urlSession: urlSession)
+            let client = AquaFileTranscriptionClient(credential: aqua.credential, endpoint: aqua.fileEndpoint, urlSession: urlSession)
 
             do {
                 return try await client.transcribeAudioFile(file: file, options: resolvedOptions)
@@ -44,7 +48,7 @@ extension SpeechService {
             }
             try validate(options: options, for: .cohere)
             let resolvedOptions = resolvedCohereOptions(from: options, config: cohere)
-            let client = CohereFileTranscriptionClient(apiKey: cohere.apiKey, urlSession: urlSession)
+            let client = CohereFileTranscriptionClient(credential: cohere.credential, endpoint: cohere.fileEndpoint, urlSession: urlSession)
 
             do {
                 return try await client.transcribeAudioFile(
@@ -63,7 +67,7 @@ extension SpeechService {
             }
             try validate(options: options, for: .grok)
             let resolvedOptions = resolvedGrokOptions(from: options, config: grok)
-            let client = GrokFileTranscriptionClient(apiKey: grok.apiKey, urlSession: urlSession)
+            let client = GrokFileTranscriptionClient(credential: grok.credential, endpoint: grok.fileEndpoint, urlSession: urlSession)
 
             do {
                 return try await client.transcribeAudioFile(
@@ -80,12 +84,45 @@ extension SpeechService {
             }
             try validate(options: options, for: .openAI)
             let resolvedOptions = resolvedOpenAIOptions(from: options, config: openAI)
-            let client = OpenAIFileTranscriptionClient(apiKey: openAI.apiKey, urlSession: urlSession)
+            let client = OpenAIFileTranscriptionClient(credential: openAI.credential, endpoint: openAI.fileEndpoint, urlSession: urlSession)
 
             do {
                 return try await client.transcribeAudioFile(file: file, options: resolvedOptions)
             } catch {
                 throw wrap(error, for: .openAI)
+            }
+
+        case .meta:
+            guard let meta else {
+                throw SpeechError.providerNotConfigured(.meta)
+            }
+            try validate(options: options, for: .meta)
+            let resolvedOptions = resolvedMetaOptions(from: options, config: meta)
+            let client = MetaFileTranscriptionClient(credential: meta.credential, endpoint: meta.fileEndpoint, urlSession: urlSession)
+
+            do {
+                return try await client.transcribeAudioFile(file: file, options: resolvedOptions)
+            } catch {
+                throw wrap(error, for: .meta)
+            }
+
+        case .gemini:
+            guard let gemini else {
+                throw SpeechError.providerNotConfigured(.gemini)
+            }
+            try validate(options: options, for: .gemini)
+            let resolvedOptions = resolvedGeminiOptions(from: options, config: gemini)
+            let client = GeminiFileTranscriptionClient(
+            credential: gemini.credential,
+            endpoint: gemini.fileEndpoint,
+            filesEndpoint: gemini.filesEndpoint,
+            urlSession: urlSession
+        )
+
+            do {
+                return try await client.transcribeAudioFile(file: file, options: resolvedOptions)
+            } catch {
+                throw wrap(error, for: .gemini)
             }
 
         #if !os(watchOS)
@@ -130,6 +167,46 @@ extension SpeechService {
         return try await transcribeAudioFile(provider: provider, file: securityScopedURL, options: options)
     }
 
+    /// Transcribes an audio file with ElevenLabs and returns ElevenLabs's detailed response.
+    ///
+    /// - Throws: ``SpeechError`` when ElevenLabs is missing, upload validation fails, or the provider request fails.
+    public func transcribeElevenLabsAudioFile(
+        file: URL,
+        modelID: ElevenLabsModelID? = nil
+    ) async throws -> ElevenLabsFileTranscriptionResponse {
+        guard let elevenLabs else {
+            throw SpeechError.providerNotConfigured(.elevenLabs)
+        }
+
+        let client = ElevenLabsFileTranscriptionClient(
+            credential: elevenLabs.credential,
+            endpoint: elevenLabs.fileEndpoint,
+            urlSession: urlSession
+        )
+        let resolvedModelID = modelID ?? elevenLabs.fileTranscriptionModelID
+
+        do {
+            return try await client.transcribeAudioFileDetailed(file: file, modelID: resolvedModelID)
+        } catch {
+            throw wrap(error, for: .elevenLabs)
+        }
+    }
+
+    /// Transcribes a security-scoped audio file URL with ElevenLabs and returns ElevenLabs's detailed response.
+    ///
+    /// - Throws: ``SpeechError`` when the file cannot be accessed, ElevenLabs is missing, upload validation fails, or the provider request fails.
+    public func transcribeElevenLabsAudioFile(
+        securityScopedURL: URL,
+        modelID: ElevenLabsModelID? = nil
+    ) async throws -> ElevenLabsFileTranscriptionResponse {
+        let didStartAccess = securityScopedURL.startAccessingSecurityScopedResource()
+        guard didStartAccess else {
+            throw SpeechError.providerFailure(provider: .elevenLabs, reason: "Failed to access security-scoped resource.")
+        }
+        defer { securityScopedURL.stopAccessingSecurityScopedResource() }
+        return try await transcribeElevenLabsAudioFile(file: securityScopedURL, modelID: modelID)
+    }
+
     /// Transcribes an audio file with Aqua and returns Aqua's detailed response.
     ///
     /// - Throws: ``SpeechError`` when Aqua is missing, upload validation fails, or the provider request fails.
@@ -141,7 +218,7 @@ extension SpeechService {
             throw SpeechError.providerNotConfigured(.aqua)
         }
 
-        let client = AquaFileTranscriptionClient(apiKey: aqua.apiKey, urlSession: urlSession)
+        let client = AquaFileTranscriptionClient(credential: aqua.credential, endpoint: aqua.fileEndpoint, urlSession: urlSession)
         let resolvedOptions = options ?? AquaFileTranscriptionOptions(
             modelID: aqua.modelID,
             language: aqua.language
@@ -180,7 +257,7 @@ extension SpeechService {
             throw SpeechError.providerNotConfigured(.grok)
         }
 
-        let client = GrokFileTranscriptionClient(apiKey: grok.apiKey, urlSession: urlSession)
+        let client = GrokFileTranscriptionClient(credential: grok.credential, endpoint: grok.fileEndpoint, urlSession: urlSession)
         let resolvedOptions = options ?? GrokFileTranscriptionOptions(
             modelID: grok.modelID,
             language: grok.language,
@@ -224,7 +301,7 @@ extension SpeechService {
             throw SpeechError.providerNotConfigured(.openAI)
         }
 
-        let client = OpenAIFileTranscriptionClient(apiKey: openAI.apiKey, urlSession: urlSession)
+        let client = OpenAIFileTranscriptionClient(credential: openAI.credential, endpoint: openAI.fileEndpoint, urlSession: urlSession)
         let resolvedOptions = options ?? OpenAIFileTranscriptionOptions(
             modelID: openAI.fileTranscriptionModelID,
             language: openAI.language,
@@ -257,6 +334,99 @@ extension SpeechService {
         }
         defer { securityScopedURL.stopAccessingSecurityScopedResource() }
         return try await transcribeOpenAIAudioFile(file: securityScopedURL, options: options)
+    }
+
+    /// Transcribes an audio file with Meta and returns Meta's detailed response.
+    ///
+    /// - Throws: ``SpeechError`` when Meta is missing, upload validation fails, option validation fails, or the provider request fails.
+    public func transcribeMetaAudioFile(
+        file: URL,
+        options: MetaFileTranscriptionOptions? = nil
+    ) async throws -> MetaFileTranscriptionResponse {
+        guard let meta else {
+            throw SpeechError.providerNotConfigured(.meta)
+        }
+
+        let client = MetaFileTranscriptionClient(credential: meta.credential, endpoint: meta.fileEndpoint, urlSession: urlSession)
+        let resolvedOptions = options ?? MetaFileTranscriptionOptions(
+            modelID: meta.modelID,
+            mode: meta.mode,
+            languageBias: meta.languageBias,
+            keywords: meta.keywords,
+            timeoutInterval: meta.timeoutInterval
+        )
+
+        do {
+            return try await client.transcribeAudioFileDetailed(file: file, options: resolvedOptions)
+        } catch {
+            throw wrap(error, for: .meta)
+        }
+    }
+
+    /// Transcribes a security-scoped audio file URL with Meta and returns Meta's detailed response.
+    ///
+    /// - Throws: ``SpeechError`` when the file cannot be accessed, Meta is missing, upload validation fails, option validation fails, or the provider request fails.
+    public func transcribeMetaAudioFile(
+        securityScopedURL: URL,
+        options: MetaFileTranscriptionOptions? = nil
+    ) async throws -> MetaFileTranscriptionResponse {
+        let didStartAccess = securityScopedURL.startAccessingSecurityScopedResource()
+        guard didStartAccess else {
+            throw SpeechError.providerFailure(provider: .meta, reason: "Failed to access security-scoped resource.")
+        }
+        defer { securityScopedURL.stopAccessingSecurityScopedResource() }
+        return try await transcribeMetaAudioFile(file: securityScopedURL, options: options)
+    }
+
+    /// Transcribes an audio file with Gemini and returns Gemini's detailed response.
+    ///
+    /// - Throws: ``SpeechError`` when Gemini is missing, upload validation fails, option validation fails, or the provider request fails.
+    public func transcribeGeminiAudioFile(
+        file: URL,
+        options: GeminiFileTranscriptionOptions? = nil
+    ) async throws -> GeminiFileTranscriptionResponse {
+        guard let gemini else {
+            throw SpeechError.providerNotConfigured(.gemini)
+        }
+
+        let client = GeminiFileTranscriptionClient(
+            credential: gemini.credential,
+            endpoint: gemini.fileEndpoint,
+            filesEndpoint: gemini.filesEndpoint,
+            urlSession: urlSession
+        )
+        let resolvedOptions = options ?? GeminiFileTranscriptionOptions(
+            modelID: gemini.fileTranscriptionModelID,
+            languageCodes: gemini.languageCodes,
+            customVocabulary: gemini.customVocabulary,
+            mode: gemini.mode,
+            diarize: gemini.diarize,
+            timestampGranularities: gemini.timestampGranularities,
+            uploadStrategy: gemini.uploadStrategy,
+            processingMode: gemini.processingMode,
+            timeoutInterval: gemini.timeoutInterval
+        )
+
+        do {
+            return try await client.transcribeAudioFileDetailed(file: file, options: resolvedOptions)
+        } catch {
+            throw wrap(error, for: .gemini)
+        }
+    }
+
+    /// Transcribes a security-scoped audio file URL with Gemini and returns Gemini's detailed response.
+    ///
+    /// - Throws: ``SpeechError`` when the file cannot be accessed, Gemini is missing, upload validation fails, option validation fails, or the provider request fails.
+    public func transcribeGeminiAudioFile(
+        securityScopedURL: URL,
+        options: GeminiFileTranscriptionOptions? = nil
+    ) async throws -> GeminiFileTranscriptionResponse {
+        let didStartAccess = securityScopedURL.startAccessingSecurityScopedResource()
+        guard didStartAccess else {
+            throw SpeechError.providerFailure(provider: .gemini, reason: "Failed to access security-scoped resource.")
+        }
+        defer { securityScopedURL.stopAccessingSecurityScopedResource() }
+        return try await transcribeGeminiAudioFile(file: securityScopedURL, options: options)
     }
 
     func validate(options: SpeechFileTranscriptionOptions?, for provider: SpeechFileTranscriptionProvider) throws {
@@ -390,6 +560,78 @@ extension SpeechService {
             timestampGranularities: timestampGranularities ?? [],
             diarizationChunkingStrategy: diarizationChunkingStrategy ?? config.diarizationChunkingStrategy,
             knownSpeakers: knownSpeakers ?? config.knownSpeakers,
+            timeoutInterval: timeoutInterval ?? config.timeoutInterval
+        )
+    }
+
+    func resolvedMetaOptions(
+        from options: SpeechFileTranscriptionOptions?,
+        config: MetaConfiguration
+    ) -> MetaFileTranscriptionOptions {
+        guard case .meta(
+            let modelID,
+            let mode,
+            let languageBias,
+            let keywords,
+            let sessionID,
+            let timeoutInterval
+        ) = options else {
+            return MetaFileTranscriptionOptions(
+                modelID: config.modelID,
+                mode: config.mode,
+                languageBias: config.languageBias,
+                keywords: config.keywords,
+                timeoutInterval: config.timeoutInterval
+            )
+        }
+
+        return MetaFileTranscriptionOptions(
+            modelID: modelID ?? config.modelID,
+            mode: mode ?? config.mode,
+            languageBias: languageBias ?? config.languageBias,
+            keywords: keywords ?? config.keywords,
+            sessionID: sessionID,
+            timeoutInterval: timeoutInterval ?? config.timeoutInterval
+        )
+    }
+
+    func resolvedGeminiOptions(
+        from options: SpeechFileTranscriptionOptions?,
+        config: GeminiConfiguration
+    ) -> GeminiFileTranscriptionOptions {
+        guard case .gemini(
+            let modelID,
+            let languageCodes,
+            let customVocabulary,
+            let mode,
+            let diarize,
+            let timestampGranularities,
+            let uploadStrategy,
+            let processingMode,
+            let timeoutInterval
+        ) = options else {
+            return GeminiFileTranscriptionOptions(
+                modelID: config.fileTranscriptionModelID,
+                languageCodes: config.languageCodes,
+                customVocabulary: config.customVocabulary,
+                mode: config.mode,
+                diarize: config.diarize,
+                timestampGranularities: config.timestampGranularities,
+                uploadStrategy: config.uploadStrategy,
+                processingMode: config.processingMode,
+                timeoutInterval: config.timeoutInterval
+            )
+        }
+
+        return GeminiFileTranscriptionOptions(
+            modelID: modelID ?? config.fileTranscriptionModelID,
+            languageCodes: languageCodes ?? config.languageCodes,
+            customVocabulary: customVocabulary ?? config.customVocabulary,
+            mode: mode ?? config.mode,
+            diarize: diarize ?? config.diarize,
+            timestampGranularities: timestampGranularities ?? config.timestampGranularities,
+            uploadStrategy: uploadStrategy ?? config.uploadStrategy,
+            processingMode: processingMode ?? config.processingMode,
             timeoutInterval: timeoutInterval ?? config.timeoutInterval
         )
     }

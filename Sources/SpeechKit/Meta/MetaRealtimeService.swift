@@ -1,10 +1,10 @@
 import Foundation
 import SwiftUI
 
-/// A SwiftUI-observable Grok realtime transcription service.
+/// A SwiftUI-observable Meta realtime transcription service.
 @Observable
 @MainActor
-public final class GrokRealtimeService {
+public final class MetaRealtimeService {
     /// The current realtime connection state.
     public private(set) var connectionState: SpeechRealtimeConnectionState = .disconnected
     /// The latest partial transcript text.
@@ -18,7 +18,7 @@ public final class GrokRealtimeService {
 
     /// The credential used for realtime transcription.
     public var credential: SpeechCredential
-    /// The Grok API key used for realtime transcription.
+    /// The Meta API key used for realtime transcription.
     ///
     /// Reading this property returns the key for a ``SpeechCredential/apiKey(_:)``
     /// credential and an empty string for a ``SpeechCredential/token(_:)``
@@ -28,23 +28,27 @@ public final class GrokRealtimeService {
         get { credential.staticAPIKey }
         set { credential = .apiKey(newValue) }
     }
-    /// An override for the Grok realtime WebSocket endpoint, or `nil` to use the vendor default.
+    /// An override for the Meta realtime WebSocket endpoint, or `nil` to use the vendor default.
     public var realtimeEndpoint: URL?
-    /// Options for the Grok realtime transcription session.
-    public var options: GrokRealtimeOptions {
+    /// Options for the Meta realtime transcription session.
+    public var options: MetaRealtimeOptions {
         didSet {
             audioManager.setTargetSampleRate(Double(options.sampleRate))
         }
     }
 
     private let audioManager: AudioCaptureManager
-    private let webSocket = GrokRealtimeWebSocket()
+    private let webSocket = MetaRealtimeWebSocket()
     private var listeningTask: Task<Void, Never>?
     private var committedFingerprints: Set<String> = []
     private var lifecycleRunID = UUID()
     private var isGracefulStopPending = false
     private var gracefulStopWaiter: CheckedContinuation<Void, Never>?
     private let gracefulStopTimeoutNanoseconds: UInt64 = 2_000_000_000
+    private var currentTurnID: Int?
+    private var currentTurnStartMs: Int?
+    private var currentTurnEndMs: Int?
+    private var currentSpeaker: String?
 
     /// The committed transcript text joined with spaces.
     public var transcriptText: String {
@@ -61,10 +65,10 @@ public final class GrokRealtimeService {
         audioManager.recordedWAVData
     }
 
-    /// Creates a Grok realtime transcription service with a long-lived API key.
+    /// Creates a Meta realtime transcription service with a long-lived API key.
     public init(
         apiKey: String = "",
-        options: GrokRealtimeOptions = GrokRealtimeOptions(),
+        options: MetaRealtimeOptions = MetaRealtimeOptions(),
         realtimeEndpoint: URL? = nil
     ) {
         self.credential = .apiKey(apiKey)
@@ -73,10 +77,10 @@ public final class GrokRealtimeService {
         self.audioManager = AudioCaptureManager(targetSampleRate: Double(options.sampleRate))
     }
 
-    /// Creates a Grok realtime transcription service with any credential.
+    /// Creates a Meta realtime transcription service with any credential.
     public init(
         credential: SpeechCredential,
-        options: GrokRealtimeOptions = GrokRealtimeOptions(),
+        options: MetaRealtimeOptions = MetaRealtimeOptions(),
         realtimeEndpoint: URL? = nil
     ) {
         self.credential = credential
@@ -90,8 +94,8 @@ public final class GrokRealtimeService {
         guard !connectionState.isLifecycleActive else { return }
 
         guard credential.isConfigured else {
-            connectionState = .error("Grok is not configured")
-            lastError = GrokRealtimeError.apiKeyMissing
+            connectionState = .error("Meta is not configured")
+            lastError = MetaRealtimeError.apiKeyMissing
             return
         }
 
@@ -117,6 +121,7 @@ public final class GrokRealtimeService {
         partialTranscriptText = ""
         partialTranscriptEntry = nil
         lastError = nil
+        resetTurnState()
 
         let hasPermission = await audioManager.requestPermission()
         guard isCurrentLifecycleRun(runID) else { return }
@@ -165,7 +170,7 @@ public final class GrokRealtimeService {
         }
     }
 
-    /// Stops realtime microphone transcription and disconnects from Grok.
+    /// Stops realtime microphone transcription and disconnects from Meta.
     public func stopListening() async {
         guard connectionState.isLifecycleActive || listeningTask != nil || audioManager.isCapturing else {
             connectionState = .disconnected
@@ -178,7 +183,7 @@ public final class GrokRealtimeService {
         isGracefulStopPending = true
 
         do {
-            try await webSocket.sendAudioDone()
+            try await webSocket.sendEndStream()
         } catch {
             finishGracefulStopWaiter()
         }
@@ -198,6 +203,7 @@ public final class GrokRealtimeService {
         partialTranscriptText = ""
         partialTranscriptEntry = nil
         committedFingerprints.removeAll()
+        resetTurnState()
     }
 
     /// Sets lifecycle state for tests that exercise facade orchestration without opening audio devices.
@@ -206,7 +212,7 @@ public final class GrokRealtimeService {
     }
 
     /// Feeds a realtime message to the state machine for tests that run without opening audio devices.
-    func handleMessageForTesting(_ message: GrokRealtimeMessage) {
+    func handleMessageForTesting(_ message: MetaRealtimeMessage) {
         _ = handleMessage(message, runID: lifecycleRunID, startsCapture: false)
     }
 
@@ -214,16 +220,16 @@ public final class GrokRealtimeService {
     ///
     /// Returns the audio send task when the message started microphone capture.
     private func handleMessage(
-        _ message: GrokRealtimeMessage,
+        _ message: MetaRealtimeMessage,
         runID: UUID,
         startsCapture: Bool
     ) -> Task<Void, Never>? {
         switch message {
-        case .transcriptCreated(let created):
+        case .sessionCreated(let sessionID):
             // Ignore a duplicate acknowledgement: re-running this branch would
             // start a second capture and orphan the running audio send task.
             guard connectionState == .connecting else { return nil }
-            connectionState = .connected(sessionID: created.sessionID ?? "")
+            connectionState = .connected(sessionID: sessionID ?? "")
             guard startsCapture else { return nil }
             do {
                 let audioStream = try audioManager.startCapture()
@@ -239,17 +245,33 @@ public final class GrokRealtimeService {
                 return nil
             }
 
-        case .transcriptPartial(let transcript):
-            handleTranscript(transcript)
-
-        case .transcriptDone(let transcript):
-            commitTranscriptIfNeeded(transcript, forceUtteranceFinal: true)
+        case .speechStart(let turnID, let audioProcessedMs):
+            currentTurnID = turnID
+            currentTurnStartMs = audioProcessedMs
+            currentTurnEndMs = nil
             partialTranscriptText = ""
             partialTranscriptEntry = nil
-            finishGracefulStopWaiter()
+
+        case .speaker(let label, _):
+            currentSpeaker = label
+
+        case .transcript(let transcript):
+            handleTranscript(transcript)
+
+        case .speechEnd(let turnID, let audioProcessedMs):
+            if let turnID {
+                currentTurnID = turnID
+            }
+            currentTurnEndMs = audioProcessedMs
+
+        case .speechComplete(let turnID, let transcript, let audioProcessedMs):
+            commitTurn(turnID: turnID, text: transcript, audioProcessedMs: audioProcessedMs)
+
+        case .audioProgress:
+            break
 
         case .error(let message):
-            lastError = GrokRealtimeError.connectionFailed(message)
+            lastError = MetaRealtimeError.connectionFailed(message)
             connectionState = .error(message)
             finishGracefulStopWaiter()
 
@@ -260,25 +282,68 @@ public final class GrokRealtimeService {
         return nil
     }
 
-    private func handleTranscript(_ transcript: GrokTranscript) {
-        if transcript.isFinal == true {
-            commitTranscriptIfNeeded(transcript, forceUtteranceFinal: false)
-            partialTranscriptText = ""
-            partialTranscriptEntry = nil
-        } else {
-            let entry = makeEntry(from: transcript, isFinal: false, isUtteranceFinal: false)
-            partialTranscriptEntry = entry
-            partialTranscriptText = entry.text
+    private func handleTranscript(_ transcript: MetaTranscript) {
+        if let turnID = transcript.turnID {
+            currentTurnID = turnID
         }
+
+        let text = partialText(appending: transcript.transcript)
+        guard !text.isEmpty else { return }
+
+        let entry = SpeechTranscriptEntry(
+            provider: .meta,
+            sourceID: currentTurnID.map(String.init),
+            text: text,
+            isFinal: transcript.final == true,
+            isUtteranceFinal: false,
+            speaker: currentSpeaker
+        )
+
+        partialTranscriptEntry = entry
+        partialTranscriptText = entry.text
     }
 
-    private func commitTranscriptIfNeeded(_ transcript: GrokTranscript, forceUtteranceFinal: Bool) {
-        let entry = makeEntry(
-            from: transcript,
+    /// Resolves the partial text for a transcript event, honoring the configured partial mode.
+    ///
+    /// Cumulative partials replace the running text, delta partials extend it.
+    private func partialText(appending text: String) -> String {
+        guard options.partialMode == .delta else { return text }
+
+        let existing = partialTranscriptText
+        guard !existing.isEmpty else { return text }
+        guard !text.isEmpty else { return existing }
+
+        let needsSeparator = existing.last?.isWhitespace == false && text.first?.isWhitespace == false
+        return needsSeparator ? existing + " " + text : existing + text
+    }
+
+    private func commitTurn(turnID: Int?, text: String, audioProcessedMs: Int?) {
+        let resolvedTurnID = turnID ?? currentTurnID
+        let startMs = currentTurnStartMs
+        let endMs = currentTurnEndMs ?? audioProcessedMs
+        let duration: Double? = {
+            guard let startMs, let endMs, endMs >= startMs else { return nil }
+            return Double(endMs - startMs) / 1000
+        }()
+
+        let entry = SpeechTranscriptEntry(
+            provider: .meta,
+            sourceID: resolvedTurnID.map(String.init),
+            text: text,
+            start: startMs.map { Double($0) / 1000 },
+            duration: duration,
             isFinal: true,
-            isUtteranceFinal: forceUtteranceFinal || transcript.speechFinal == true
+            isUtteranceFinal: true,
+            speaker: currentSpeaker
         )
+
         appendCommittedEntryIfNeeded(entry)
+        partialTranscriptText = ""
+        partialTranscriptEntry = nil
+        currentTurnID = nil
+        currentTurnStartMs = nil
+        currentTurnEndMs = nil
+        finishGracefulStopWaiter()
     }
 
     private func commitPartialTranscriptBeforeStop() {
@@ -306,12 +371,7 @@ public final class GrokRealtimeService {
     private func appendCommittedEntryIfNeeded(_ entry: SpeechTranscriptEntry) {
         guard !entry.text.isEmpty else { return }
 
-        let sourceID = entry.sourceID ?? ""
-        let start = entry.start.map { String($0) } ?? ""
-        let duration = entry.duration.map { String($0) } ?? ""
-        let channelIndex = entry.channelIndex.map { String($0) } ?? ""
-        let fingerprint = [sourceID, entry.text, start, duration, channelIndex].joined(separator: "|")
-
+        let fingerprint = [entry.sourceID ?? "", entry.text].joined(separator: "|")
         guard !committedFingerprints.contains(fingerprint) else { return }
         committedFingerprints.insert(fingerprint)
         transcriptEntries.append(entry)
@@ -348,24 +408,6 @@ public final class GrokRealtimeService {
         gracefulStopWaiter = nil
     }
 
-    private func makeEntry(
-        from transcript: GrokTranscript,
-        isFinal: Bool,
-        isUtteranceFinal: Bool
-    ) -> SpeechTranscriptEntry {
-        SpeechTranscriptEntry(
-            provider: .grok,
-            text: transcript.text,
-            start: transcript.start,
-            duration: transcript.duration,
-            isFinal: isFinal,
-            isUtteranceFinal: isUtteranceFinal,
-            channelIndex: transcript.channelIndex,
-            speaker: transcript.speaker,
-            words: transcript.words?.map(SpeechTranscriptWord.init) ?? []
-        )
-    }
-
     private func sendAudioChunks(_ stream: AsyncStream<Data>, runID: UUID) async {
         for await audioData in stream {
             if Task.isCancelled { break }
@@ -391,6 +433,13 @@ public final class GrokRealtimeService {
         if connectionState.isLifecycleActive {
             connectionState = .disconnected
         }
+    }
+
+    private func resetTurnState() {
+        currentTurnID = nil
+        currentTurnStartMs = nil
+        currentTurnEndMs = nil
+        currentSpeaker = nil
     }
 
     private func beginLifecycleRun() -> UUID {

@@ -4,7 +4,7 @@ Add realtime speech-to-text and audio file transcription to Swift and SwiftUI ap
 
 ## Overview
 
-SpeechKit provides one observable service, ``SpeechService``, for realtime microphone transcription and provider-backed audio file transcription. Realtime transcription supports ElevenLabs, OpenAI, xAI Grok, and Apple local Speech on supported OS versions. File transcription supports ElevenLabs, Aqua, Cohere, Grok, OpenAI, and Apple local Speech on supported OS versions.
+SpeechKit provides one observable service, ``SpeechService``, for realtime microphone transcription and provider-backed audio file transcription. Realtime transcription supports ElevenLabs, OpenAI, xAI Grok, Meta, Gemini, and Apple local Speech on supported OS versions. File transcription supports ElevenLabs, Aqua, Cohere, Grok, OpenAI, Meta, Gemini, and Apple local Speech on supported OS versions.
 
 Create a service with the provider configurations your app needs, then place it in SwiftUI's environment or keep it in your own model layer. Use ``SpeechService`` as the main app-facing facade; provider-specific realtime services are advanced APIs for direct provider integrations.
 
@@ -35,6 +35,10 @@ struct DemoApp: App {
 - <doc:ProviderHowToGuides>
 - <doc:AppleLocalSpeech>
 - ``SpeechService``
+- ``SpeechCredential``
+- ``SpeechTokenProvider``
+- ``SpeechServiceExtensionKey``
+- ``SpeechService/subscript(extension:)``
 
 ### Realtime Transcription
 
@@ -57,6 +61,7 @@ struct DemoApp: App {
 - ``ElevenLabsService/ConnectionState``
 - ``ElevenLabsService/TranscriptEntry``
 - ``ElevenLabsWordTimestamp``
+- ``ElevenLabsFileTranscriptionResponse``
 - ``ElevenLabsError``
 
 ### Shared Realtime
@@ -108,6 +113,37 @@ struct DemoApp: App {
 - ``OpenAIKnownSpeaker``
 - ``OpenAIRealtimeSessionOptions``
 - ``OpenAIRealtimeService``
+
+### Meta
+
+- ``MetaConfiguration``
+- ``MetaModelID``
+- ``MetaTranscriptionMode``
+- ``MetaAudioEncoding``
+- ``MetaPartialMode``
+- ``MetaLanguage``
+- ``MetaFileTranscriptionOptions``
+- ``MetaTranscriptionTurn``
+- ``MetaFileTranscriptionResponse``
+- ``MetaRealtimeOptions``
+- ``MetaRealtimeService``
+- ``MetaRealtimeError``
+
+### Gemini
+
+- ``GeminiConfiguration``
+- ``GeminiFileTranscriptionModelID``
+- ``GeminiRealtimeModelID``
+- ``GeminiTranscriptionMode``
+- ``GeminiTimestampGranularity``
+- ``GeminiFileUploadStrategy``
+- ``GeminiProcessingMode``
+- ``GeminiFileTranscriptionOptions``
+- ``GeminiWordInfo``
+- ``GeminiFileTranscriptionResponse``
+- ``GeminiRealtimeOptions``
+- ``GeminiRealtimeService``
+- ``GeminiRealtimeError``
 
 ### Apple Local Speech
 

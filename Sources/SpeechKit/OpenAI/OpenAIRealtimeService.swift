@@ -16,8 +16,20 @@ public final class OpenAIRealtimeService {
     /// The most recent realtime error, if any.
     public private(set) var lastError: Error?
 
+    /// The credential used for realtime transcription.
+    public var credential: SpeechCredential
     /// The OpenAI API key used for realtime transcription.
-    public var apiKey: String
+    ///
+    /// Reading this property returns the key for a ``SpeechCredential/apiKey(_:)``
+    /// credential and an empty string for a ``SpeechCredential/token(_:)``
+    /// credential. Writing it replaces ``credential`` with
+    /// ``SpeechCredential/apiKey(_:)``.
+    public var apiKey: String {
+        get { credential.staticAPIKey }
+        set { credential = .apiKey(newValue) }
+    }
+    /// An override for the OpenAI realtime WebSocket endpoint, or `nil` to use the vendor default.
+    public var realtimeEndpoint: URL?
     /// Options for the OpenAI realtime transcription session.
     public var options: OpenAIRealtimeSessionOptions
 
@@ -43,19 +55,44 @@ public final class OpenAIRealtimeService {
         audioManager.recordedWAVData
     }
 
-    /// Creates an OpenAI realtime transcription service.
-    public init(apiKey: String = "", options: OpenAIRealtimeSessionOptions = OpenAIRealtimeSessionOptions()) {
-        self.apiKey = apiKey
+    /// Creates an OpenAI realtime transcription service with a long-lived API key.
+    public init(
+        apiKey: String = "",
+        options: OpenAIRealtimeSessionOptions = OpenAIRealtimeSessionOptions(),
+        realtimeEndpoint: URL? = nil
+    ) {
+        self.credential = .apiKey(apiKey)
         self.options = options
+        self.realtimeEndpoint = realtimeEndpoint
+    }
+
+    /// Creates an OpenAI realtime transcription service with any credential.
+    public init(
+        credential: SpeechCredential,
+        options: OpenAIRealtimeSessionOptions = OpenAIRealtimeSessionOptions(),
+        realtimeEndpoint: URL? = nil
+    ) {
+        self.credential = credential
+        self.options = options
+        self.realtimeEndpoint = realtimeEndpoint
     }
 
     /// Starts realtime microphone transcription.
     public func startListening() async {
         guard !connectionState.isLifecycleActive else { return }
 
-        guard !apiKey.isEmpty else {
+        guard credential.isConfigured else {
             connectionState = .error("OpenAI is not configured")
             lastError = OpenAIError.apiKeyMissing
+            return
+        }
+
+        let resolvedCredential: SpeechResolvedCredential
+        do {
+            resolvedCredential = try await credential.resolved()
+        } catch {
+            connectionState = .error(error.localizedDescription)
+            lastError = error
             return
         }
 
@@ -72,12 +109,16 @@ public final class OpenAIRealtimeService {
             return
         }
 
-        let apiKey = apiKey
         let options = options
+        let realtimeEndpoint = realtimeEndpoint
 
         listeningTask = Task {
             do {
-                let messageStream = try await webSocket.connect(apiKey: apiKey, options: options)
+                let messageStream = try await webSocket.connect(
+                    credential: resolvedCredential,
+                    options: options,
+                    endpoint: realtimeEndpoint
+                )
                 guard isCurrentLifecycleRun(runID) else {
                     await webSocket.disconnect()
                     return

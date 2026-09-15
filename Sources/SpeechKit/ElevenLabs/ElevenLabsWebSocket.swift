@@ -5,7 +5,7 @@ actor ElevenLabsWebSocket {
     private var session: URLSession?
     private var continuation: AsyncThrowingStream<ElevenLabsMessage, Error>.Continuation?
     
-    private let baseURL = "wss://api.elevenlabs.io/v1/speech-to-text/realtime"
+    static let defaultURL = URL(string: "wss://api.elevenlabs.io/v1/speech-to-text/realtime")
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     
@@ -13,14 +13,46 @@ actor ElevenLabsWebSocket {
         webSocketTask?.state == .running
     }
     
-    func connect(apiKey: String, modelID: ElevenLabsModelID) async throws -> AsyncThrowingStream<ElevenLabsMessage, Error> {
-        guard let url = URL(string: "\(baseURL)?model_id=\(modelID.rawValue)") else {
+    /// Builds the WebSocket handshake request for a realtime session.
+    ///
+    /// An API key goes in the `xi-api-key` header. A short-lived ElevenLabs
+    /// token goes in the `token` query parameter, which is where ElevenLabs
+    /// accepts single-use realtime scribe tokens.
+    nonisolated static func makeConnectRequest(
+        credential: SpeechResolvedCredential,
+        modelID: ElevenLabsModelID,
+        endpoint: URL? = nil
+    ) throws -> URLRequest {
+        guard let baseURL = endpoint ?? defaultURL,
+              var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw ElevenLabsError.invalidURL
         }
-        
+
+        var queryItems = components.queryItems ?? []
+        queryItems.append(URLQueryItem(name: "model_id", value: modelID.rawValue))
+        if case .token(let token) = credential {
+            queryItems.append(URLQueryItem(name: "token", value: token))
+        }
+        components.queryItems = queryItems
+
+        guard let url = components.url else {
+            throw ElevenLabsError.invalidURL
+        }
+
         var request = URLRequest(url: url)
-        request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
-        
+        if case .apiKey(let key) = credential {
+            request.setValue(key, forHTTPHeaderField: "xi-api-key")
+        }
+        return request
+    }
+
+    func connect(
+        credential: SpeechResolvedCredential,
+        modelID: ElevenLabsModelID,
+        endpoint: URL? = nil
+    ) async throws -> AsyncThrowingStream<ElevenLabsMessage, Error> {
+        let request = try Self.makeConnectRequest(credential: credential, modelID: modelID, endpoint: endpoint)
+
         let session = URLSession(configuration: .default)
         self.session = session
         

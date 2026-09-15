@@ -128,6 +128,272 @@ struct SpeechServiceTests {
         #expect(service.lastError as? SpeechError == .realtimeProviderNotConfigured(.grok))
     }
 
+    @MainActor
+    @Test("Meta configuration applies file and realtime defaults")
+    func metaConfigurationAppliesDefaults() {
+        let service = SpeechService(meta: MetaConfiguration(apiKey: "meta"))
+
+        #expect(service.meta?.apiKey == "meta")
+        #expect(service.meta?.modelID == .museVoiceTranscribe1)
+        #expect(service.meta?.mode == .endpointing)
+        #expect(service.meta?.languageBias == [])
+        #expect(service.meta?.realtimeOptions.audioEncoding == .pcm24kHz)
+        #expect(service.meta?.realtimeOptions.partialMode == .cumulative)
+        #expect(service.meta?.realtimeOptions.sampleRate == 24000)
+    }
+
+    @MainActor
+    @Test("Gemini configuration applies file and realtime defaults")
+    func geminiConfigurationAppliesDefaults() {
+        let service = SpeechService(gemini: GeminiConfiguration(apiKey: "gemini"))
+
+        #expect(service.gemini?.apiKey == "gemini")
+        #expect(service.gemini?.fileTranscriptionModelID == .transcribe35)
+        #expect(service.gemini?.realtimeModelID == .transcribeLive35)
+        #expect(service.gemini?.mode == .verbatim)
+        #expect(service.gemini?.diarize == false)
+        #expect(service.gemini?.uploadStrategy == .automatic)
+        #expect(service.gemini?.processingMode == .synchronous)
+        #expect(service.gemini?.realtimeOptions.sampleRate == 16000)
+        #expect(service.gemini?.realtimeOptions.automaticActivityDetection == true)
+    }
+
+    @Test("Meta configuration supports raw language names")
+    func metaConfigurationSupportsRawLanguageNames() throws {
+        let meta = try MetaConfiguration(apiKey: "meta", languageNames: ["English", "Mandarin Chinese"])
+
+        #expect(meta.languageBias == [.english, .mandarinChinese])
+    }
+
+    @Test("Meta configuration rejects unknown language names")
+    func metaConfigurationRejectsUnknownLanguageNames() {
+        #expect(throws: SpeechError.providerFailure(provider: .meta, reason: "Unsupported language: Klingon.")) {
+            _ = try MetaConfiguration(apiKey: "meta", languageNames: ["Klingon"])
+        }
+    }
+
+    @MainActor
+    @Test("startListening surfaces missing Meta configuration")
+    func startListeningWithoutMetaConfigurationSetsFallbackError() async {
+        let service = SpeechService()
+
+        await service.startListening(provider: .meta)
+
+        #expect(service.realtimeConnectionState == .error("Meta is not configured"))
+        #expect(service.connectionState == .error("Meta is not configured"))
+        #expect(service.lastError as? SpeechError == .realtimeProviderNotConfigured(.meta))
+    }
+
+    @MainActor
+    @Test("startListening surfaces missing Gemini configuration")
+    func startListeningWithoutGeminiConfigurationSetsFallbackError() async {
+        let service = SpeechService()
+
+        await service.startListening(provider: .gemini)
+
+        #expect(service.realtimeConnectionState == .error("Gemini is not configured"))
+        #expect(service.connectionState == .error("Gemini is not configured"))
+        #expect(service.lastError as? SpeechError == .realtimeProviderNotConfigured(.gemini))
+    }
+
+    @MainActor
+    @Test("routing rejects Gemini options for Meta")
+    func metaRoutingRejectsGeminiOptions() async {
+        let service = SpeechService(
+            meta: MetaConfiguration(apiKey: "meta"),
+            gemini: GeminiConfiguration(apiKey: "gemini")
+        )
+        let fileURL = temporaryAudioFileURL()
+
+        await #expect(throws: SpeechError.invalidOptionsForProvider(expected: .meta, received: .gemini)) {
+            _ = try await service.transcribeAudioFile(
+                provider: .meta,
+                file: fileURL,
+                options: .gemini(diarize: true)
+            )
+        }
+    }
+
+    @Test("Meta handshake message encodes session configuration")
+    func metaHandshakeMessageEncodesSessionConfiguration() throws {
+        let options = MetaRealtimeOptions(
+            mode: .diarization,
+            audioEncoding: .pcm24kHz,
+            partialMode: .delta,
+            emitAudioProgress: true,
+            languageBias: [.english],
+            keywords: ["SpeechKit"]
+        )
+
+        let data = try JSONEncoder().encode(options.handshakeMessage(secret: "meta-key"))
+        let json = String(decoding: data, as: UTF8.self)
+
+        #expect(json.contains("\"accessToken\":\"Bearer meta-key\""))
+        #expect(json.contains("\"audioEncoding\":\"PCM_24KHZ\""))
+        #expect(json.contains("\"model\":\"muse-voice-transcribe-1.0\""))
+        #expect(json.contains("\"mode\":\"DIARIZATION\""))
+        #expect(json.contains("\"partialMode\":\"DELTA\""))
+        #expect(json.contains("\"emitAudioProgress\":true"))
+        #expect(json.contains("\"languageBias\":[\"English\"]"))
+        #expect(json.contains("\"keywords\":[\"SpeechKit\"]"))
+    }
+
+    @Test("Meta realtime options reject WAV encoding")
+    func metaRealtimeOptionsRejectWAVEncoding() {
+        let options = MetaRealtimeOptions(audioEncoding: .wav)
+
+        #expect(throws: SpeechError.providerFailure(provider: .meta, reason: "Realtime transcription requires a raw PCM audio encoding.")) {
+            try options.validate()
+        }
+    }
+
+    @Test("Meta realtime session acknowledgement decodes")
+    func metaRealtimeSessionAcknowledgementDecodes() throws {
+        let data = Data("""
+        {"sessionId":"9f1c"}
+        """.utf8)
+
+        let message = try JSONDecoder().decode(MetaRealtimeMessage.self, from: data)
+
+        guard case .sessionCreated(let sessionID) = message else {
+            Issue.record("Expected a session acknowledgement.")
+            return
+        }
+        #expect(sessionID == "9f1c")
+    }
+
+    @Test("Meta realtime events decode by type")
+    func metaRealtimeEventsDecodeByType() throws {
+        let decoder = JSONDecoder()
+
+        let transcript = try decoder.decode(MetaRealtimeMessage.self, from: Data("""
+        {"type":"transcript","transcript":"how is the weather","final":false,"audioProcessedMs":3200}
+        """.utf8))
+        guard case .transcript(let partial) = transcript else {
+            Issue.record("Expected a transcript event.")
+            return
+        }
+        #expect(partial.transcript == "how is the weather")
+        #expect(partial.final == false)
+        #expect(partial.audioProcessedMs == 3200)
+
+        let speaker = try decoder.decode(MetaRealtimeMessage.self, from: Data("""
+        {"type":"speaker","label":"A","audioProcessedMs":2480}
+        """.utf8))
+        guard case .speaker(let label, _) = speaker else {
+            Issue.record("Expected a speaker event.")
+            return
+        }
+        #expect(label == "A")
+
+        let complete = try decoder.decode(MetaRealtimeMessage.self, from: Data("""
+        {"type":"speechComplete","turnId":1,"transcript":"How is the weather?","audioProcessedMs":3600}
+        """.utf8))
+        guard case .speechComplete(let turnID, let text, _) = complete else {
+            Issue.record("Expected a speech complete event.")
+            return
+        }
+        #expect(turnID == 1)
+        #expect(text == "How is the weather?")
+
+        let failure = try decoder.decode(MetaRealtimeMessage.self, from: Data("""
+        {"type":"error","message":"Bad audio","sessionId":"9f1c"}
+        """.utf8))
+        guard case .error(let message) = failure else {
+            Issue.record("Expected an error event.")
+            return
+        }
+        #expect(message == "Bad audio")
+    }
+
+    @Test("Gemini setup message encodes the live session")
+    func geminiSetupMessageEncodesLiveSession() throws {
+        let options = GeminiRealtimeOptions(
+            languageCodes: ["en-US"],
+            customVocabulary: ["SpeechKit"],
+            mode: .verbatim,
+            automaticActivityDetection: false
+        )
+
+        let data = try JSONEncoder().encode(options.setupMessage())
+        let json = String(decoding: data, as: UTF8.self)
+
+        #expect(json.contains("\"model\":\"models\\/gemini-3.5-transcribe-live\"") || json.contains("\"model\":\"models/gemini-3.5-transcribe-live\""))
+        #expect(json.contains("\"responseModalities\":[\"TEXT\"]"))
+        #expect(json.contains("\"languageCodes\":[\"en-US\"]"))
+        #expect(json.contains("\"customVocabulary\":[\"SpeechKit\"]"))
+        #expect(json.contains("\"mode\":\"VERBATIM\""))
+        #expect(json.contains("\"disabled\":true"))
+    }
+
+    @Test("Gemini realtime audio message encodes base64 PCM")
+    func geminiRealtimeAudioMessageEncodesBase64PCM() throws {
+        let message = GeminiRealtimeAudioMessage(audioData: Data([1, 2, 3]))
+        let data = try JSONEncoder().encode(message)
+        let json = String(decoding: data, as: UTF8.self)
+
+        #expect(json.contains("\"data\":\"AQID\""))
+        #expect(json.contains("\"mimeType\":\"audio\\/pcm;rate=16000\"") || json.contains("\"mimeType\":\"audio/pcm;rate=16000\""))
+    }
+
+    @Test("Gemini live messages decode by top-level key")
+    func geminiLiveMessagesDecodeByTopLevelKey() throws {
+        let decoder = JSONDecoder()
+
+        let setup = try decoder.decode(GeminiLiveMessage.self, from: Data("""
+        {"setupComplete":{}}
+        """.utf8))
+        guard case .setupComplete = setup else {
+            Issue.record("Expected a setup complete event.")
+            return
+        }
+
+        let interim = try decoder.decode(GeminiLiveMessage.self, from: Data("""
+        {"serverContent":{"interimInputTranscription":{"text":"partial"}}}
+        """.utf8))
+        guard case .interimTranscription(let interimText) = interim else {
+            Issue.record("Expected an interim transcription event.")
+            return
+        }
+        #expect(interimText == "partial")
+
+        let final = try decoder.decode(GeminiLiveMessage.self, from: Data("""
+        {"serverContent":{"inputTranscription":{"text":"final"}}}
+        """.utf8))
+        guard case .finalTranscription(let finalText) = final else {
+            Issue.record("Expected a final transcription event.")
+            return
+        }
+        #expect(finalText == "final")
+
+        let goAway = try decoder.decode(GeminiLiveMessage.self, from: Data("""
+        {"goAway":{"timeLeft":"10s"}}
+        """.utf8))
+        guard case .goAway(let timeLeft) = goAway else {
+            Issue.record("Expected a go away event.")
+            return
+        }
+        #expect(timeLeft == "10s")
+    }
+
+    @Test("Gemini word info decodes duration offsets")
+    func geminiWordInfoDecodesDurationOffsets() throws {
+        let data = Data("""
+        {"type":"word_info","text":"Hello","speaker":"spk_1","start_offset":"0.100s","end_offset":"0.450s","start_index":0,"end_index":5}
+        """.utf8)
+
+        let word = try JSONDecoder().decode(GeminiWordInfo.self, from: data)
+
+        #expect(word.text == "Hello")
+        #expect(word.speaker == "spk_1")
+        #expect(word.start == 0.1)
+        #expect(word.end == 0.45)
+        #expect(word.startIndex == 0)
+        #expect(word.endIndex == 5)
+        #expect(GeminiWordInfo.seconds(fromOffset: "12s") == 12)
+        #expect(GeminiWordInfo.seconds(fromOffset: nil) == nil)
+    }
+
     #if !os(watchOS)
     @Test("Apple providers are gated from allCases until OS 26")
     func appleProvidersAreGatedFromAllCasesUntilOS26() {

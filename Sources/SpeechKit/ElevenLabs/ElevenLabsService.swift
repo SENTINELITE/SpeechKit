@@ -21,8 +21,20 @@ public final class ElevenLabsService {
     
     // MARK: - Configuration
     
-    /// The ElevenLabs API key used for realtime and file transcription.
-    public var apiKey: String
+    /// The credential used for realtime transcription.
+    public var credential: SpeechCredential
+    /// The ElevenLabs API key used for realtime transcription.
+    ///
+    /// Reading this property returns the key for a ``SpeechCredential/apiKey(_:)``
+    /// credential and an empty string for a ``SpeechCredential/token(_:)``
+    /// credential. Writing it replaces ``credential`` with
+    /// ``SpeechCredential/apiKey(_:)``.
+    public var apiKey: String {
+        get { credential.staticAPIKey }
+        set { credential = .apiKey(newValue) }
+    }
+    /// An override for the ElevenLabs realtime WebSocket endpoint, or `nil` to use the vendor default.
+    public var realtimeEndpoint: URL?
     /// The ElevenLabs realtime model used when listening.
     public var realtimeModelID: ElevenLabsModelID
     
@@ -61,10 +73,26 @@ public final class ElevenLabsService {
 
     // MARK: - Initialization
     
-    /// Creates an ElevenLabs realtime transcription service.
-    public init(apiKey: String = "", realtimeModelID: ElevenLabsModelID = .scribeV2Realtime) {
-        self.apiKey = apiKey
+    /// Creates an ElevenLabs realtime transcription service with a long-lived API key.
+    public init(
+        apiKey: String = "",
+        realtimeModelID: ElevenLabsModelID = .scribeV2Realtime,
+        realtimeEndpoint: URL? = nil
+    ) {
+        self.credential = .apiKey(apiKey)
         self.realtimeModelID = realtimeModelID
+        self.realtimeEndpoint = realtimeEndpoint
+    }
+
+    /// Creates an ElevenLabs realtime transcription service with any credential.
+    public init(
+        credential: SpeechCredential,
+        realtimeModelID: ElevenLabsModelID = .scribeV2Realtime,
+        realtimeEndpoint: URL? = nil
+    ) {
+        self.credential = credential
+        self.realtimeModelID = realtimeModelID
+        self.realtimeEndpoint = realtimeEndpoint
     }
     
     // MARK: - Public Methods
@@ -73,9 +101,18 @@ public final class ElevenLabsService {
     public func startListening() async {
         guard !connectionState.isLifecycleActive else { return }
 
-        guard !apiKey.isEmpty else {
+        guard credential.isConfigured else {
             connectionState = .error("API key not configured")
             lastError = ElevenLabsError.apiKeyMissing
+            return
+        }
+
+        let resolvedCredential: SpeechResolvedCredential
+        do {
+            resolvedCredential = try await credential.resolved()
+        } catch {
+            connectionState = .error(error.localizedDescription)
+            lastError = error
             return
         }
 
@@ -92,12 +129,16 @@ public final class ElevenLabsService {
             return
         }
 
-        let apiKey = apiKey
         let realtimeModelID = realtimeModelID
-        
+        let realtimeEndpoint = realtimeEndpoint
+
         listeningTask = Task {
             do {
-                let messageStream = try await webSocket.connect(apiKey: apiKey, modelID: realtimeModelID)
+                let messageStream = try await webSocket.connect(
+                    credential: resolvedCredential,
+                    modelID: realtimeModelID,
+                    endpoint: realtimeEndpoint
+                )
                 guard isCurrentLifecycleRun(runID) else {
                     await webSocket.disconnect()
                     return
@@ -109,47 +150,8 @@ public final class ElevenLabsService {
                     if Task.isCancelled { break }
                     guard isCurrentLifecycleRun(runID) else { break }
                     
-                    switch message {
-                    case .sessionStarted(let session):
-                        connectionState = .connected(sessionID: session.sessionID)
-                        
-                        do {
-                            let audioStream = try audioManager.startCapture()
-                            connectionState = .listening
-                            
-                            sendTask = Task {
-                                await sendAudioChunks(audioStream, runID: runID)
-                            }
-                        } catch {
-                            if isCurrentLifecycleRun(runID) {
-                                lastError = error
-                                connectionState = .error("Failed to start audio capture")
-                            }
-                        }
-                        
-                    case .partialTranscript(let partial):
-                        partialTranscriptText = partial.text
-                        
-                    case .committedTranscript(let committed):
-                        if !committed.text.isEmpty {
-                            let entry = SpeechTranscriptEntry(provider: .elevenLabs, text: committed.text)
-                            transcriptEntries.append(entry)
-                            partialTranscriptText = ""
-                        }
-                        
-                    case .committedTranscriptWithTimestamps(let committed):
-                        if !committed.text.isEmpty {
-                            let entry = SpeechTranscriptEntry(
-                                provider: .elevenLabs,
-                                text: committed.text,
-                                words: committed.words?.map(SpeechTranscriptWord.init) ?? []
-                            )
-                            transcriptEntries.append(entry)
-                            partialTranscriptText = ""
-                        }
-                        
-                    case .unknown(let type):
-                        Self.logger.debug("Ignoring unknown ElevenLabs realtime message type: \(type, privacy: .public)")
+                    if let startedSendTask = handleMessage(message, runID: runID, startsCapture: true) {
+                        sendTask = startedSendTask
                     }
                 }
                 
@@ -198,6 +200,68 @@ public final class ElevenLabsService {
     /// Sets lifecycle state for tests that exercise facade orchestration without opening audio devices.
     func setLifecycleStateForTesting(_ state: SpeechRealtimeConnectionState) {
         connectionState = state
+    }
+
+    /// Feeds a realtime message to the state machine for tests that run without opening audio devices.
+    func handleMessageForTesting(_ message: ElevenLabsMessage) {
+        _ = handleMessage(message, runID: lifecycleRunID, startsCapture: false)
+    }
+
+    /// Applies one server message to the session state machine.
+    ///
+    /// Returns the audio send task when the message started microphone capture.
+    private func handleMessage(
+        _ message: ElevenLabsMessage,
+        runID: UUID,
+        startsCapture: Bool
+    ) -> Task<Void, Never>? {
+        switch message {
+        case .sessionStarted(let session):
+            // Ignore a duplicate acknowledgement: re-running this branch would
+            // start a second capture and orphan the running audio send task.
+            guard connectionState == .connecting else { return nil }
+            connectionState = .connected(sessionID: session.sessionID)
+            guard startsCapture else { return nil }
+            do {
+                let audioStream = try audioManager.startCapture()
+                connectionState = .listening
+                return Task {
+                    await sendAudioChunks(audioStream, runID: runID)
+                }
+            } catch {
+                if isCurrentLifecycleRun(runID) {
+                    lastError = error
+                    connectionState = .error("Failed to start audio capture")
+                }
+                return nil
+            }
+
+        case .partialTranscript(let partial):
+            partialTranscriptText = partial.text
+
+        case .committedTranscript(let committed):
+            if !committed.text.isEmpty {
+                let entry = SpeechTranscriptEntry(provider: .elevenLabs, text: committed.text)
+                transcriptEntries.append(entry)
+                partialTranscriptText = ""
+            }
+
+        case .committedTranscriptWithTimestamps(let committed):
+            if !committed.text.isEmpty {
+                let entry = SpeechTranscriptEntry(
+                    provider: .elevenLabs,
+                    text: committed.text,
+                    words: committed.words?.map(SpeechTranscriptWord.init) ?? []
+                )
+                transcriptEntries.append(entry)
+                partialTranscriptText = ""
+            }
+
+        case .unknown(let type):
+            Self.logger.debug("Ignoring unknown ElevenLabs realtime message type: \(type, privacy: .public)")
+        }
+
+        return nil
     }
 
     // MARK: - Private Methods

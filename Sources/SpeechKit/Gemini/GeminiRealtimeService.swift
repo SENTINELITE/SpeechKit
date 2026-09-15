@@ -1,10 +1,10 @@
 import Foundation
 import SwiftUI
 
-/// A SwiftUI-observable Grok realtime transcription service.
+/// A SwiftUI-observable Gemini Live realtime transcription service.
 @Observable
 @MainActor
-public final class GrokRealtimeService {
+public final class GeminiRealtimeService {
     /// The current realtime connection state.
     public private(set) var connectionState: SpeechRealtimeConnectionState = .disconnected
     /// The latest partial transcript text.
@@ -18,7 +18,7 @@ public final class GrokRealtimeService {
 
     /// The credential used for realtime transcription.
     public var credential: SpeechCredential
-    /// The Grok API key used for realtime transcription.
+    /// The Google AI API key used for realtime transcription.
     ///
     /// Reading this property returns the key for a ``SpeechCredential/apiKey(_:)``
     /// credential and an empty string for a ``SpeechCredential/token(_:)``
@@ -28,23 +28,49 @@ public final class GrokRealtimeService {
         get { credential.staticAPIKey }
         set { credential = .apiKey(newValue) }
     }
-    /// An override for the Grok realtime WebSocket endpoint, or `nil` to use the vendor default.
+    /// An override for the Google AI realtime WebSocket endpoint, or `nil` to use the vendor default.
     public var realtimeEndpoint: URL?
-    /// Options for the Grok realtime transcription session.
-    public var options: GrokRealtimeOptions {
-        didSet {
-            audioManager.setTargetSampleRate(Double(options.sampleRate))
-        }
-    }
+    /// Options for the Gemini Live realtime transcription session.
+    public var options: GeminiRealtimeOptions
 
     private let audioManager: AudioCaptureManager
-    private let webSocket = GrokRealtimeWebSocket()
+    private let webSocket = GeminiLiveWebSocket()
     private var listeningTask: Task<Void, Never>?
     private var committedFingerprints: Set<String> = []
     private var lifecycleRunID = UUID()
     private var isGracefulStopPending = false
     private var gracefulStopWaiter: CheckedContinuation<Void, Never>?
     private let gracefulStopTimeoutNanoseconds: UInt64 = 2_000_000_000
+    private var utteranceCount = 0
+    private var currentUtteranceID: String?
+    private var currentUtteranceCloseKind = UtteranceCloseKind.open
+    private var hasHandledSetupComplete = false
+
+    /// How the current Gemini utterance was committed, which decides whether a late final reuses its id.
+    private enum UtteranceCloseKind {
+        /// No final entry has been committed for the current utterance yet.
+        case open
+        /// The partial entry was promoted to a final entry while stopping.
+        case partialCommit
+        /// Gemini sent a final transcription for the current utterance.
+        case finalTranscription
+    }
+
+    /// A Boolean value that indicates whether SpeechKit has an open manual activity bracket with Gemini.
+    ///
+    /// This is only ever `true` when ``GeminiRealtimeOptions/automaticActivityDetection``
+    /// is `false`, in which case SpeechKit brackets capture with explicit
+    /// `activityStart` and `activityEnd` events.
+    private(set) var isManualActivityActive = false
+
+    /// The number of times the service has run the setup-complete start branch for the current session.
+    ///
+    /// Gemini can repeat a `setupComplete` acknowledgement; the start branch must
+    /// only run once so the first audio task is never orphaned.
+    private(set) var setupCompleteRunCount = 0
+
+    /// The most recent session resumption handle Gemini sent, stored for a resumable-session follow-up.
+    private(set) var sessionResumptionHandle: String?
 
     /// The committed transcript text joined with spaces.
     public var transcriptText: String {
@@ -61,10 +87,10 @@ public final class GrokRealtimeService {
         audioManager.recordedWAVData
     }
 
-    /// Creates a Grok realtime transcription service with a long-lived API key.
+    /// Creates a Gemini Live realtime transcription service with a long-lived API key.
     public init(
         apiKey: String = "",
-        options: GrokRealtimeOptions = GrokRealtimeOptions(),
+        options: GeminiRealtimeOptions = GeminiRealtimeOptions(),
         realtimeEndpoint: URL? = nil
     ) {
         self.credential = .apiKey(apiKey)
@@ -73,10 +99,14 @@ public final class GrokRealtimeService {
         self.audioManager = AudioCaptureManager(targetSampleRate: Double(options.sampleRate))
     }
 
-    /// Creates a Grok realtime transcription service with any credential.
+    /// Creates a Gemini Live realtime transcription service with any credential.
+    ///
+    /// A ``SpeechCredential/token(_:)`` credential is sent as a Google
+    /// ephemeral token in an `Authorization: Token` header, so the secret never
+    /// appears in the socket URL.
     public init(
         credential: SpeechCredential,
-        options: GrokRealtimeOptions = GrokRealtimeOptions(),
+        options: GeminiRealtimeOptions = GeminiRealtimeOptions(),
         realtimeEndpoint: URL? = nil
     ) {
         self.credential = credential
@@ -90,8 +120,8 @@ public final class GrokRealtimeService {
         guard !connectionState.isLifecycleActive else { return }
 
         guard credential.isConfigured else {
-            connectionState = .error("Grok is not configured")
-            lastError = GrokRealtimeError.apiKeyMissing
+            connectionState = .error("Gemini is not configured")
+            lastError = GeminiRealtimeError.apiKeyMissing
             return
         }
 
@@ -99,16 +129,14 @@ public final class GrokRealtimeService {
         do {
             resolvedCredential = try await credential.resolved()
         } catch {
-            connectionState = .error(error.localizedDescription)
-            lastError = error
+            reportFailure(error)
             return
         }
 
         do {
             try options.validate()
         } catch {
-            connectionState = .error(error.localizedDescription)
-            lastError = error
+            reportFailure(error)
             return
         }
 
@@ -117,6 +145,11 @@ public final class GrokRealtimeService {
         partialTranscriptText = ""
         partialTranscriptEntry = nil
         lastError = nil
+        sessionResumptionHandle = nil
+        isManualActivityActive = false
+        hasHandledSetupComplete = false
+        setupCompleteRunCount = 0
+        resetUtteranceTracking()
 
         let hasPermission = await audioManager.requestPermission()
         guard isCurrentLifecycleRun(runID) else { return }
@@ -146,7 +179,7 @@ public final class GrokRealtimeService {
                     if Task.isCancelled { break }
                     guard isCurrentLifecycleRun(runID) else { break }
 
-                    if let startedSendTask = handleMessage(message, runID: runID, startsCapture: true) {
+                    if let startedSendTask = await handle(message, runID: runID, startsCapture: true) {
                         sendTask = startedSendTask
                     }
                 }
@@ -155,8 +188,7 @@ public final class GrokRealtimeService {
                 finishGracefulStopWaiter()
             } catch {
                 if !Task.isCancelled, isCurrentLifecycleRun(runID) {
-                    lastError = error
-                    connectionState = .error(error.localizedDescription)
+                    reportFailure(error)
                 }
                 finishGracefulStopWaiter()
             }
@@ -165,7 +197,7 @@ public final class GrokRealtimeService {
         }
     }
 
-    /// Stops realtime microphone transcription and disconnects from Grok.
+    /// Stops realtime microphone transcription and disconnects from Gemini.
     public func stopListening() async {
         guard connectionState.isLifecycleActive || listeningTask != nil || audioManager.isCapturing else {
             connectionState = .disconnected
@@ -178,7 +210,11 @@ public final class GrokRealtimeService {
         isGracefulStopPending = true
 
         do {
-            try await webSocket.sendAudioDone()
+            if isManualActivityActive {
+                isManualActivityActive = false
+                try await webSocket.sendActivityEnd()
+            }
+            try await webSocket.sendAudioStreamEnd()
         } catch {
             finishGracefulStopWaiter()
         }
@@ -198,6 +234,7 @@ public final class GrokRealtimeService {
         partialTranscriptText = ""
         partialTranscriptEntry = nil
         committedFingerprints.removeAll()
+        resetUtteranceTracking()
     }
 
     /// Sets lifecycle state for tests that exercise facade orchestration without opening audio devices.
@@ -205,80 +242,116 @@ public final class GrokRealtimeService {
         connectionState = state
     }
 
-    /// Feeds a realtime message to the state machine for tests that run without opening audio devices.
-    func handleMessageForTesting(_ message: GrokRealtimeMessage) {
-        _ = handleMessage(message, runID: lifecycleRunID, startsCapture: false)
+    /// Applies a decoded Gemini Live message without opening audio devices, for tests.
+    func handleMessageForTesting(_ message: GeminiLiveMessage) async {
+        _ = await handle(message, runID: lifecycleRunID, startsCapture: false)
     }
 
-    /// Applies one server message to the session state machine.
+    /// Applies a decoded Gemini Live message to the service state.
     ///
-    /// Returns the audio send task when the message started microphone capture.
-    private func handleMessage(
-        _ message: GrokRealtimeMessage,
+    /// - Returns: The audio streaming task when this message started microphone capture.
+    private func handle(
+        _ message: GeminiLiveMessage,
         runID: UUID,
         startsCapture: Bool
-    ) -> Task<Void, Never>? {
+    ) async -> Task<Void, Never>? {
         switch message {
-        case .transcriptCreated(let created):
-            // Ignore a duplicate acknowledgement: re-running this branch would
-            // start a second capture and orphan the running audio send task.
-            guard connectionState == .connecting else { return nil }
-            connectionState = .connected(sessionID: created.sessionID ?? "")
-            guard startsCapture else { return nil }
-            do {
-                let audioStream = try audioManager.startCapture()
+        case .setupComplete:
+            // Gemini can repeat the acknowledgement; running the start branch a
+            // second time would orphan the first audio task.
+            guard !hasHandledSetupComplete else { return nil }
+            hasHandledSetupComplete = true
+            setupCompleteRunCount += 1
+
+            connectionState = .connected(sessionID: sessionResumptionHandle ?? "")
+            guard startsCapture else {
+                // Simulated setup for tests: record the manual activity bracket
+                // without opening audio devices or touching the socket.
                 connectionState = .listening
-                return Task {
-                    await sendAudioChunks(audioStream, runID: runID)
-                }
+                isManualActivityActive = !options.automaticActivityDetection
+                return nil
+            }
+
+            let audioStream: AsyncStream<Data>
+            do {
+                audioStream = try audioManager.startCapture()
             } catch {
                 if isCurrentLifecycleRun(runID) {
-                    lastError = error
+                    lastError = SpeechRealtimeErrorRedaction.redacted(error)
                     connectionState = .error("Failed to start audio capture")
                 }
                 return nil
             }
 
-        case .transcriptPartial(let transcript):
-            handleTranscript(transcript)
+            connectionState = .listening
 
-        case .transcriptDone(let transcript):
-            commitTranscriptIfNeeded(transcript, forceUtteranceFinal: true)
+            if !options.automaticActivityDetection {
+                do {
+                    try await webSocket.sendActivityStart()
+                    isManualActivityActive = true
+                } catch {
+                    audioManager.stopCapture()
+                    if isCurrentLifecycleRun(runID) {
+                        lastError = SpeechRealtimeErrorRedaction.redacted(error)
+                        connectionState = .error("Failed to start manual activity")
+                    }
+                    return nil
+                }
+            }
+
+            return Task {
+                await sendAudioChunks(audioStream, runID: runID)
+            }
+
+        case .sessionResumptionUpdate(let handle, _):
+            sessionResumptionHandle = handle
+
+        case .interimTranscription(let text):
+            let entry = makeEntry(
+                text: text,
+                sourceID: utteranceIDForInterim(),
+                isFinal: false,
+                isUtteranceFinal: false
+            )
+            partialTranscriptEntry = entry
+            partialTranscriptText = entry.text
+
+        case .finalTranscription(let text):
+            let entry = makeEntry(
+                text: text,
+                sourceID: utteranceIDForFinal(),
+                isFinal: true,
+                isUtteranceFinal: true
+            )
+            currentUtteranceCloseKind = .finalTranscription
+            appendCommittedEntryIfNeeded(entry)
             partialTranscriptText = ""
             partialTranscriptEntry = nil
             finishGracefulStopWaiter()
 
+        case .goAway(let timeLeft):
+            let reason = timeLeft.map { "\($0) remaining" } ?? "the connection is closing"
+            lastError = GeminiRealtimeError.sessionEnding(reason)
+            commitPartialTranscriptBeforeStop()
+            stopGracefullyAfterSessionEnd()
+
         case .error(let message):
-            lastError = GrokRealtimeError.connectionFailed(message)
+            lastError = GeminiRealtimeError.connectionFailed(message)
             connectionState = .error(message)
             finishGracefulStopWaiter()
 
-        case .unknown:
+        case .turnComplete, .usageMetadata, .unknown:
             break
         }
 
         return nil
     }
 
-    private func handleTranscript(_ transcript: GrokTranscript) {
-        if transcript.isFinal == true {
-            commitTranscriptIfNeeded(transcript, forceUtteranceFinal: false)
-            partialTranscriptText = ""
-            partialTranscriptEntry = nil
-        } else {
-            let entry = makeEntry(from: transcript, isFinal: false, isUtteranceFinal: false)
-            partialTranscriptEntry = entry
-            partialTranscriptText = entry.text
+    private func stopGracefullyAfterSessionEnd() {
+        guard connectionState.isLifecycleActive, connectionState != .stopping else { return }
+        Task { [weak self] in
+            await self?.stopListening()
         }
-    }
-
-    private func commitTranscriptIfNeeded(_ transcript: GrokTranscript, forceUtteranceFinal: Bool) {
-        let entry = makeEntry(
-            from: transcript,
-            isFinal: true,
-            isUtteranceFinal: forceUtteranceFinal || transcript.speechFinal == true
-        )
-        appendCommittedEntryIfNeeded(entry)
     }
 
     private func commitPartialTranscriptBeforeStop() {
@@ -298,6 +371,7 @@ public final class GrokRealtimeService {
             words: partialEntry.words
         )
 
+        currentUtteranceCloseKind = .partialCommit
         appendCommittedEntryIfNeeded(entry)
         partialTranscriptText = ""
         partialTranscriptEntry = nil
@@ -349,21 +423,65 @@ public final class GrokRealtimeService {
     }
 
     private func makeEntry(
-        from transcript: GrokTranscript,
+        text: String,
+        sourceID: String,
         isFinal: Bool,
         isUtteranceFinal: Bool
     ) -> SpeechTranscriptEntry {
         SpeechTranscriptEntry(
-            provider: .grok,
-            text: transcript.text,
-            start: transcript.start,
-            duration: transcript.duration,
+            provider: .gemini,
+            sourceID: sourceID,
+            text: text,
             isFinal: isFinal,
-            isUtteranceFinal: isUtteranceFinal,
-            channelIndex: transcript.channelIndex,
-            speaker: transcript.speaker,
-            words: transcript.words?.map(SpeechTranscriptWord.init) ?? []
+            isUtteranceFinal: isUtteranceFinal
         )
+    }
+
+    /// Returns the utterance id for an interim transcription.
+    ///
+    /// A new interim after a committed final starts the next utterance.
+    private func utteranceIDForInterim() -> String {
+        guard let currentUtteranceID, currentUtteranceCloseKind == .open else {
+            return beginNextUtterance()
+        }
+        return currentUtteranceID
+    }
+
+    /// Returns the utterance id for a final transcription.
+    ///
+    /// Gemini Live sends no utterance identifier, so SpeechKit tracks one itself
+    /// to keep two identical utterances apart. A final that follows a partial for
+    /// the current utterance — including a partial already promoted by
+    /// ``commitPartialTranscriptBeforeStop()`` — reuses that id so the late
+    /// duplicate is suppressed.
+    private func utteranceIDForFinal() -> String {
+        switch currentUtteranceCloseKind {
+        case .open, .partialCommit:
+            return currentUtteranceID ?? beginNextUtterance()
+        case .finalTranscription:
+            return beginNextUtterance()
+        }
+    }
+
+    private func beginNextUtterance() -> String {
+        utteranceCount += 1
+        let identifier = "utterance-\(utteranceCount)"
+        currentUtteranceID = identifier
+        currentUtteranceCloseKind = .open
+        return identifier
+    }
+
+    private func resetUtteranceTracking() {
+        utteranceCount = 0
+        currentUtteranceID = nil
+        currentUtteranceCloseKind = .open
+    }
+
+    /// Publishes a caught error with any credential-bearing URL stripped out.
+    private func reportFailure(_ error: Error) {
+        let redacted = SpeechRealtimeErrorRedaction.redacted(error)
+        lastError = redacted
+        connectionState = .error(redacted.localizedDescription)
     }
 
     private func sendAudioChunks(_ stream: AsyncStream<Data>, runID: UUID) async {
@@ -376,7 +494,7 @@ public final class GrokRealtimeService {
             } catch {
                 if !Task.isCancelled, isCurrentLifecycleRun(runID) {
                     await MainActor.run {
-                        lastError = error
+                        lastError = SpeechRealtimeErrorRedaction.redacted(error)
                     }
                 }
                 break

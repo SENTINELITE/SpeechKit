@@ -118,7 +118,7 @@ struct CommittedTranscriptWithTimestamps: Decodable, Sendable {
 }
 
 /// A word-level timestamp returned by ElevenLabs transcription.
-public struct ElevenLabsWordTimestamp: Decodable, Sendable {
+public struct ElevenLabsWordTimestamp: Decodable, Sendable, Equatable {
     /// The word or token text.
     public let text: String
     /// The start time, in seconds.

@@ -154,6 +154,36 @@ struct FileTranscriptionClientTests {
         #expect(body.contains("name=\"file\"; filename=\"sample.wav\""))
     }
 
+    @Test("ElevenLabs detailed response decodes text, language code, and word timings")
+    func elevenLabsDetailedResponseDecodesWordTimings() throws {
+        let data = Data(
+            """
+            {
+              "text": "hello world",
+              "language_code": "en",
+              "words": [
+                {"text":"hello","start":0.0,"end":0.5,"type":"word","logprob":-0.1},
+                {"text":" ","start":0.5,"end":0.5,"type":"spacing"},
+                {"text":"world","start":0.5,"end":1.0,"type":"word"}
+              ]
+            }
+            """.utf8
+        )
+
+        let response = try JSONDecoder().decode(ElevenLabsFileTranscriptionResponse.self, from: data)
+
+        #expect(response.text == "hello world")
+        #expect(response.languageCode == "en")
+        #expect(response.words?.count == 3)
+        #expect(response.words?.first?.text == "hello")
+        #expect(response.words?.first?.start == 0.0)
+        #expect(response.words?.first?.end == 0.5)
+        #expect(response.words?.first?.type == "word")
+        #expect(response.words?.first?.logprob == -0.1)
+        #expect(response.words?.last?.text == "world")
+        #expect(response.words?.last?.logprob == nil)
+    }
+
     @Test("OpenAI multipart request includes model, response format, and optional fields")
     func openAIRequestIncludesModelResponseFormatAndOptionalFields() throws {
         let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")

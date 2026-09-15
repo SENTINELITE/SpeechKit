@@ -5,7 +5,7 @@ actor GrokRealtimeWebSocket {
     private var session: URLSession?
     private var continuation: AsyncThrowingStream<GrokRealtimeMessage, Error>.Continuation?
 
-    private let baseURL = "wss://api.x.ai/v1/stt"
+    static let defaultURL = URL(string: "wss://api.x.ai/v1/stt")
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
@@ -13,20 +13,39 @@ actor GrokRealtimeWebSocket {
         webSocketTask?.state == .running
     }
 
-    func connect(
-        apiKey: String,
-        options: GrokRealtimeOptions
-    ) async throws -> AsyncThrowingStream<GrokRealtimeMessage, Error> {
-        guard var components = URLComponents(string: baseURL) else {
+    /// Builds the WebSocket handshake request for a realtime session.
+    ///
+    /// Grok accepts both a long-lived API key and a short-lived token as a
+    /// bearer token.
+    nonisolated static func makeConnectRequest(
+        credential: SpeechResolvedCredential,
+        options: GrokRealtimeOptions,
+        endpoint: URL? = nil
+    ) throws -> URLRequest {
+        guard let baseURL = endpoint ?? defaultURL,
+              var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw GrokRealtimeError.invalidURL
         }
-        components.queryItems = try options.queryItems()
+
+        var queryItems = components.queryItems ?? []
+        queryItems.append(contentsOf: try options.queryItems())
+        components.queryItems = queryItems
+
         guard let url = components.url else {
             throw GrokRealtimeError.invalidURL
         }
 
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(credential.secret)", forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    func connect(
+        credential: SpeechResolvedCredential,
+        options: GrokRealtimeOptions,
+        endpoint: URL? = nil
+    ) async throws -> AsyncThrowingStream<GrokRealtimeMessage, Error> {
+        let request = try Self.makeConnectRequest(credential: credential, options: options, endpoint: endpoint)
 
         let session = URLSession(configuration: .default)
         self.session = session

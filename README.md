@@ -9,8 +9,8 @@ SpeechKit is a Swift package for adding speech-to-text to Swift and SwiftUI apps
 
 It supports two workflows:
 
-- Realtime microphone transcription with ElevenLabs, OpenAI, xAI Grok, and Apple local Speech on supported OS versions.
-- File transcription with ElevenLabs, Aqua, Cohere, Grok, OpenAI, and Apple local Speech on supported OS versions.
+- Realtime microphone transcription with ElevenLabs, OpenAI, xAI Grok, Meta, Gemini, and Apple local Speech on supported OS versions.
+- File transcription with ElevenLabs, Aqua, Cohere, Grok, OpenAI, Meta, Gemini, and Apple local Speech on supported OS versions.
 
 ## Highlights
 
@@ -18,6 +18,7 @@ It supports two workflows:
 - Provider-neutral realtime transcript state.
 - Provider-neutral file transcription for simple text results.
 - Provider-specific options and detailed responses when you need timestamps, diarization, usage metadata, or model-specific controls.
+- Meta Muse Voice Transcribe and Gemini 3.5 Transcribe for both realtime sessions and file uploads.
 - On-device Apple Speech support for apps running on iOS 26, macOS 26, or visionOS 26.
 - Security-scoped file overloads for document picker workflows.
 - A runnable iOS demo app for trying realtime transcription, recorded dictation uploads, and file transcription.
@@ -105,6 +106,60 @@ Provider references:
 
 - xAI warns not to expose API keys in client-side code in its [Speech to Text documentation](https://docs.x.ai/developers/model-capabilities/audio/speech-to-text).
 - OpenAI documents speech-to-text authentication and request patterns in its [Speech to text guide](https://platform.openai.com/docs/guides/speech-to-text).
+- Meta documents Muse Voice Transcribe authentication in its [speech-to-text documentation](https://dev.meta.ai/docs/speech-to-text/).
+- Google documents API key handling and ephemeral tokens in its [Gemini API key guide](https://ai.google.dev/gemini-api/docs/api-key).
+
+The Gemini Live WebSocket carries the API key in the URL query string, so a backend proxy or Google's ephemeral tokens are the safer production path for realtime Gemini sessions. When you pass a Google ephemeral token, SpeechKit sends it in an `Authorization: Token` header instead and keeps it out of the URL.
+
+### Short-Lived Tokens
+
+Every keyed provider accepts a `SpeechCredential` instead of a raw key. A `SpeechTokenProvider` is called once per file transcription request and once per realtime session, so your app never keeps a long-lived key in memory.
+
+```swift
+let speech = SpeechService(
+    elevenLabs: ElevenLabsConfiguration(
+        credential: .token(SpeechTokenProvider { try await backend.fetchElevenLabsToken() })
+    ),
+    openAI: OpenAIConfiguration(
+        credential: .token(SpeechTokenProvider { try await backend.fetchOpenAIClientSecret() })
+    )
+)
+```
+
+`apiKey` still works everywhere it worked before. Reading it returns the key for an API-key credential and an empty string for a token credential; writing it replaces the credential with an API key.
+
+First-party short-lived tokens:
+
+| Provider | Short-lived token |
+| --- | --- |
+| ElevenLabs | Single-use token for realtime Scribe |
+| OpenAI | Ephemeral client secret for Realtime |
+| Google Gemini | Ephemeral token for Live (Live only, not REST) |
+| Aqua, Cohere, Grok, Meta | No first-party token: use your own proxy |
+
+Google ephemeral tokens only authorize Gemini Live. A token used for Gemini file transcription must be an OAuth access token or a credential your own proxy accepts, because SpeechKit sends it as `Authorization: Bearer`.
+
+### Proxy Endpoints
+
+When a provider has no short-lived token, route the traffic through your own proxy and let the proxy inject the vendor key. Every keyed configuration takes a `fileEndpoint`, providers with realtime take a `realtimeEndpoint`, and Gemini also takes a `filesEndpoint` for the Files API upload URL. SpeechKit still appends the query items it needs, so an override may carry its own query string.
+
+```swift
+let speech = SpeechService(
+    grok: GrokConfiguration(
+        credential: .token(SpeechTokenProvider { try await backend.fetchProxyToken() }),
+        fileEndpoint: URL(string: "https://api.example.com/grok/stt"),
+        realtimeEndpoint: URL(string: "wss://api.example.com/grok/stt")
+    ),
+    gemini: GeminiConfiguration(
+        credential: .token(SpeechTokenProvider { try await backend.fetchProxyToken() }),
+        fileEndpoint: URL(string: "https://api.example.com/gemini/v1beta/interactions"),
+        filesEndpoint: URL(string: "https://api.example.com/gemini/upload/v1beta/files"),
+        realtimeEndpoint: URL(string: "wss://api.example.com/gemini/live")
+    )
+)
+```
+
+A `nil` endpoint keeps the vendor default.
 
 ## Chapter 1: Create a Speech Service
 
@@ -242,6 +297,50 @@ let speech = SpeechService(
 await speech.startListening(provider: .grok)
 ```
 
+### Realtime: Meta
+
+Meta Muse Voice Transcribe streams raw PCM. `MetaRealtimeOptions` sets the mode, the partial delivery style, the language bias, and keyword hints.
+
+```swift
+let speech = SpeechService(
+    meta: MetaConfiguration(
+        apiKey: "<META_API_KEY>",
+        realtimeOptions: MetaRealtimeOptions(
+            mode: .diarization,
+            audioEncoding: .pcm24kHz,
+            partialMode: .cumulative,
+            languageBias: [.english],
+            keywords: ["SpeechKit"]
+        )
+    )
+)
+
+await speech.startListening(provider: .meta)
+```
+
+Meta realtime sessions accept 24 kHz or 16 kHz mono PCM only. Use `.cumulative` partials when each event should carry the full turn text, and `.delta` when you want only the new words.
+
+### Realtime: Gemini
+
+Gemini 3.5 Transcribe Live streams 16 kHz mono PCM through the Gemini Live API. `GeminiRealtimeOptions` sets the language hints, custom vocabulary, and transcription mode.
+
+```swift
+let speech = SpeechService(
+    gemini: GeminiConfiguration(
+        apiKey: "<GOOGLE_API_KEY>",
+        realtimeOptions: GeminiRealtimeOptions(
+            languageCodes: ["en-US"],
+            customVocabulary: ["SpeechKit"],
+            mode: .verbatim
+        )
+    )
+)
+
+await speech.startListening(provider: .gemini)
+```
+
+Gemini Live sessions last up to 10 minutes and do not return speaker labels or word timestamps. Use file transcription when you need either one.
+
 ### Realtime: Apple Local Speech
 
 Apple local Speech runs on device through Apple's Speech framework. It is available on iOS 26, macOS 26, and visionOS 26, and is not available on watchOS.
@@ -300,6 +399,8 @@ let text = try await speech.transcribeAudioFile(
     file: audioFileURL
 )
 ```
+
+Call `transcribeElevenLabsAudioFile(file:modelID:)` instead when you need the detailed `ElevenLabsFileTranscriptionResponse`, which carries the detected `languageCode` and word-level timings in `words`.
 
 ### File: Aqua
 
@@ -404,6 +505,87 @@ let response = try await speech.transcribeOpenAIAudioFile(
 
 print(response.diarizedSegments ?? [])
 ```
+
+### File: Meta
+
+Meta Muse Voice Transcribe accepts WAV uploads up to 32 MB and 10 minutes. The provider-neutral API returns text:
+
+```swift
+let text = try await speech.transcribeAudioFile(
+    provider: .meta,
+    file: audioFileURL,
+    options: .meta(mode: .diarization, languageBias: [.english])
+)
+```
+
+Use the detailed call when you want per-turn timings and speaker labels.
+
+```swift
+let speech = SpeechService(
+    meta: MetaConfiguration(
+        apiKey: "<META_API_KEY>",
+        mode: .diarization,
+        languageBias: [.english],
+        keywords: ["SpeechKit", "AC-42"]
+    )
+)
+
+let response = try await speech.transcribeMetaAudioFile(file: audioFileURL)
+print(response.transcript)
+for turn in response.turns ?? [] {
+    print(turn.speaker ?? "?", turn.startMs, turn.endMs, turn.transcript)
+}
+```
+
+Meta biases transcription with language names such as `"English"` or `"Mandarin Chinese"` instead of BCP-47 codes.
+
+### File: Gemini
+
+Gemini 3.5 Transcribe accepts up to one hour of audio, or 30 minutes when diarization or word timestamps are on. The provider-neutral API returns text:
+
+```swift
+let text = try await speech.transcribeAudioFile(
+    provider: .gemini,
+    file: audioFileURL,
+    options: .gemini(languageCodes: ["en-US"])
+)
+```
+
+Use the detailed call when you want speaker labels and word timestamps.
+
+```swift
+let speech = SpeechService(
+    gemini: GeminiConfiguration(
+        apiKey: "<GOOGLE_API_KEY>",
+        languageCodes: ["en-US"],
+        mode: .verbatim,
+        diarize: true,
+        timestampGranularities: [.word]
+    )
+)
+
+let response = try await speech.transcribeGeminiAudioFile(file: audioFileURL)
+print(response.text)
+for word in response.words {
+    print(word.text, word.speaker ?? "?", word.start ?? 0, word.end ?? 0)
+}
+```
+
+Gemini rejects a custom vocabulary combined with diarization or word timestamps, so pick one or the other per request.
+
+For long recordings, start a background interaction instead of waiting on one synchronous request. SpeechKit polls until the interaction completes.
+
+```swift
+let response = try await speech.transcribeGeminiAudioFile(
+    file: longRecordingURL,
+    options: GeminiFileTranscriptionOptions(
+        languageCodes: ["en-US"],
+        processingMode: .background(pollInterval: 5)
+    )
+)
+```
+
+SpeechKit sends audio inline below the 20 MB default threshold and uploads larger files with the Gemini Files API. Set `uploadStrategy` to `.inline` or `.filesAPI` to force one path.
 
 ### File: Apple Local Speech
 

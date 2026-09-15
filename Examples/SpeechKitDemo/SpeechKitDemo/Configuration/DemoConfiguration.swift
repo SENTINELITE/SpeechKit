@@ -31,6 +31,8 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
     case cohere
     case grok
     case openAI
+    case meta
+    case gemini
 
     var id: Self { self }
 
@@ -42,6 +44,8 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
         case .cohere: "Cohere"
         case .grok: "Grok"
         case .openAI: "OpenAI"
+        case .meta: "Meta"
+        case .gemini: "Gemini"
         }
     }
 
@@ -53,6 +57,8 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
         case .cohere: .cohere
         case .grok: .grok
         case .openAI: .openAI
+        case .meta: .meta
+        case .gemini: .gemini
         }
     }
 
@@ -64,6 +70,8 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
         case .cohere: .cohere
         case .grok: .grok
         case .openAI: .openAI
+        case .meta: .meta
+        case .gemini: .gemini
         }
     }
 }
@@ -73,6 +81,8 @@ enum DemoRealtimeProvider: String, CaseIterable, Identifiable {
     case elevenLabs
     case openAI
     case grok
+    case meta
+    case gemini
 
     var id: Self { self }
 
@@ -82,6 +92,8 @@ enum DemoRealtimeProvider: String, CaseIterable, Identifiable {
         case .elevenLabs: "ElevenLabs"
         case .openAI: "OpenAI"
         case .grok: "Grok"
+        case .meta: "Meta"
+        case .gemini: "Gemini"
         }
     }
 
@@ -91,6 +103,8 @@ enum DemoRealtimeProvider: String, CaseIterable, Identifiable {
         case .elevenLabs: .elevenLabs
         case .openAI: .openAI
         case .grok: .grok
+        case .meta: .meta
+        case .gemini: .gemini
         }
     }
 
@@ -100,6 +114,8 @@ enum DemoRealtimeProvider: String, CaseIterable, Identifiable {
         case .elevenLabs: .elevenLabs
         case .openAI: .openAI
         case .grok: .grok
+        case .meta: .meta
+        case .gemini: .gemini
         }
     }
 }
@@ -111,6 +127,8 @@ enum DemoAPIKeyProvider: String, CaseIterable, Identifiable {
     case grok
     case cohere
     case aqua
+    case meta
+    case gemini
 
     var id: Self { self }
 
@@ -122,6 +140,8 @@ enum DemoAPIKeyProvider: String, CaseIterable, Identifiable {
         case .grok: "Grok"
         case .cohere: "Cohere"
         case .aqua: "Aqua"
+        case .meta: "Meta"
+        case .gemini: "Gemini"
         }
     }
 
@@ -261,6 +281,58 @@ final class DemoConfiguration {
         didSet { set(openAITimeoutMinutes, for: "openAITimeoutMinutes") }
     }
 
+    var metaModel: MetaModelID {
+        didSet { set(metaModel.rawValue, for: "metaModel") }
+    }
+
+    var metaMode: MetaTranscriptionMode {
+        didSet { set(metaMode.rawValue, for: "metaMode") }
+    }
+
+    var metaLanguage: MetaLanguage? {
+        didSet { set(metaLanguage?.rawValue ?? "", for: "metaLanguage") }
+    }
+
+    var metaKeywords: String {
+        didSet { set(metaKeywords, for: "metaKeywords") }
+    }
+
+    var metaRealtimePartialMode: MetaPartialMode {
+        didSet { set(metaRealtimePartialMode.rawValue, for: "metaRealtimePartialMode") }
+    }
+
+    var geminiFileModel: GeminiFileTranscriptionModelID {
+        didSet { set(geminiFileModel.rawValue, for: "geminiFileModel") }
+    }
+
+    var geminiRealtimeModel: GeminiRealtimeModelID {
+        didSet { set(geminiRealtimeModel.rawValue, for: "geminiRealtimeModel") }
+    }
+
+    var geminiLanguageCodes: String {
+        didSet { set(geminiLanguageCodes, for: "geminiLanguageCodes") }
+    }
+
+    var geminiCustomVocabulary: String {
+        didSet { set(geminiCustomVocabulary, for: "geminiCustomVocabulary") }
+    }
+
+    var geminiMode: GeminiTranscriptionMode {
+        didSet { set(geminiMode.rawValue, for: "geminiMode") }
+    }
+
+    var geminiDiarize: Bool {
+        didSet { set(geminiDiarize, for: "geminiDiarize") }
+    }
+
+    var geminiWordTimestamps: Bool {
+        didSet { set(geminiWordTimestamps, for: "geminiWordTimestamps") }
+    }
+
+    var geminiBackgroundProcessing: Bool {
+        didSet { set(geminiBackgroundProcessing, for: "geminiBackgroundProcessing") }
+    }
+
     /// Loads persisted provider defaults and keychain-backed secrets.
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -294,6 +366,19 @@ final class DemoConfiguration {
         openAISegmentTimestamps = defaults.object(forKey: "openAISegmentTimestamps") as? Bool ?? false
         openAIDiarization = defaults.object(forKey: "openAIDiarization") as? Bool ?? false
         openAITimeoutMinutes = defaults.object(forKey: "openAITimeoutMinutes") as? Double ?? 10
+        metaModel = Self.enumValue(for: "metaModel", default: .museVoiceTranscribe1, defaults: defaults)
+        metaMode = Self.enumValue(for: "metaMode", default: .endpointing, defaults: defaults)
+        metaLanguage = Self.optionalEnumValue(for: "metaLanguage", defaults: defaults)
+        metaKeywords = defaults.string(forKey: "metaKeywords") ?? ""
+        metaRealtimePartialMode = Self.enumValue(for: "metaRealtimePartialMode", default: .cumulative, defaults: defaults)
+        geminiFileModel = Self.enumValue(for: "geminiFileModel", default: .transcribe35, defaults: defaults)
+        geminiRealtimeModel = Self.enumValue(for: "geminiRealtimeModel", default: .transcribeLive35, defaults: defaults)
+        geminiLanguageCodes = defaults.string(forKey: "geminiLanguageCodes") ?? ""
+        geminiCustomVocabulary = defaults.string(forKey: "geminiCustomVocabulary") ?? ""
+        geminiMode = Self.enumValue(for: "geminiMode", default: .verbatim, defaults: defaults)
+        geminiDiarize = defaults.object(forKey: "geminiDiarize") as? Bool ?? false
+        geminiWordTimestamps = defaults.object(forKey: "geminiWordTimestamps") as? Bool ?? false
+        geminiBackgroundProcessing = defaults.object(forKey: "geminiBackgroundProcessing") as? Bool ?? false
         loadAPIKeys()
     }
 
@@ -398,6 +483,42 @@ final class DemoConfiguration {
             modelID: aquaModel,
             language: aquaLanguage
         )
+
+        let metaKey = apiKey(for: .meta)
+        speech.meta = metaKey.isEmpty ? nil : MetaConfiguration(
+            apiKey: metaKey,
+            modelID: metaModel,
+            mode: metaMode,
+            languageBias: metaLanguageBias,
+            keywords: commaSeparatedValues(metaKeywords),
+            realtimeOptions: MetaRealtimeOptions(
+                modelID: metaModel,
+                mode: metaMode,
+                partialMode: metaRealtimePartialMode,
+                languageBias: metaLanguageBias,
+                keywords: commaSeparatedValues(metaKeywords)
+            )
+        )
+
+        let geminiKey = apiKey(for: .gemini)
+        speech.gemini = geminiKey.isEmpty ? nil : GeminiConfiguration(
+            apiKey: geminiKey,
+            fileTranscriptionModelID: geminiFileModel,
+            realtimeModelID: geminiRealtimeModel,
+            languageCodes: commaSeparatedValues(geminiLanguageCodes),
+            customVocabulary: commaSeparatedValues(geminiCustomVocabulary),
+            mode: geminiMode,
+            diarize: geminiDiarize,
+            timestampGranularities: geminiTimestampGranularities,
+            processingMode: geminiProcessingMode,
+            // `realtimeModelID` above is the source of truth for the Live model;
+            // SpeechService applies it on top of these options.
+            realtimeOptions: GeminiRealtimeOptions(
+                languageCodes: commaSeparatedValues(geminiLanguageCodes),
+                customVocabulary: commaSeparatedValues(geminiCustomVocabulary),
+                mode: geminiMode
+            )
+        )
     }
 
     /// Converts the current provider-specific controls into SpeechKit file transcription options.
@@ -438,7 +559,39 @@ final class DemoConfiguration {
                 diarizationChunkingStrategy: openAIDiarization ? .auto : nil,
                 timeoutInterval: openAITimeoutMinutes * 60
             )
+        case .meta:
+            return .meta(
+                modelID: metaModel,
+                mode: metaMode,
+                languageBias: metaLanguageBias,
+                keywords: commaSeparatedValues(metaKeywords)
+            )
+        case .gemini:
+            return .gemini(
+                modelID: geminiFileModel,
+                languageCodes: commaSeparatedValues(geminiLanguageCodes),
+                customVocabulary: commaSeparatedValues(geminiCustomVocabulary),
+                mode: geminiMode,
+                diarize: geminiDiarize,
+                timestampGranularities: geminiTimestampGranularities,
+                processingMode: geminiProcessingMode
+            )
         }
+    }
+
+    /// The Meta language bias list built from the single-language demo picker.
+    private var metaLanguageBias: [MetaLanguage] {
+        metaLanguage.map { [$0] } ?? []
+    }
+
+    /// The Gemini timestamp granularities implied by the demo word-timestamp toggle.
+    private var geminiTimestampGranularities: [GeminiTimestampGranularity] {
+        geminiWordTimestamps ? [.word] : []
+    }
+
+    /// The Gemini processing mode implied by the demo background-processing toggle.
+    private var geminiProcessingMode: GeminiProcessingMode {
+        geminiBackgroundProcessing ? .background(pollInterval: 5) : .synchronous
     }
 
     /// Returns the provider timeout shown by upload progress UI when SpeechKit has a timeout for that provider.
@@ -448,7 +601,7 @@ final class DemoConfiguration {
             return grokTimeoutMinutes * 60
         case .openAI:
             return openAITimeoutMinutes * 60
-        case .elevenLabs, .aqua, .cohere:
+        case .elevenLabs, .aqua, .cohere, .meta, .gemini:
             return nil
         }
     }

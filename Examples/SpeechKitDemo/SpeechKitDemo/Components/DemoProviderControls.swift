@@ -125,6 +125,55 @@ struct FileProviderOptionsView: View {
             Toggle("Word timestamps", isOn: $configuration.openAIWordTimestamps)
             Toggle("Segment timestamps", isOn: $configuration.openAISegmentTimestamps)
             Toggle("Diarization", isOn: $configuration.openAIDiarization)
+        case .meta:
+            Picker("Model", selection: $configuration.metaModel) {
+                ForEach(MetaModelID.allCases, id: \.self) { model in
+                    Text(model.rawValue).tag(model)
+                }
+            }
+
+            Picker("Mode", selection: $configuration.metaMode) {
+                ForEach(MetaTranscriptionMode.allCases, id: \.self) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+
+            Picker("Language bias", selection: $configuration.metaLanguage) {
+                Text("Default").tag(MetaLanguage?.none)
+                ForEach(MetaLanguage.allCases, id: \.self) { language in
+                    Text(language.displayName).tag(MetaLanguage?.some(language))
+                }
+            }
+
+            TextField("Keywords (comma separated)", text: $configuration.metaKeywords, axis: .vertical)
+                .lineLimit(2...4)
+        case .gemini:
+            Picker("Model", selection: $configuration.geminiFileModel) {
+                ForEach(GeminiFileTranscriptionModelID.allCases, id: \.self) { model in
+                    Text(model.rawValue).tag(model)
+                }
+            }
+
+            Picker("Mode", selection: $configuration.geminiMode) {
+                ForEach(GeminiTranscriptionMode.allCases, id: \.self) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+
+            TextField("Language codes (comma separated)", text: $configuration.geminiLanguageCodes)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            TextField("Custom vocabulary (comma separated)", text: $configuration.geminiCustomVocabulary, axis: .vertical)
+                .lineLimit(2...4)
+
+            Toggle("Diarize", isOn: $configuration.geminiDiarize)
+            Toggle("Word timestamps", isOn: $configuration.geminiWordTimestamps)
+            Toggle("Background processing", isOn: $configuration.geminiBackgroundProcessing)
+
+            Text("Gemini rejects a custom vocabulary combined with diarization or word timestamps. Leave the vocabulary empty to use either one.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }
@@ -156,4 +205,12 @@ extension GrokLanguage {
     var displayName: String {
         "\(rawValue) - \(String(describing: self))"
     }
+}
+
+/// Human-readable names for Meta language controls.
+///
+/// Meta biases transcription with language names, so each raw value is already
+/// a display name.
+extension MetaLanguage {
+    var displayName: String { rawValue }
 }

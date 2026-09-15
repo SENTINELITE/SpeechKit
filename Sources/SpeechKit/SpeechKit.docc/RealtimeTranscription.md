@@ -1,6 +1,6 @@
 # Realtime Transcription
 
-Stream microphone audio to ElevenLabs, OpenAI, xAI Grok, or Apple local Speech and observe partial and committed transcript text.
+Stream microphone audio to ElevenLabs, OpenAI, xAI Grok, Meta, Gemini, or Apple local Speech and observe partial and committed transcript text.
 
 ## Overview
 
@@ -40,6 +40,8 @@ Start a specific realtime provider by passing ``SpeechRealtimeProvider``:
 ```swift
 await speech.startListening(provider: .openAI)
 await speech.startListening(provider: .grok)
+await speech.startListening(provider: .meta)
+await speech.startListening(provider: .gemini)
 ```
 
 Apple local Speech is available on iOS 26, macOS 26, and visionOS 26. SpeechKit omits `.apple` from ``SpeechRealtimeProvider/allCases`` before those OS versions and on watchOS.
@@ -69,11 +71,36 @@ let speech = SpeechService(
             language: .english,
             keyTerms: ["SpeechKit"]
         )
+    ),
+    meta: MetaConfiguration(
+        apiKey: "<META_API_KEY>",
+        realtimeOptions: MetaRealtimeOptions(
+            mode: .diarization,
+            audioEncoding: .pcm24kHz,
+            partialMode: .cumulative,
+            languageBias: [.english]
+        )
+    ),
+    gemini: GeminiConfiguration(
+        apiKey: "<GOOGLE_API_KEY>",
+        realtimeOptions: GeminiRealtimeOptions(
+            languageCodes: ["en-US"],
+            mode: .verbatim
+        )
     )
 )
 ```
 
 `gpt-live-transcribe` is the low-latency default. Select `gpt-transcribe` for committed WebSocket turns when your app needs OpenAI's detected-language output. Both models use `languages` instead of the legacy singular `language` hint.
+
+Meta streams raw PCM and accepts 24 kHz or 16 kHz mono audio only, so ``MetaRealtimeOptions`` rejects ``MetaAudioEncoding/wav``. Use ``MetaPartialMode/cumulative`` when each partial event should carry the full turn text, and ``MetaPartialMode/delta`` when you only want the new words.
+
+Gemini Live streams 16 kHz mono PCM, limits a session to 10 minutes, and returns neither speaker labels nor word timestamps. Use <doc:FileTranscription> with ``GeminiConfiguration/diarize`` or ``GeminiTimestampGranularity/word`` when you need either one.
+
+| Provider | Capture format | Session limit |
+| --- | --- | --- |
+| Meta | 24 kHz or 16 kHz mono PCM16 | Not documented |
+| Gemini | 16 kHz mono PCM16 | 10 minutes |
 
 For provider-by-provider setup examples, see <doc:ProviderHowToGuides>.
 
@@ -102,6 +129,15 @@ When a realtime provider is not configured, ``SpeechService/startListening(provi
 - ``SpeechRealtimeConnectionState``
 - ``SpeechTranscriptEntry``
 - ``SpeechTranscriptWord``
+
+### Provider Realtime Services
+
+- ``GrokRealtimeService``
+- ``OpenAIRealtimeService``
+- ``MetaRealtimeService``
+- ``MetaRealtimeError``
+- ``GeminiRealtimeService``
+- ``GeminiRealtimeError``
 
 ### Realtime Operations
 

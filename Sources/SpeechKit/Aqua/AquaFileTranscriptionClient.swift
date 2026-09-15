@@ -66,15 +66,22 @@ public struct AquaFileTranscriptionResponse: Decodable, Sendable, Equatable {
 }
 
 struct AquaFileTranscriptionClient {
-    private let apiKey: String
+    static let defaultUploadURL = URL(string: "https://api.aquavoice.com/api/v1/audio/transcriptions")
+
+    private let credential: SpeechCredential
     private let urlSession: URLSession
-    private let uploadURL = URL(string: "https://api.aquavoice.com/api/v1/audio/transcriptions")
+    private let uploadURL: URL?
     private let maxUploadBytes: Int64 = 25 * 1024 * 1024
     private let allowedExtensions: Set<String> = ["flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "wav", "webm"]
 
-    init(apiKey: String, urlSession: URLSession = .shared) {
-        self.apiKey = apiKey
+    init(apiKey: String, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+        self.init(credential: .apiKey(apiKey), endpoint: endpoint, urlSession: urlSession)
+    }
+
+    init(credential: SpeechCredential, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+        self.credential = credential
         self.urlSession = urlSession
+        self.uploadURL = endpoint ?? Self.defaultUploadURL
     }
 
     func transcribeAudioFile(
@@ -89,7 +96,7 @@ struct AquaFileTranscriptionClient {
         file: URL,
         options: AquaFileTranscriptionOptions = AquaFileTranscriptionOptions()
     ) async throws -> AquaFileTranscriptionResponse {
-        let request = try makeRequest(file: file, options: options)
+        let request = try await makeAuthorizedRequest(file: file, options: options)
         let (data, response) = try await urlSession.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SpeechError.invalidResponse(provider: .aqua)
@@ -106,11 +113,36 @@ struct AquaFileTranscriptionClient {
         }
     }
 
+    /// Builds an upload request, resolving the credential first.
+    func makeAuthorizedRequest(
+        file: URL,
+        options: AquaFileTranscriptionOptions = AquaFileTranscriptionOptions()
+    ) async throws -> URLRequest {
+        guard credential.isConfigured else {
+            throw SpeechError.providerNotConfigured(.aqua)
+        }
+        let resolved = try await credential.resolved(for: .aqua)
+        return try makeRequest(file: file, options: options, secret: resolved.secret)
+    }
+
+    /// Builds an upload request from the configured long-lived API key.
     func makeRequest(
         file: URL,
         options: AquaFileTranscriptionOptions = AquaFileTranscriptionOptions()
     ) throws -> URLRequest {
-        guard !apiKey.isEmpty else {
+        try makeRequest(file: file, options: options, secret: credential.staticAPIKey)
+    }
+
+    /// Builds an upload request from an already-resolved secret.
+    ///
+    /// Aqua accepts both a long-lived API key and a short-lived token as a
+    /// bearer token.
+    func makeRequest(
+        file: URL,
+        options: AquaFileTranscriptionOptions = AquaFileTranscriptionOptions(),
+        secret: String
+    ) throws -> URLRequest {
+        guard !secret.isEmpty else {
             throw SpeechError.providerNotConfigured(.aqua)
         }
         guard let uploadURL else {
@@ -137,7 +169,7 @@ struct AquaFileTranscriptionClient {
 
         var request = URLRequest(url: uploadURL)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.httpBody = SpeechFileUploadSupport.makeMultipartBody(boundary: boundary, parts: parts)
         return request

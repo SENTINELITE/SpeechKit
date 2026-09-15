@@ -1,9 +1,13 @@
 import Foundation
 
-struct ElevenLabsFileTranscriptionResponse: Decodable, Sendable {
-    let text: String
-    let languageCode: String?
-    let words: [ElevenLabsWordTimestamp]?
+/// A detailed ElevenLabs file transcription response.
+public struct ElevenLabsFileTranscriptionResponse: Decodable, Sendable, Equatable {
+    /// The transcribed text.
+    public let text: String
+    /// The detected or requested language code.
+    public let languageCode: String?
+    /// Optional word-level timestamps.
+    public let words: [ElevenLabsWordTimestamp]?
 
     private enum CodingKeys: String, CodingKey {
         case text
@@ -13,18 +17,33 @@ struct ElevenLabsFileTranscriptionResponse: Decodable, Sendable {
 }
 
 struct ElevenLabsFileTranscriptionClient {
-    private let apiKey: String
+    static let defaultUploadURL = URL(string: "https://api.elevenlabs.io/v1/speech-to-text")
+
+    private let credential: SpeechCredential
     private let urlSession: URLSession
-    private let uploadURL = URL(string: "https://api.elevenlabs.io/v1/speech-to-text")
+    private let uploadURL: URL?
     private let maxUploadBytes: Int64 = 3 * 1024 * 1024 * 1024
     private let maxUploadDuration: TimeInterval = 10 * 60 * 60
 
-    init(apiKey: String, urlSession: URLSession = .shared) {
-        self.apiKey = apiKey
+    init(apiKey: String, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+        self.init(credential: .apiKey(apiKey), endpoint: endpoint, urlSession: urlSession)
+    }
+
+    init(credential: SpeechCredential, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+        self.credential = credential
         self.urlSession = urlSession
+        self.uploadURL = endpoint ?? Self.defaultUploadURL
     }
 
     func transcribeAudioFile(file: URL, modelID: ElevenLabsModelID) async throws -> String {
+        let response = try await transcribeAudioFileDetailed(file: file, modelID: modelID)
+        return response.text
+    }
+
+    func transcribeAudioFileDetailed(
+        file: URL,
+        modelID: ElevenLabsModelID
+    ) async throws -> ElevenLabsFileTranscriptionResponse {
         let request = try await makeRequest(file: file, modelID: modelID)
         let (data, response) = try await urlSession.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -36,15 +55,26 @@ struct ElevenLabsFileTranscriptionClient {
         }
 
         do {
-            let decoded = try JSONDecoder().decode(ElevenLabsFileTranscriptionResponse.self, from: data)
-            return decoded.text
+            return try JSONDecoder().decode(ElevenLabsFileTranscriptionResponse.self, from: data)
         } catch {
             throw ElevenLabsError.decodingFailed(error.localizedDescription)
         }
     }
 
     func makeRequest(file: URL, modelID: ElevenLabsModelID) async throws -> URLRequest {
-        guard !apiKey.isEmpty else {
+        guard credential.isConfigured else {
+            throw ElevenLabsError.apiKeyMissing
+        }
+        let resolved = try await resolvedSecret()
+        return try await makeRequest(file: file, modelID: modelID, secret: resolved)
+    }
+
+    /// Builds an upload request from an already-resolved secret.
+    ///
+    /// ElevenLabs accepts both a long-lived API key and a short-lived token in
+    /// the `xi-api-key` header for file transcription.
+    func makeRequest(file: URL, modelID: ElevenLabsModelID, secret: String) async throws -> URLRequest {
+        guard !secret.isEmpty else {
             throw ElevenLabsError.apiKeyMissing
         }
         guard modelID == .scribeV1 || modelID == .scribeV2 else {
@@ -64,7 +94,7 @@ struct ElevenLabsFileTranscriptionClient {
 
         var request = URLRequest(url: uploadURL)
         request.httpMethod = "POST"
-        request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
+        request.setValue(secret, forHTTPHeaderField: "xi-api-key")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.httpBody = SpeechFileUploadSupport.makeMultipartBody(
             boundary: boundary,
@@ -79,5 +109,9 @@ struct ElevenLabsFileTranscriptionClient {
             ]
         )
         return request
+    }
+
+    private func resolvedSecret() async throws -> String {
+        try await credential.resolved(for: .elevenLabs).secret
     }
 }

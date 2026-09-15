@@ -331,15 +331,22 @@ public struct OpenAIFileTranscriptionResponse: Decodable, Sendable, Equatable {
 }
 
 struct OpenAIFileTranscriptionClient {
-    private let apiKey: String
+    static let defaultUploadURL = URL(string: "https://api.openai.com/v1/audio/transcriptions")
+
+    private let credential: SpeechCredential
     private let urlSession: URLSession
-    private let uploadURL = URL(string: "https://api.openai.com/v1/audio/transcriptions")
+    private let uploadURL: URL?
     private let maxUploadBytes: Int64 = 25 * 1024 * 1024
     private let allowedExtensions: Set<String> = ["mp3", "mp4", "mpeg", "mpga", "m4a", "wav", "webm"]
 
-    init(apiKey: String, urlSession: URLSession = .shared) {
-        self.apiKey = apiKey
+    init(apiKey: String, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+        self.init(credential: .apiKey(apiKey), endpoint: endpoint, urlSession: urlSession)
+    }
+
+    init(credential: SpeechCredential, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+        self.credential = credential
         self.urlSession = urlSession
+        self.uploadURL = endpoint ?? Self.defaultUploadURL
     }
 
     func transcribeAudioFile(
@@ -354,7 +361,7 @@ struct OpenAIFileTranscriptionClient {
         file: URL,
         options: OpenAIFileTranscriptionOptions = OpenAIFileTranscriptionOptions()
     ) async throws -> OpenAIFileTranscriptionResponse {
-        let request = try makeRequest(file: file, options: options)
+        let request = try await makeAuthorizedRequest(file: file, options: options)
         let (data, response) = try await urlSession.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SpeechError.invalidResponse(provider: .openAI)
@@ -371,11 +378,36 @@ struct OpenAIFileTranscriptionClient {
         }
     }
 
+    /// Builds an upload request, resolving the credential first.
+    func makeAuthorizedRequest(
+        file: URL,
+        options: OpenAIFileTranscriptionOptions = OpenAIFileTranscriptionOptions()
+    ) async throws -> URLRequest {
+        guard credential.isConfigured else {
+            throw SpeechError.providerNotConfigured(.openAI)
+        }
+        let resolved = try await credential.resolved(for: .openAI)
+        return try makeRequest(file: file, options: options, secret: resolved.secret)
+    }
+
+    /// Builds an upload request from the configured long-lived API key.
     func makeRequest(
         file: URL,
         options: OpenAIFileTranscriptionOptions = OpenAIFileTranscriptionOptions()
     ) throws -> URLRequest {
-        guard !apiKey.isEmpty else {
+        try makeRequest(file: file, options: options, secret: credential.staticAPIKey)
+    }
+
+    /// Builds an upload request from an already-resolved secret.
+    ///
+    /// OpenAI accepts both a long-lived API key and an ephemeral client secret
+    /// as a bearer token.
+    func makeRequest(
+        file: URL,
+        options: OpenAIFileTranscriptionOptions = OpenAIFileTranscriptionOptions(),
+        secret: String
+    ) throws -> URLRequest {
+        guard !secret.isEmpty else {
             throw SpeechError.providerNotConfigured(.openAI)
         }
         guard let uploadURL else {
@@ -433,7 +465,7 @@ struct OpenAIFileTranscriptionClient {
         var request = URLRequest(url: uploadURL)
         request.httpMethod = "POST"
         request.timeoutInterval = options.timeoutInterval
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.httpBody = SpeechFileUploadSupport.makeMultipartBody(boundary: boundary, parts: parts)
         return request

@@ -105,6 +105,59 @@ let diarized = try await speech.transcribeOpenAIAudioFile(
 print(diarized.diarizedSegments ?? [])
 ```
 
+### Meta Files
+
+Meta accepts WAV uploads up to 32 MB and 10 minutes. Use `.diarization` mode for speaker labels on each turn.
+
+```swift
+let speech = SpeechService(
+    meta: MetaConfiguration(
+        apiKey: "<META_API_KEY>",
+        mode: .diarization,
+        languageBias: [.english],
+        keywords: ["SpeechKit"]
+    )
+)
+
+let response = try await speech.transcribeMetaAudioFile(file: audioFileURL)
+print(response.transcript)
+print(response.turns ?? [])
+```
+
+### Gemini Files
+
+Gemini accepts up to one hour of audio, or 30 minutes when diarization or word timestamps are on.
+
+```swift
+let speech = SpeechService(
+    gemini: GeminiConfiguration(
+        apiKey: "<GOOGLE_API_KEY>",
+        languageCodes: ["en-US"],
+        mode: .verbatim,
+        diarize: true,
+        timestampGranularities: [.word]
+    )
+)
+
+let response = try await speech.transcribeGeminiAudioFile(file: audioFileURL)
+print(response.text)
+print(response.words)
+```
+
+Gemini rejects a custom vocabulary combined with diarization or word timestamps. For long recordings, poll a background interaction instead of waiting on one request.
+
+```swift
+let response = try await speech.transcribeGeminiAudioFile(
+    file: longRecordingURL,
+    options: GeminiFileTranscriptionOptions(
+        customVocabulary: ["SpeechKit"],
+        processingMode: .background(pollInterval: 5)
+    )
+)
+```
+
+SpeechKit sends audio inline below the 20 MB default threshold and uploads larger files with the Gemini Files API.
+
 ### Apple Local Files
 
 Apple local Speech runs on device and requires iOS 26, macOS 26, or visionOS 26. It is unavailable on watchOS and may need local speech assets for the selected locale.
@@ -173,6 +226,46 @@ let speech = SpeechService(
 await speech.startListening(provider: .grok)
 ```
 
+### Meta Realtime
+
+Meta realtime sessions accept 24 kHz or 16 kHz mono PCM only.
+
+```swift
+let speech = SpeechService(
+    meta: MetaConfiguration(
+        apiKey: "<META_API_KEY>",
+        realtimeOptions: MetaRealtimeOptions(
+            mode: .diarization,
+            audioEncoding: .pcm24kHz,
+            partialMode: .cumulative,
+            languageBias: [.english],
+            keywords: ["SpeechKit"]
+        )
+    )
+)
+
+await speech.startListening(provider: .meta)
+```
+
+### Gemini Realtime
+
+Gemini Live sessions stream 16 kHz mono PCM, last up to 10 minutes, and do not return speaker labels or word timestamps.
+
+```swift
+let speech = SpeechService(
+    gemini: GeminiConfiguration(
+        apiKey: "<GOOGLE_API_KEY>",
+        realtimeOptions: GeminiRealtimeOptions(
+            languageCodes: ["en-US"],
+            customVocabulary: ["SpeechKit"],
+            mode: .verbatim
+        )
+    )
+)
+
+await speech.startListening(provider: .gemini)
+```
+
 ### Apple Local Realtime
 
 ```swift
@@ -198,4 +291,6 @@ if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
 - ``CohereConfiguration``
 - ``GrokConfiguration``
 - ``OpenAIConfiguration``
+- ``MetaConfiguration``
+- ``GeminiConfiguration``
 - ``AppleSpeechConfiguration``

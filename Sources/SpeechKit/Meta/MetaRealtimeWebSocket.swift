@@ -1,52 +1,56 @@
 import Foundation
 
-actor OpenAIRealtimeWebSocket {
+actor MetaRealtimeWebSocket {
     private var webSocketTask: URLSessionWebSocketTask?
     private var session: URLSession?
-    private var continuation: AsyncThrowingStream<OpenAIRealtimeMessage, Error>.Continuation?
-    private var inputAudioCommitGate = OpenAIInputAudioCommitGate()
+    private var continuation: AsyncThrowingStream<MetaRealtimeMessage, Error>.Continuation?
 
-    static let defaultURL = URL(string: "wss://api.openai.com/v1/realtime")
+    static let defaultURL = URL(string: "wss://api.meta.ai/v1/asr/realtime")
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private let handshakeTimeoutNanoseconds: UInt64 = 10_000_000_000
+    private var handshakeTimeoutTask: Task<Void, Never>?
+    private var didAcknowledgeHandshake = false
 
     var isConnected: Bool {
         webSocketTask?.state == .running
     }
 
-    /// Builds the WebSocket handshake request for a Realtime session.
+    /// Builds the WebSocket handshake request for a realtime session.
     ///
-    /// OpenAI accepts both a long-lived API key and an ephemeral client secret
-    /// as a bearer token.
+    /// Meta carries the credential in the handshake frame, so the request only
+    /// determines the socket URL.
     nonisolated static func makeConnectRequest(
         credential: SpeechResolvedCredential,
-        options: OpenAIRealtimeSessionOptions,
+        options: MetaRealtimeOptions,
         endpoint: URL? = nil
     ) throws -> URLRequest {
         try options.validate()
+        guard !credential.isEmpty else {
+            throw MetaRealtimeError.apiKeyMissing
+        }
         guard let baseURL = endpoint ?? defaultURL,
               var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
-            throw OpenAIError.invalidURL
+            throw MetaRealtimeError.invalidURL
         }
 
-        var queryItems = components.queryItems ?? []
-        queryItems.append(URLQueryItem(name: "model", value: options.sessionModelID.rawValue))
-        components.queryItems = queryItems
+        if let sessionID = options.sessionID, !sessionID.isEmpty {
+            var queryItems = components.queryItems ?? []
+            queryItems.append(URLQueryItem(name: "sessionId", value: sessionID))
+            components.queryItems = queryItems
+        }
 
         guard let url = components.url else {
-            throw OpenAIError.invalidURL
+            throw MetaRealtimeError.invalidURL
         }
-
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(credential.secret)", forHTTPHeaderField: "Authorization")
-        return request
+        return URLRequest(url: url)
     }
 
     func connect(
         credential: SpeechResolvedCredential,
-        options: OpenAIRealtimeSessionOptions,
+        options: MetaRealtimeOptions,
         endpoint: URL? = nil
-    ) async throws -> AsyncThrowingStream<OpenAIRealtimeMessage, Error> {
+    ) async throws -> AsyncThrowingStream<MetaRealtimeMessage, Error> {
         let request = try Self.makeConnectRequest(credential: credential, options: options, endpoint: endpoint)
 
         let session = URLSession(configuration: .default)
@@ -54,9 +58,10 @@ actor OpenAIRealtimeWebSocket {
 
         let task = session.webSocketTask(with: request)
         self.webSocketTask = task
+        didAcknowledgeHandshake = false
 
         task.resume()
-        try await send(OpenAIRealtimeSessionUpdateMessage(options: options))
+        try await sendEncodable(options.handshakeMessage(secret: credential.secret))
 
         return AsyncThrowingStream { continuation in
             self.continuation = continuation
@@ -65,45 +70,54 @@ actor OpenAIRealtimeWebSocket {
                 Task { await self.disconnect() }
             }
 
+            self.handshakeTimeoutTask = Task { [weak self, handshakeTimeoutNanoseconds] in
+                do {
+                    try await Task.sleep(nanoseconds: handshakeTimeoutNanoseconds)
+                } catch {
+                    return
+                }
+
+                await self?.failHandshakeIfUnacknowledged()
+            }
+
             Task {
                 await self.receiveMessages()
             }
         }
     }
 
-    func send(_ message: OpenAIRealtimeSessionUpdateMessage) async throws {
-        try await sendEncodable(message)
+    func sendAudio(_ audioData: Data) async throws {
+        guard let task = webSocketTask, task.state == .running else {
+            throw MetaRealtimeError.disconnected
+        }
+
+        try await task.send(.data(audioData))
     }
 
-    func send(_ message: OpenAIInputAudioBufferAppendMessage) async throws {
-        try await sendEncodable(message)
-        inputAudioCommitGate.append(message.byteCount)
-    }
-
-    func commitInputAudioBuffer() async throws {
-        guard inputAudioCommitGate.isReady else { return }
-        try await sendEncodable(OpenAIInputAudioBufferCommitMessage())
-        inputAudioCommitGate.markCommitted()
+    func sendEndStream() async throws {
+        try await sendEncodable(MetaEndStreamMessage())
     }
 
     func disconnect() {
+        handshakeTimeoutTask?.cancel()
+        handshakeTimeoutTask = nil
+        didAcknowledgeHandshake = false
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
         continuation?.finish()
         continuation = nil
-        inputAudioCommitGate.reset()
         session?.invalidateAndCancel()
         session = nil
     }
 
     private func sendEncodable<T: Encodable & Sendable>(_ message: T) async throws {
         guard let task = webSocketTask, task.state == .running else {
-            throw OpenAIError.disconnected
+            throw MetaRealtimeError.disconnected
         }
 
         let data = try encoder.encode(message)
         guard let jsonString = String(data: data, encoding: .utf8) else {
-            throw OpenAIError.encodingFailed
+            throw MetaRealtimeError.encodingFailed
         }
 
         try await task.send(.string(jsonString))
@@ -141,10 +155,32 @@ actor OpenAIRealtimeWebSocket {
 
     private func yieldDecodedMessage(_ data: Data) {
         do {
-            let decoded = try decoder.decode(OpenAIRealtimeMessage.self, from: data)
+            let decoded = try decoder.decode(MetaRealtimeMessage.self, from: data)
+            if case .sessionCreated = decoded {
+                acknowledgeHandshake()
+            }
             continuation?.yield(decoded)
         } catch {
             continuation?.yield(.unknown("decode_error"))
         }
+    }
+
+    private func acknowledgeHandshake() {
+        didAcknowledgeHandshake = true
+        handshakeTimeoutTask?.cancel()
+        handshakeTimeoutTask = nil
+    }
+
+    private func failHandshakeIfUnacknowledged() {
+        guard !didAcknowledgeHandshake else { return }
+
+        handshakeTimeoutTask = nil
+        let continuation = self.continuation
+        self.continuation = nil
+        continuation?.finish(throwing: MetaRealtimeError.handshakeTimedOut)
+        webSocketTask?.cancel(with: .normalClosure, reason: nil)
+        webSocketTask = nil
+        session?.invalidateAndCancel()
+        session = nil
     }
 }

@@ -1,12 +1,12 @@
 import Foundation
 
-actor OpenAIRealtimeWebSocket {
+actor GeminiLiveWebSocket {
     private var webSocketTask: URLSessionWebSocketTask?
     private var session: URLSession?
-    private var continuation: AsyncThrowingStream<OpenAIRealtimeMessage, Error>.Continuation?
-    private var inputAudioCommitGate = OpenAIInputAudioCommitGate()
+    private var continuation: AsyncThrowingStream<GeminiLiveMessage, Error>.Continuation?
+    private var sampleRate = 16000
 
-    static let defaultURL = URL(string: "wss://api.openai.com/v1/realtime")
+    static let defaultURL = URL(string: "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent")
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
@@ -14,40 +14,50 @@ actor OpenAIRealtimeWebSocket {
         webSocketTask?.state == .running
     }
 
-    /// Builds the WebSocket handshake request for a Realtime session.
+    /// Builds the WebSocket handshake request for a Gemini Live session.
     ///
-    /// OpenAI accepts both a long-lived API key and an ephemeral client secret
-    /// as a bearer token.
+    /// An API key goes in the `key` query parameter. A short-lived Google
+    /// ephemeral token goes in an `Authorization: Token` header instead, which
+    /// keeps the secret out of the URL.
     nonisolated static func makeConnectRequest(
         credential: SpeechResolvedCredential,
-        options: OpenAIRealtimeSessionOptions,
+        options: GeminiRealtimeOptions,
         endpoint: URL? = nil
     ) throws -> URLRequest {
         try options.validate()
+        guard !credential.isEmpty else {
+            throw GeminiRealtimeError.apiKeyMissing
+        }
         guard let baseURL = endpoint ?? defaultURL,
               var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
-            throw OpenAIError.invalidURL
+            throw GeminiRealtimeError.invalidURL
         }
 
-        var queryItems = components.queryItems ?? []
-        queryItems.append(URLQueryItem(name: "model", value: options.sessionModelID.rawValue))
-        components.queryItems = queryItems
+        if case .apiKey(let key) = credential {
+            var queryItems = components.queryItems ?? []
+            queryItems.append(URLQueryItem(name: "key", value: key))
+            components.queryItems = queryItems
+        }
 
         guard let url = components.url else {
-            throw OpenAIError.invalidURL
+            throw GeminiRealtimeError.invalidURL
         }
 
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(credential.secret)", forHTTPHeaderField: "Authorization")
+        if case .token(let token) = credential {
+            request.setValue("Token \(token)", forHTTPHeaderField: "Authorization")
+        }
         return request
     }
 
     func connect(
         credential: SpeechResolvedCredential,
-        options: OpenAIRealtimeSessionOptions,
+        options: GeminiRealtimeOptions,
         endpoint: URL? = nil
-    ) async throws -> AsyncThrowingStream<OpenAIRealtimeMessage, Error> {
+    ) async throws -> AsyncThrowingStream<GeminiLiveMessage, Error> {
         let request = try Self.makeConnectRequest(credential: credential, options: options, endpoint: endpoint)
+
+        sampleRate = options.sampleRate
 
         let session = URLSession(configuration: .default)
         self.session = session
@@ -56,7 +66,7 @@ actor OpenAIRealtimeWebSocket {
         self.webSocketTask = task
 
         task.resume()
-        try await send(OpenAIRealtimeSessionUpdateMessage(options: options))
+        try await sendEncodable(options.setupMessage())
 
         return AsyncThrowingStream { continuation in
             self.continuation = continuation
@@ -71,19 +81,20 @@ actor OpenAIRealtimeWebSocket {
         }
     }
 
-    func send(_ message: OpenAIRealtimeSessionUpdateMessage) async throws {
-        try await sendEncodable(message)
+    func sendAudio(_ audioData: Data) async throws {
+        try await sendEncodable(GeminiRealtimeAudioMessage(audioData: audioData, sampleRate: sampleRate))
     }
 
-    func send(_ message: OpenAIInputAudioBufferAppendMessage) async throws {
-        try await sendEncodable(message)
-        inputAudioCommitGate.append(message.byteCount)
+    func sendActivityStart() async throws {
+        try await sendEncodable(GeminiActivityMessage(kind: .activityStart))
     }
 
-    func commitInputAudioBuffer() async throws {
-        guard inputAudioCommitGate.isReady else { return }
-        try await sendEncodable(OpenAIInputAudioBufferCommitMessage())
-        inputAudioCommitGate.markCommitted()
+    func sendActivityEnd() async throws {
+        try await sendEncodable(GeminiActivityMessage(kind: .activityEnd))
+    }
+
+    func sendAudioStreamEnd() async throws {
+        try await sendEncodable(GeminiAudioStreamEndMessage())
     }
 
     func disconnect() {
@@ -91,19 +102,18 @@ actor OpenAIRealtimeWebSocket {
         webSocketTask = nil
         continuation?.finish()
         continuation = nil
-        inputAudioCommitGate.reset()
         session?.invalidateAndCancel()
         session = nil
     }
 
     private func sendEncodable<T: Encodable & Sendable>(_ message: T) async throws {
         guard let task = webSocketTask, task.state == .running else {
-            throw OpenAIError.disconnected
+            throw GeminiRealtimeError.disconnected
         }
 
         let data = try encoder.encode(message)
         guard let jsonString = String(data: data, encoding: .utf8) else {
-            throw OpenAIError.encodingFailed
+            throw GeminiRealtimeError.encodingFailed
         }
 
         try await task.send(.string(jsonString))
@@ -141,10 +151,10 @@ actor OpenAIRealtimeWebSocket {
 
     private func yieldDecodedMessage(_ data: Data) {
         do {
-            let decoded = try decoder.decode(OpenAIRealtimeMessage.self, from: data)
+            let decoded = try decoder.decode(GeminiLiveMessage.self, from: data)
             continuation?.yield(decoded)
         } catch {
-            continuation?.yield(.unknown("decode_error"))
+            continuation?.yield(.unknown)
         }
     }
 }

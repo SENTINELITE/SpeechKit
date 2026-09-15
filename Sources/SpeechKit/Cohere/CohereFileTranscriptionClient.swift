@@ -43,15 +43,22 @@ struct CohereFileTranscriptionClient {
         let text: String
     }
 
-    private let apiKey: String
+    static let defaultUploadURL = URL(string: "https://api.cohere.com/v2/audio/transcriptions")
+
+    private let credential: SpeechCredential
     private let urlSession: URLSession
-    private let uploadURL = URL(string: "https://api.cohere.com/v2/audio/transcriptions")
+    private let uploadURL: URL?
     private let maxUploadBytes: Int64 = 25 * 1024 * 1024
     private let allowedExtensions: Set<String> = ["flac", "mp3", "mpeg", "mpga", "ogg", "wav"]
 
-    init(apiKey: String, urlSession: URLSession = .shared) {
-        self.apiKey = apiKey
+    init(apiKey: String, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+        self.init(credential: .apiKey(apiKey), endpoint: endpoint, urlSession: urlSession)
+    }
+
+    init(credential: SpeechCredential, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+        self.credential = credential
         self.urlSession = urlSession
+        self.uploadURL = endpoint ?? Self.defaultUploadURL
     }
 
     func transcribeAudioFile(
@@ -84,7 +91,31 @@ struct CohereFileTranscriptionClient {
         language: CohereLanguage,
         temperature: Double?
     ) async throws -> URLRequest {
-        guard !apiKey.isEmpty else {
+        guard credential.isConfigured else {
+            throw SpeechError.providerNotConfigured(.cohere)
+        }
+        let resolved = try await credential.resolved(for: .cohere)
+        return try makeRequest(
+            file: file,
+            modelID: modelID,
+            language: language,
+            temperature: temperature,
+            secret: resolved.secret
+        )
+    }
+
+    /// Builds an upload request from an already-resolved secret.
+    ///
+    /// Cohere accepts both a long-lived API key and a short-lived token as a
+    /// bearer token.
+    func makeRequest(
+        file: URL,
+        modelID: CohereModelID,
+        language: CohereLanguage,
+        temperature: Double?,
+        secret: String
+    ) throws -> URLRequest {
+        guard !secret.isEmpty else {
             throw SpeechError.providerNotConfigured(.cohere)
         }
         guard let uploadURL else {
@@ -112,7 +143,7 @@ struct CohereFileTranscriptionClient {
 
         var request = URLRequest(url: uploadURL)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.httpBody = SpeechFileUploadSupport.makeMultipartBody(boundary: boundary, parts: parts)
         return request

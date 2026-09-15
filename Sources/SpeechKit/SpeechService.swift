@@ -21,6 +21,14 @@ public final class SpeechService {
     public var openAI: OpenAIConfiguration? {
         didSet { applyOpenAIRealtimeConfig() }
     }
+    /// The Meta configuration used for Meta realtime and file transcription.
+    public var meta: MetaConfiguration? {
+        didSet { applyMetaRealtimeConfig() }
+    }
+    /// The Gemini configuration used for Gemini realtime and file transcription.
+    public var gemini: GeminiConfiguration? {
+        didSet { applyGeminiRealtimeConfig() }
+    }
     /// The Apple local Speech configuration used for realtime and file transcription.
     @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
     @available(watchOS, unavailable)
@@ -32,9 +40,17 @@ public final class SpeechService {
     let elevenLabsRealtimeService: ElevenLabsService
     let openAIRealtimeService: OpenAIRealtimeService
     let grokRealtimeService: GrokRealtimeService
+    let metaRealtimeService: MetaRealtimeService
+    let geminiRealtimeService: GeminiRealtimeService
     let urlSession: URLSession
     var appleConfigurationStorage: Any?
     var appleRealtimeServiceStorage: Any?
+    /// Values attached by extension packages through ``SpeechServiceExtensionKey``.
+    ///
+    /// This is a stored property so that writes through the
+    /// ``SpeechService/subscript(extension:)`` subscript publish an observation
+    /// change.
+    var extensionStorage: [String: Any] = [:]
     /// The provider currently used for realtime transcription state.
     public internal(set) var activeRealtimeProvider: SpeechRealtimeProvider = .elevenLabs
     var fallbackConnectionState: SpeechRealtimeConnectionState?
@@ -46,26 +62,34 @@ public final class SpeechService {
         cohere: CohereConfiguration? = nil,
         grok: GrokConfiguration? = nil,
         aqua: AquaConfiguration? = nil,
-        openAI: OpenAIConfiguration? = nil
+        openAI: OpenAIConfiguration? = nil,
+        meta: MetaConfiguration? = nil,
+        gemini: GeminiConfiguration? = nil
     ) {
         self.elevenLabs = elevenLabs
         self.cohere = cohere
         self.grok = grok
         self.aqua = aqua
         self.openAI = openAI
+        self.meta = meta
+        self.gemini = gemini
         self.elevenLabsRealtimeService = ElevenLabsService()
         self.openAIRealtimeService = OpenAIRealtimeService()
         self.grokRealtimeService = GrokRealtimeService()
+        self.metaRealtimeService = MetaRealtimeService()
+        self.geminiRealtimeService = GeminiRealtimeService()
         self.urlSession = .shared
         applyRealtimeConfig()
         applyOpenAIRealtimeConfig()
         applyGrokRealtimeConfig()
+        applyMetaRealtimeConfig()
+        applyGeminiRealtimeConfig()
     }
 
     /// Creates a speech service with Apple local Speech configuration.
     ///
     /// Use this initializer only on OS versions that expose `SpeechAnalyzer`
-    /// and `SpeechTranscriber`. The base ``SpeechService/init(elevenLabs:cohere:grok:aqua:openAI:)``
+    /// and `SpeechTranscriber`. The base ``SpeechService/init(elevenLabs:cohere:grok:aqua:openAI:meta:gemini:)``
     /// initializer remains available for the package's lower deployment targets.
     @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
     @available(watchOS, unavailable)
@@ -75,6 +99,8 @@ public final class SpeechService {
         grok: GrokConfiguration? = nil,
         aqua: AquaConfiguration? = nil,
         openAI: OpenAIConfiguration? = nil,
+        meta: MetaConfiguration? = nil,
+        gemini: GeminiConfiguration? = nil,
         apple: AppleSpeechConfiguration? = nil
     ) {
         self.init(
@@ -82,7 +108,9 @@ public final class SpeechService {
             cohere: cohere,
             grok: grok,
             aqua: aqua,
-            openAI: openAI
+            openAI: openAI,
+            meta: meta,
+            gemini: gemini
         )
         self.apple = apple
     }
@@ -93,41 +121,70 @@ public final class SpeechService {
         grok: GrokConfiguration? = nil,
         aqua: AquaConfiguration? = nil,
         openAI: OpenAIConfiguration? = nil,
+        meta: MetaConfiguration? = nil,
+        gemini: GeminiConfiguration? = nil,
         urlSession: URLSession,
         elevenLabsRealtimeService: ElevenLabsService,
         openAIRealtimeService: OpenAIRealtimeService = OpenAIRealtimeService(),
-        grokRealtimeService: GrokRealtimeService = GrokRealtimeService()
+        grokRealtimeService: GrokRealtimeService = GrokRealtimeService(),
+        metaRealtimeService: MetaRealtimeService = MetaRealtimeService(),
+        geminiRealtimeService: GeminiRealtimeService = GeminiRealtimeService()
     ) {
         self.elevenLabs = elevenLabs
         self.cohere = cohere
         self.grok = grok
         self.aqua = aqua
         self.openAI = openAI
+        self.meta = meta
+        self.gemini = gemini
         self.urlSession = urlSession
         self.elevenLabsRealtimeService = elevenLabsRealtimeService
         self.openAIRealtimeService = openAIRealtimeService
         self.grokRealtimeService = grokRealtimeService
+        self.metaRealtimeService = metaRealtimeService
+        self.geminiRealtimeService = geminiRealtimeService
         applyRealtimeConfig()
         applyOpenAIRealtimeConfig()
         applyGrokRealtimeConfig()
+        applyMetaRealtimeConfig()
+        applyGeminiRealtimeConfig()
     }
 
     private func applyRealtimeConfig() {
-        elevenLabsRealtimeService.apiKey = elevenLabs?.apiKey ?? ""
+        elevenLabsRealtimeService.credential = elevenLabs?.credential ?? .apiKey("")
+        elevenLabsRealtimeService.realtimeEndpoint = elevenLabs?.realtimeEndpoint
         elevenLabsRealtimeService.realtimeModelID = elevenLabs?.realtimeModelID ?? .scribeV2Realtime
     }
 
     private func applyOpenAIRealtimeConfig() {
-        openAIRealtimeService.apiKey = openAI?.apiKey ?? ""
+        openAIRealtimeService.credential = openAI?.credential ?? .apiKey("")
+        openAIRealtimeService.realtimeEndpoint = openAI?.realtimeEndpoint
         if let openAI {
             openAIRealtimeService.options = resolvedOpenAIRealtimeOptions(from: openAI)
         }
     }
 
     private func applyGrokRealtimeConfig() {
-        grokRealtimeService.apiKey = grok?.apiKey ?? ""
+        grokRealtimeService.credential = grok?.credential ?? .apiKey("")
+        grokRealtimeService.realtimeEndpoint = grok?.realtimeEndpoint
         if let grok {
             grokRealtimeService.options = grok.realtimeOptions
+        }
+    }
+
+    private func applyMetaRealtimeConfig() {
+        metaRealtimeService.credential = meta?.credential ?? .apiKey("")
+        metaRealtimeService.realtimeEndpoint = meta?.realtimeEndpoint
+        if let meta {
+            metaRealtimeService.options = meta.realtimeOptions
+        }
+    }
+
+    private func applyGeminiRealtimeConfig() {
+        geminiRealtimeService.credential = gemini?.credential ?? .apiKey("")
+        geminiRealtimeService.realtimeEndpoint = gemini?.realtimeEndpoint
+        if let gemini {
+            geminiRealtimeService.options = resolvedGeminiRealtimeOptions(from: gemini)
         }
     }
 
@@ -142,5 +199,16 @@ public final class SpeechService {
             delay: config.realtimeDelay,
             commitInterval: config.realtimeCommitInterval
         )
+    }
+
+    /// Returns the Gemini realtime options a configuration implies.
+    ///
+    /// ``GeminiConfiguration/realtimeModelID`` is the single source of truth for
+    /// the Gemini Live model, so it overrides
+    /// ``GeminiRealtimeOptions/modelID`` on the configured options.
+    func resolvedGeminiRealtimeOptions(from config: GeminiConfiguration) -> GeminiRealtimeOptions {
+        var options = config.realtimeOptions
+        options.modelID = config.realtimeModelID
+        return options
     }
 }
