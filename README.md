@@ -9,8 +9,8 @@ SpeechKit is a Swift package for adding speech-to-text to Swift and SwiftUI apps
 
 It supports two workflows:
 
-- Realtime microphone transcription with ElevenLabs, OpenAI, and xAI Grok.
-- File transcription with ElevenLabs, Aqua, Cohere, Grok, and OpenAI.
+- Realtime microphone transcription with ElevenLabs, OpenAI, xAI Grok, and Apple local Speech on supported OS versions.
+- File transcription with ElevenLabs, Aqua, Cohere, Grok, OpenAI, and Apple local Speech on supported OS versions.
 
 ## Highlights
 
@@ -18,6 +18,7 @@ It supports two workflows:
 - Provider-neutral realtime transcript state.
 - Provider-neutral file transcription for simple text results.
 - Provider-specific options and detailed responses when you need timestamps, diarization, usage metadata, or model-specific controls.
+- On-device Apple Speech support for apps running on iOS 26, macOS 26, or visionOS 26.
 - Security-scoped file overloads for document picker workflows.
 - A runnable iOS demo app for trying realtime transcription, recorded dictation uploads, and file transcription.
 
@@ -25,11 +26,12 @@ It supports two workflows:
 
 SpeechKit `1.0.0` is the first stable release of the package API for production integration. Future source-breaking API changes will ship in a new major version.
 
-## Sponsor
+## Sponsor the project
 > <img width="1500" height="500" alt="SpeechKit" src="https://github.com/user-attachments/assets/3f3b68e7-37fb-46c7-a139-2b513b2e184c" />
 > <br>
 > SpeechKit is independently built and maintained. Sponsorship helps fund provider integrations, realtime transcription support, documentation, examples, and long-term maintenance.
 
+If SpeechKit is useful to you, [sponsor the project on GitHub](https://github.com/sponsors/SENTINELITE).
 
 ## Requirements
 
@@ -41,6 +43,8 @@ SpeechKit `1.0.0` is the first stable release of the package API for production 
 
 Apps that use realtime microphone transcription must include the platform's microphone permission usage description in their app target.
 
+Apple local Speech support requires iOS 26, macOS 26, or visionOS 26, and is unavailable on watchOS. SpeechKit keeps the package's lower deployment targets by omitting Apple from provider discovery until the current OS can run `SpeechAnalyzer`.
+
 ## Platform Support
 
 | Platform | Minimum version | Validation |
@@ -51,6 +55,8 @@ Apps that use realtime microphone transcription must include the platform's micr
 | visionOS | 2.0 | CI generic device build |
 
 SpeechKit requires the Swift 6.2 toolchain family. CI pins Xcode 26.2 and builds all declared platforms with warnings treated as errors.
+
+Apple local Speech is an additional runtime capability on iOS 26+, macOS 26+, and visionOS 26+. It may require downloading Apple speech assets for the selected locale before transcription starts.
 
 ## Installation
 
@@ -125,6 +131,20 @@ struct DemoApp: App {
 }
 ```
 
+Apple local Speech does not require an API key. Add it only on OS versions that support Apple's `SpeechAnalyzer` APIs:
+
+```swift
+if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+    let speech = SpeechService(
+        apple: AppleSpeechConfiguration(
+            locale: .current,
+            contextualStrings: ["SpeechKit"],
+            preparesAssetsAutomatically: true
+        )
+    )
+}
+```
+
 ## Chapter 2: Realtime Transcription
 
 Realtime transcription streams microphone audio and exposes provider-neutral transcript state.
@@ -182,15 +202,18 @@ await speech.startListening(provider: .elevenLabs)
 
 ### Realtime: OpenAI
 
-OpenAI realtime uses an OpenAI Realtime session model plus a transcription model. Tune delay and commit interval when you create the service.
+OpenAI defaults to `gpt-live-transcribe` for low-latency microphone transcription. Use `gpt-transcribe` for committed Realtime turns when detected languages are required. Both models accept a prompt, keyword hints, and multiple expected input languages.
 
 ```swift
 let speech = SpeechService(
     openAI: OpenAIConfiguration(
         apiKey: "<OPENAI_API_KEY>",
         realtimeSessionModelID: .gptRealtime,
-        realtimeTranscriptionModelID: .gpt4oTranscribe,
-        realtimeDelay: .milliseconds(300),
+        realtimeTranscriptionModelID: .gptLiveTranscribe,
+        languages: ["en", "fr"],
+        prompt: "A customer support call.",
+        keywords: ["SpeechKit", "AC-42"],
+        realtimeDelay: .low,
         realtimeCommitInterval: 1
     )
 )
@@ -218,6 +241,26 @@ let speech = SpeechService(
 
 await speech.startListening(provider: .grok)
 ```
+
+### Realtime: Apple Local Speech
+
+Apple local Speech runs on device through Apple's Speech framework. It is available on iOS 26, macOS 26, and visionOS 26, and is not available on watchOS.
+
+```swift
+if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+    let speech = SpeechService(
+        apple: AppleSpeechConfiguration(
+            locale: .current,
+            contextualStrings: ["SpeechKit"]
+        )
+    )
+
+    await speech.prepareAppleSpeechAssets()
+    await speech.startListening(provider: .apple)
+}
+```
+
+SpeechKit maps Apple's volatile results to `partialTranscriptEntry` and upserts final results by audio time range, so revised Apple segments do not duplicate text in `transcriptEntries`.
 
 ## Chapter 3: File Transcription
 
@@ -317,20 +360,22 @@ print(response.words ?? [])
 
 ### File: OpenAI
 
-OpenAI file transcription supports GPT transcription models, Whisper timestamps, log probabilities, detailed responses, and diarized segments with `gpt-4o-transcribe-diarize`.
+OpenAI file transcription defaults to `gpt-transcribe`, which supports prompts, keyword hints, multiple expected input languages, and detected-language output. Whisper remains available for timestamps, and `gpt-4o-transcribe-diarize` remains available for speaker labels.
 
 ```swift
 let speech = SpeechService(
     openAI: OpenAIConfiguration(
         apiKey: "<OPENAI_API_KEY>",
-        fileTranscriptionModelID: .gpt4oTranscribe,
-        language: "en",
-        prompt: "Use product names exactly."
+        fileTranscriptionModelID: .gptTranscribe,
+        languages: ["en", "fr"],
+        prompt: "Use product names exactly.",
+        keywords: ["SpeechKit", "AC-42"]
     )
 )
 
 let response = try await speech.transcribeOpenAIAudioFile(file: audioFileURL)
 print(response.text)
+print(response.languages?.map(\.code) ?? [])
 print(response.usage?.seconds ?? 0)
 ```
 
@@ -358,6 +403,43 @@ let response = try await speech.transcribeOpenAIAudioFile(
 )
 
 print(response.diarizedSegments ?? [])
+```
+
+### File: Apple Local Speech
+
+Use Apple local Speech for on-device file transcription on supported OS versions. The provider-neutral API returns text:
+
+```swift
+if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+    let speech = SpeechService(
+        apple: AppleSpeechConfiguration(locale: .current)
+    )
+
+    let text = try await speech.transcribeAudioFile(
+        provider: .apple,
+        file: audioFileURL
+    )
+}
+```
+
+Use the Apple-specific helper when you need normalized entries and timing metadata:
+
+```swift
+if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+    let speech = SpeechService(
+        apple: AppleSpeechConfiguration(locale: .current)
+    )
+
+    let response = try await speech.transcribeAppleAudioFile(
+        file: audioFileURL,
+        options: AppleSpeechFileTranscriptionOptions(
+            locale: Locale(identifier: "en-US")
+        )
+    )
+
+    print(response.text)
+    print(response.entries)
+}
 ```
 
 ## Chapter 4: Security-Scoped Files
@@ -388,6 +470,8 @@ do {
 ```
 
 The `options` value must match the selected file provider. Passing `.cohere(...)` options to `.openAI` throws `SpeechError.invalidOptionsForProvider`.
+
+Apple local Speech can also throw `SpeechError.appleSpeechUnavailable`, `SpeechError.appleSpeechUnsupportedLocale`, and `SpeechError.appleSpeechAssetsUnavailable` when the OS, locale, or local model assets are not ready.
 
 ## Documentation
 

@@ -13,6 +13,13 @@ extension SpeechService {
             return openAIRealtimeService.connectionState
         case .grok:
             return grokRealtimeService.connectionState
+        #if !os(watchOS)
+        case .apple:
+            if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+                return appleSpeechService.connectionState
+            }
+            return .error(SpeechError.appleSpeechUnavailable.localizedDescription)
+        #endif
         }
     }
 
@@ -30,6 +37,13 @@ extension SpeechService {
             return openAIRealtimeService.partialTranscriptText
         case .grok:
             return grokRealtimeService.partialTranscriptText
+        #if !os(watchOS)
+        case .apple:
+            if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+                return appleSpeechService.partialTranscriptText
+            }
+            return ""
+        #endif
         }
     }
 
@@ -54,6 +68,13 @@ extension SpeechService {
             )
         case .grok:
             return grokRealtimeService.partialTranscriptEntry
+        #if !os(watchOS)
+        case .apple:
+            if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+                return appleSpeechService.partialTranscriptEntry
+            }
+            return nil
+        #endif
         }
     }
 
@@ -66,6 +87,13 @@ extension SpeechService {
             return openAIRealtimeService.realtimeAudioLevel
         case .grok:
             return grokRealtimeService.realtimeAudioLevel
+        #if !os(watchOS)
+        case .apple:
+            if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+                return appleSpeechService.realtimeAudioLevel
+            }
+            return 0
+        #endif
         }
     }
 
@@ -78,6 +106,13 @@ extension SpeechService {
             return openAIRealtimeService.realtimeRecordingData
         case .grok:
             return grokRealtimeService.realtimeRecordingData
+        #if !os(watchOS)
+        case .apple:
+            if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+                return appleSpeechService.realtimeRecordingData
+            }
+            return nil
+        #endif
         }
     }
 
@@ -90,6 +125,13 @@ extension SpeechService {
             return openAIRealtimeService.transcriptEntries
         case .grok:
             return grokRealtimeService.transcriptEntries
+        #if !os(watchOS)
+        case .apple:
+            if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+                return appleSpeechService.transcriptEntries
+            }
+            return []
+        #endif
         }
     }
 
@@ -105,6 +147,13 @@ extension SpeechService {
             return openAIRealtimeService.lastError
         case .grok:
             return grokRealtimeService.lastError
+        #if !os(watchOS)
+        case .apple:
+            if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+                return appleSpeechService.lastError
+            }
+            return SpeechError.appleSpeechUnavailable
+        #endif
         }
     }
 
@@ -135,6 +184,15 @@ extension SpeechService {
             await startOpenAIListening()
         case .grok:
             await startGrokListening()
+        #if !os(watchOS)
+        case .apple:
+            if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+                await startAppleListening()
+            } else {
+                fallbackConnectionState = .error(SpeechError.appleSpeechUnavailable.localizedDescription)
+                fallbackLastError = SpeechError.appleSpeechUnavailable
+            }
+        #endif
         }
     }
 
@@ -195,6 +253,12 @@ extension SpeechService {
             await openAIRealtimeService.stopListening()
         case .grok:
             await grokRealtimeService.stopListening()
+        #if !os(watchOS)
+        case .apple:
+            if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+                await appleSpeechService.stopListening()
+            }
+        #endif
         }
     }
 
@@ -209,6 +273,12 @@ extension SpeechService {
             openAIRealtimeService.clearTranscript()
         case .grok:
             grokRealtimeService.clearTranscript()
+        #if !os(watchOS)
+        case .apple:
+            if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+                appleSpeechService.clearTranscript()
+            }
+        #endif
         }
     }
 }

@@ -41,6 +41,13 @@ struct RealtimeTranscriptionView: View {
         configuration.hasAPIKey(for: configuration.realtimeProvider)
     }
 
+    private var realtimeProviderTitle: String {
+        if configuration.realtimeProvider == .openAI {
+            return "OpenAI · \(configuration.openAIRealtimeTranscriptionModel.rawValue)"
+        }
+        return configuration.realtimeProvider.title
+    }
+
     private var hasExportableRecording: Bool {
         !isAudioActive && speech.realtimeRecordingData != nil
     }
@@ -76,7 +83,7 @@ struct RealtimeTranscriptionView: View {
 
             DemoVoiceStage(
                 title: "Realtime transcription",
-                providerTitle: configuration.realtimeProvider.title,
+                providerTitle: realtimeProviderTitle,
                 iconName: microphoneIconName,
                 voiceLevel: voiceLevel,
                 voiceState: voiceState

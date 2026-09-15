@@ -177,6 +177,82 @@ public struct AquaConfiguration: Sendable, Equatable {
     }
 }
 
+/// Configuration for Apple's local Speech framework transcription.
+///
+/// Apple transcription runs through `SpeechAnalyzer` and `SpeechTranscriber`,
+/// so it does not require an API key. The APIs are only available on iOS 26,
+/// macOS 26, and visionOS 26, and are unavailable on watchOS.
+@available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
+@available(watchOS, unavailable)
+public struct AppleSpeechConfiguration: Sendable, Equatable {
+    /// The preferred locale for local transcription.
+    ///
+    /// SpeechKit resolves this to Apple's nearest supported locale before
+    /// creating a transcriber.
+    public var locale: Locale
+    /// A Boolean value indicating whether SpeechKit may download missing local speech assets.
+    ///
+    /// When this is `false`, SpeechKit fails with
+    /// ``SpeechError/appleSpeechAssetsUnavailable(localeIdentifier:)`` instead
+    /// of starting an asset installation request.
+    public var preparesAssetsAutomatically: Bool
+    /// Terms that should bias Apple's local speech analyzer toward app-specific vocabulary.
+    public var contextualStrings: [String]
+    /// The model retention policy used by Apple local speech analysis.
+    public var modelRetention: AppleSpeechModelRetention
+
+    /// Creates an Apple local speech configuration.
+    ///
+    /// - Parameters:
+    ///   - locale: The preferred transcription locale.
+    ///   - preparesAssetsAutomatically: Whether SpeechKit may download missing
+    ///     Apple speech assets for the resolved locale.
+    ///   - contextualStrings: App-specific words or phrases to bias recognition.
+    ///   - modelRetention: How long Apple should retain loaded speech models.
+    public init(
+        locale: Locale = .current,
+        preparesAssetsAutomatically: Bool = true,
+        contextualStrings: [String] = [],
+        modelRetention: AppleSpeechModelRetention = .whileInUse
+    ) {
+        self.locale = locale
+        self.preparesAssetsAutomatically = preparesAssetsAutomatically
+        self.contextualStrings = contextualStrings
+        self.modelRetention = modelRetention
+    }
+}
+
+/// The model retention policy for Apple's local speech analyzer.
+@available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
+@available(watchOS, unavailable)
+public enum AppleSpeechModelRetention: Sendable, Equatable, CaseIterable {
+    /// Keep speech models loaded only while analysis is active.
+    case whileInUse
+    /// Let the system keep speech models loaded briefly after analysis completes.
+    case lingering
+    /// Keep speech models loaded for the lifetime of the current process.
+    case processLifetime
+}
+
+/// Options for one Apple local file transcription request.
+@available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
+@available(watchOS, unavailable)
+public struct AppleSpeechFileTranscriptionOptions: Sendable, Equatable {
+    /// The preferred locale for this transcription request.
+    public var locale: Locale?
+    /// Overrides whether SpeechKit may download missing Apple speech assets.
+    public var preparesAssetsAutomatically: Bool?
+
+    /// Creates Apple local file transcription options.
+    public init(
+        locale: Locale? = nil,
+        preparesAssetsAutomatically: Bool? = nil
+    ) {
+        self.locale = locale
+        self.preparesAssetsAutomatically = preparesAssetsAutomatically
+    }
+}
+
 /// Configuration for OpenAI realtime and file transcription.
 public struct OpenAIConfiguration: Sendable, Equatable {
     /// The OpenAI API key used for realtime and file transcription requests.
@@ -189,8 +265,12 @@ public struct OpenAIConfiguration: Sendable, Equatable {
     public var realtimeTranscriptionModelID: OpenAIRealtimeTranscriptionModelID
     /// An optional ISO-639-1 language hint used by default.
     public var language: String?
+    /// Expected input language codes for OpenAI models that support multiple language hints.
+    public var languages: [String]
     /// The default prompt used for file transcription.
     public var prompt: String?
+    /// Literal terms that may appear in recordings or realtime audio.
+    public var keywords: [String]
     /// The default file transcription temperature.
     public var temperature: Double?
     /// The default chunking strategy for OpenAI diarized file transcription.
@@ -207,15 +287,17 @@ public struct OpenAIConfiguration: Sendable, Equatable {
     /// Creates an OpenAI configuration.
     public init(
         apiKey: String,
-        fileTranscriptionModelID: OpenAIFileTranscriptionModelID = .gpt4oTranscribe,
+        fileTranscriptionModelID: OpenAIFileTranscriptionModelID = .gptTranscribe,
         realtimeSessionModelID: OpenAIRealtimeSessionModelID = .gptRealtime,
-        realtimeTranscriptionModelID: OpenAIRealtimeTranscriptionModelID = .gpt4oTranscribe,
+        realtimeTranscriptionModelID: OpenAIRealtimeTranscriptionModelID = .gptLiveTranscribe,
         language: String? = nil,
+        languages: [String] = [],
         prompt: String? = nil,
+        keywords: [String] = [],
         temperature: Double? = nil,
         diarizationChunkingStrategy: OpenAIDiarizationChunkingStrategy? = nil,
         knownSpeakers: [OpenAIKnownSpeaker] = [],
-        realtimeDelay: OpenAIRealtimeDelay = .auto,
+        realtimeDelay: OpenAIRealtimeDelay = .low,
         realtimeCommitInterval: TimeInterval = 1,
         timeoutInterval: TimeInterval = 10 * 60
     ) {
@@ -224,7 +306,9 @@ public struct OpenAIConfiguration: Sendable, Equatable {
         self.realtimeSessionModelID = realtimeSessionModelID
         self.realtimeTranscriptionModelID = realtimeTranscriptionModelID
         self.language = language
+        self.languages = languages
         self.prompt = prompt
+        self.keywords = keywords
         self.temperature = temperature
         self.diarizationChunkingStrategy = diarizationChunkingStrategy
         self.knownSpeakers = knownSpeakers
@@ -246,6 +330,25 @@ public enum SpeechFileTranscriptionProvider: String, Sendable, CaseIterable {
     case grok
     /// OpenAI speech-to-text file transcription.
     case openAI
+    /// Apple local Speech framework file transcription.
+    ///
+    /// SpeechKit only includes this provider in ``allCases`` on iOS 26,
+    /// macOS 26, and visionOS 26. Calling it directly on older OS versions
+    /// throws ``SpeechError/appleSpeechUnavailable``.
+    #if !os(watchOS)
+    case apple
+    #endif
+
+    /// The file transcription providers that are callable on the current OS.
+    public static var allCases: [SpeechFileTranscriptionProvider] {
+        var providers: [SpeechFileTranscriptionProvider] = [.elevenLabs, .aqua, .cohere, .grok, .openAI]
+        #if !os(watchOS)
+        if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+            providers.append(.apple)
+        }
+        #endif
+        return providers
+    }
 }
 
 /// Provider-specific options for a single file transcription request.
@@ -273,7 +376,9 @@ public enum SpeechFileTranscriptionOptions: Sendable, Equatable {
     case openAI(
         modelID: OpenAIFileTranscriptionModelID? = nil,
         language: String? = nil,
+        languages: [String]? = nil,
         prompt: String? = nil,
+        keywords: [String]? = nil,
         temperature: Double? = nil,
         includeLogprobs: Bool? = nil,
         timestampGranularities: [OpenAITimestampGranularity]? = nil,
@@ -281,6 +386,18 @@ public enum SpeechFileTranscriptionOptions: Sendable, Equatable {
         knownSpeakers: [OpenAIKnownSpeaker]? = nil,
         timeoutInterval: TimeInterval? = nil
     )
+    /// Options for an Apple local file transcription request.
+    ///
+    /// These options are only meaningful when the request runs on iOS 26,
+    /// macOS 26, or visionOS 26. On older OS versions, Apple local
+    /// transcription throws ``SpeechError/appleSpeechUnavailable`` before
+    /// reading these values.
+    #if !os(watchOS)
+    case apple(
+        locale: Locale? = nil,
+        preparesAssetsAutomatically: Bool? = nil
+    )
+    #endif
 
     var provider: SpeechFileTranscriptionProvider {
         switch self {
@@ -294,6 +411,10 @@ public enum SpeechFileTranscriptionOptions: Sendable, Equatable {
             return .grok
         case .openAI:
             return .openAI
+        #if !os(watchOS)
+        case .apple:
+            return .apple
+        #endif
         }
     }
 }

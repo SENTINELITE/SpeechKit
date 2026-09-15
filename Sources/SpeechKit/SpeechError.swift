@@ -18,6 +18,14 @@ public enum SpeechError: Error, LocalizedError, Sendable, Equatable {
     case decodingFailed(provider: SpeechFileTranscriptionProvider, reason: String)
     /// The provider request failed for a reason that does not fit a narrower case.
     case providerFailure(provider: SpeechFileTranscriptionProvider, reason: String)
+    /// Apple's local speech transcription APIs are not available on this OS.
+    case appleSpeechUnavailable
+    /// Apple's local speech transcription APIs are unavailable on watchOS.
+    case appleSpeechNotSupportedOnWatch
+    /// Apple Speech does not support the requested locale on this device.
+    case appleSpeechUnsupportedLocale(localeIdentifier: String)
+    /// Apple Speech requires local assets that are not currently installed.
+    case appleSpeechAssetsUnavailable(localeIdentifier: String)
 
     /// A localized description of the error.
     public var errorDescription: String? {
@@ -38,6 +46,14 @@ public enum SpeechError: Error, LocalizedError, Sendable, Equatable {
             return "Failed to decode \(provider.rawValue) response: \(reason)"
         case .providerFailure(let provider, let reason):
             return "\(provider.rawValue) request failed: \(reason)"
+        case .appleSpeechUnavailable:
+            return "Apple local speech transcription requires iOS 26, macOS 26, or visionOS 26."
+        case .appleSpeechNotSupportedOnWatch:
+            return "Apple local speech transcription is not available on watchOS."
+        case .appleSpeechUnsupportedLocale(let localeIdentifier):
+            return "Apple local speech transcription does not support locale \(localeIdentifier)."
+        case .appleSpeechAssetsUnavailable(let localeIdentifier):
+            return "Apple local speech assets for \(localeIdentifier) are not installed."
         }
     }
 }

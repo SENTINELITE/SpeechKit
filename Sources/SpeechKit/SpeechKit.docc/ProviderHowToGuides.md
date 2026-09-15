@@ -75,8 +75,9 @@ let response = try await speech.transcribeGrokAudioFile(file: audioFileURL)
 let speech = SpeechService(
     openAI: OpenAIConfiguration(
         apiKey: "<OPENAI_API_KEY>",
-        fileTranscriptionModelID: .gpt4oTranscribe,
-        language: "en",
+        fileTranscriptionModelID: .gptTranscribe,
+        languages: ["en", "fr"],
+        keywords: ["SpeechKit", "AC-42"],
         prompt: "Use product names exactly."
     )
 )
@@ -104,6 +105,21 @@ let diarized = try await speech.transcribeOpenAIAudioFile(
 print(diarized.diarizedSegments ?? [])
 ```
 
+### Apple Local Files
+
+Apple local Speech runs on device and requires iOS 26, macOS 26, or visionOS 26. It is unavailable on watchOS and may need local speech assets for the selected locale.
+
+```swift
+if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+    let speech = SpeechService(
+        apple: AppleSpeechConfiguration(locale: .current)
+    )
+
+    let response = try await speech.transcribeAppleAudioFile(file: audioFileURL)
+    print(response.text)
+}
+```
+
 ## Realtime Providers
 
 Realtime transcription streams microphone audio and updates observable transcript state on ``SpeechService``.
@@ -128,8 +144,10 @@ let speech = SpeechService(
     openAI: OpenAIConfiguration(
         apiKey: "<OPENAI_API_KEY>",
         realtimeSessionModelID: .gptRealtime,
-        realtimeTranscriptionModelID: .gpt4oTranscribe,
-        realtimeDelay: .milliseconds(300),
+        realtimeTranscriptionModelID: .gptLiveTranscribe,
+        languages: ["en", "fr"],
+        keywords: ["SpeechKit", "AC-42"],
+        realtimeDelay: .low,
         realtimeCommitInterval: 1
     )
 )
@@ -155,6 +173,22 @@ let speech = SpeechService(
 await speech.startListening(provider: .grok)
 ```
 
+### Apple Local Realtime
+
+```swift
+if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+    let speech = SpeechService(
+        apple: AppleSpeechConfiguration(
+            locale: .current,
+            contextualStrings: ["SpeechKit"]
+        )
+    )
+
+    try await speech.prepareAppleSpeechAssets()
+    await speech.startListening(provider: .apple)
+}
+```
+
 ## Topics
 
 ### Provider Types
@@ -164,3 +198,4 @@ await speech.startListening(provider: .grok)
 - ``CohereConfiguration``
 - ``GrokConfiguration``
 - ``OpenAIConfiguration``
+- ``AppleSpeechConfiguration``

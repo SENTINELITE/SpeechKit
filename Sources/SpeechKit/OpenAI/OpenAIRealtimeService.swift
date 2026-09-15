@@ -11,6 +11,8 @@ public final class OpenAIRealtimeService {
     public private(set) var partialTranscriptText: String = ""
     /// The committed transcript entries.
     public private(set) var transcriptEntries: [SpeechTranscriptEntry] = []
+    /// Detected languages keyed by the completed OpenAI Realtime item identifier.
+    public private(set) var detectedLanguagesByItemID: [String: [OpenAITranscriptionLanguage]] = [:]
     /// The most recent realtime error, if any.
     public private(set) var lastError: Error?
 
@@ -110,6 +112,9 @@ public final class OpenAIRealtimeService {
                         partialTranscriptText = partialsByItemID[key, default: ""]
 
                     case .transcriptionCompleted(let completed):
+                        if let itemID = completed.itemID, let languages = completed.languages {
+                            detectedLanguagesByItemID[itemID] = languages
+                        }
                         let text = completed.transcript.isEmpty
                             ? partialsByItemID[completed.itemID ?? "current", default: ""]
                             : completed.transcript
@@ -175,6 +180,7 @@ public final class OpenAIRealtimeService {
     /// Clears committed and partial realtime transcript text.
     public func clearTranscript() {
         transcriptEntries.removeAll()
+        detectedLanguagesByItemID.removeAll()
         partialTranscriptText = ""
         partialsByItemID.removeAll()
     }

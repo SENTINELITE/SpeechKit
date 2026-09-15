@@ -3,6 +3,27 @@ import Observation
 import Security
 import SpeechKit
 
+/// Named latency/accuracy tiers exposed by the OpenAI realtime transcription demo.
+enum DemoOpenAIRealtimeDelay: String, CaseIterable, Identifiable {
+    case minimal
+    case low
+    case medium
+    case high
+    case xhigh
+
+    var id: Self { self }
+
+    var speechKitValue: OpenAIRealtimeDelay {
+        switch self {
+        case .minimal: .minimal
+        case .low: .low
+        case .medium: .medium
+        case .high: .high
+        case .xhigh: .xhigh
+        }
+    }
+}
+
 /// File-transcription providers exposed by the demo app.
 enum DemoFileProvider: String, CaseIterable, Identifiable {
     case elevenLabs
@@ -200,8 +221,20 @@ final class DemoConfiguration {
         didSet { set(openAILanguage, for: "openAILanguage") }
     }
 
+    var openAILanguages: String {
+        didSet { set(openAILanguages, for: "openAILanguages") }
+    }
+
     var openAIPrompt: String {
         didSet { set(openAIPrompt, for: "openAIPrompt") }
+    }
+
+    var openAIKeywords: String {
+        didSet { set(openAIKeywords, for: "openAIKeywords") }
+    }
+
+    var openAIRealtimeDelay: DemoOpenAIRealtimeDelay {
+        didSet { set(openAIRealtimeDelay.rawValue, for: "openAIRealtimeDelay") }
     }
 
     var openAITemperature: String {
@@ -247,11 +280,14 @@ final class DemoConfiguration {
         grokMultichannel = defaults.object(forKey: "grokMultichannel") as? Bool ?? false
         grokRealtimeFillerWords = defaults.object(forKey: "grokRealtimeFillerWords") as? Bool ?? false
         grokTimeoutMinutes = defaults.object(forKey: "grokTimeoutMinutes") as? Double ?? 15
-        openAIFileModel = Self.enumValue(for: "openAIFileModel", default: .gpt4oTranscribe, defaults: defaults)
+        openAIFileModel = Self.enumValue(for: "openAIFileModel", default: .gptTranscribe, defaults: defaults)
         openAIRealtimeSessionModel = Self.enumValue(for: "openAIRealtimeSessionModel", default: .gptRealtime, defaults: defaults)
-        openAIRealtimeTranscriptionModel = Self.enumValue(for: "openAIRealtimeTranscriptionModel", default: .gpt4oTranscribe, defaults: defaults)
+        openAIRealtimeTranscriptionModel = Self.enumValue(for: "openAIRealtimeTranscriptionModel", default: .gptLiveTranscribe, defaults: defaults)
         openAILanguage = defaults.string(forKey: "openAILanguage") ?? ""
+        openAILanguages = defaults.string(forKey: "openAILanguages") ?? ""
         openAIPrompt = defaults.string(forKey: "openAIPrompt") ?? ""
+        openAIKeywords = defaults.string(forKey: "openAIKeywords") ?? ""
+        openAIRealtimeDelay = Self.enumValue(for: "openAIRealtimeDelay", default: .low, defaults: defaults)
         openAITemperature = defaults.string(forKey: "openAITemperature") ?? ""
         openAIIncludeLogprobs = defaults.object(forKey: "openAIIncludeLogprobs") as? Bool ?? false
         openAIWordTimestamps = defaults.object(forKey: "openAIWordTimestamps") as? Bool ?? false
@@ -319,9 +355,12 @@ final class DemoConfiguration {
             realtimeSessionModelID: openAIRealtimeSessionModel,
             realtimeTranscriptionModelID: openAIRealtimeTranscriptionModel,
             language: nilIfBlank(openAILanguage),
+            languages: commaSeparatedValues(openAILanguages),
             prompt: nilIfBlank(openAIPrompt),
+            keywords: commaSeparatedValues(openAIKeywords),
             temperature: Double(openAITemperature),
             diarizationChunkingStrategy: openAIDiarization ? .auto : nil,
+            realtimeDelay: openAIRealtimeDelay.speechKitValue,
             realtimeCommitInterval: 1,
             timeoutInterval: openAITimeoutMinutes * 60
         )
@@ -390,7 +429,9 @@ final class DemoConfiguration {
             return .openAI(
                 modelID: openAIFileModel,
                 language: nilIfBlank(openAILanguage),
+                languages: commaSeparatedValues(openAILanguages),
                 prompt: nilIfBlank(openAIPrompt),
+                keywords: commaSeparatedValues(openAIKeywords),
                 temperature: Double(openAITemperature),
                 includeLogprobs: openAIIncludeLogprobs,
                 timestampGranularities: granularities,
@@ -428,6 +469,14 @@ final class DemoConfiguration {
     private func nilIfBlank(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Parses comma-separated language or keyword values without persisting empty entries.
+    private func commaSeparatedValues(_ value: String) -> [String] {
+        value
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
     /// Reads a persisted raw-representable value or returns a default.

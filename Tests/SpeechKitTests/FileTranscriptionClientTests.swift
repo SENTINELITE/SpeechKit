@@ -189,6 +189,51 @@ struct FileTranscriptionClientTests {
         #expect(body.contains("\r\n\r\nlogprobs\r\n"))
     }
 
+    @Test("OpenAI GPT Transcribe request uses plural language and keyword fields")
+    func openAIGPTTranscribeRequestIncludesNewContextFields() throws {
+        let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
+        let fileURL = temporaryAudioFileURL(named: "sample.wav")
+
+        let request = try client.makeRequest(
+            file: fileURL,
+            options: OpenAIFileTranscriptionOptions(
+                modelID: .gptTranscribe,
+                languages: ["en", "fr"],
+                prompt: "A product support call.",
+                keywords: ["AC-42", "SpeechKit"]
+            )
+        )
+        let body = try #require(request.httpBody).utf8String
+
+        #expect(body.contains("\r\n\r\ngpt-transcribe\r\n"))
+        #expect(body.contains("name=\"languages[]\""))
+        #expect(body.contains("\r\n\r\nen\r\n"))
+        #expect(body.contains("\r\n\r\nfr\r\n"))
+        #expect(!body.contains("name=\"language\""))
+        #expect(body.contains("name=\"keywords[]\""))
+        #expect(body.contains("\r\n\r\nAC-42\r\n"))
+        #expect(body.contains("\r\n\r\nSpeechKit\r\n"))
+    }
+
+    @Test("OpenAI GPT Transcribe rejects conflicting language hints and invalid keywords")
+    func openAIGPTTranscribeValidatesNewContextFields() throws {
+        let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
+        let fileURL = temporaryAudioFileURL(named: "sample.wav")
+
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "Use either language or languages with gpt-transcribe, not both.")) {
+            _ = try client.makeRequest(
+                file: fileURL,
+                options: OpenAIFileTranscriptionOptions(modelID: .gptTranscribe, language: "en", languages: ["fr"])
+            )
+        }
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "keywords cannot contain <, >, carriage returns, or line feeds.")) {
+            _ = try client.makeRequest(
+                file: fileURL,
+                options: OpenAIFileTranscriptionOptions(modelID: .gptTranscribe, keywords: ["bad\nkeyword"])
+            )
+        }
+    }
+
     @Test("OpenAI Whisper timestamp request uses verbose JSON")
     func openAIWhisperTimestampRequestUsesVerboseJSON() throws {
         let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
@@ -402,6 +447,17 @@ struct FileTranscriptionClientTests {
         #expect(response.words?.first?.word == "hello")
         #expect(response.segments?.first?.text == "hello")
         #expect(response.diarizedSegments?.first?.speaker == "speaker_0")
+    }
+
+    @Test("OpenAI GPT Transcribe response decodes detected languages")
+    func openAIGPTTranscribeResponseDecodesDetectedLanguages() throws {
+        let data = Data("""
+        {"text":"Bonjour","languages":[{"code":"fr"}]}
+        """.utf8)
+
+        let response = try JSONDecoder().decode(OpenAIFileTranscriptionResponse.self, from: data)
+
+        #expect(response.languages == [OpenAITranscriptionLanguage(code: "fr")])
     }
 
     @Test("OpenAI current diarized response decodes speaker segments without losing timestamp segments")

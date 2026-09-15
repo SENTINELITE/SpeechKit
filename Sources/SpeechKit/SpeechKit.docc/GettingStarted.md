@@ -40,10 +40,13 @@ struct ContentView: View {
 
 Apps that use realtime microphone transcription must include the platform's microphone permission usage description in their app target.
 
+Apple local Speech does not require an API key, but it requires iOS 26, macOS 26, or visionOS 26 and is unavailable on watchOS. See <doc:AppleLocalSpeech> for asset preparation and availability guidance.
+
 ## Topics
 
 ### Next Steps
 
 - <doc:RealtimeTranscription>
 - <doc:FileTranscription>
+- <doc:AppleLocalSpeech>
 - <doc:ProviderConfiguration>

@@ -80,6 +80,12 @@ struct SettingsSheet: View {
                 }
             }
 
+            Picker("OpenAI live delay", selection: $configuration.openAIRealtimeDelay) {
+                ForEach(DemoOpenAIRealtimeDelay.allCases) { delay in
+                    Text(delay.rawValue).tag(delay)
+                }
+            }
+
             Picker("Grok language", selection: $configuration.grokLanguage) {
                 Text("Default").tag(GrokLanguage?.none)
                 ForEach(GrokLanguage.allCases, id: \.self) { language in

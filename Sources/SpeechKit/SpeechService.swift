@@ -21,11 +21,20 @@ public final class SpeechService {
     public var openAI: OpenAIConfiguration? {
         didSet { applyOpenAIRealtimeConfig() }
     }
+    /// The Apple local Speech configuration used for realtime and file transcription.
+    @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
+    @available(watchOS, unavailable)
+    public var apple: AppleSpeechConfiguration? {
+        get { appleConfigurationStorage as? AppleSpeechConfiguration }
+        set { appleConfigurationStorage = newValue }
+    }
 
     let elevenLabsRealtimeService: ElevenLabsService
     let openAIRealtimeService: OpenAIRealtimeService
     let grokRealtimeService: GrokRealtimeService
     let urlSession: URLSession
+    var appleConfigurationStorage: Any?
+    var appleRealtimeServiceStorage: Any?
     /// The provider currently used for realtime transcription state.
     public internal(set) var activeRealtimeProvider: SpeechRealtimeProvider = .elevenLabs
     var fallbackConnectionState: SpeechRealtimeConnectionState?
@@ -51,6 +60,31 @@ public final class SpeechService {
         applyRealtimeConfig()
         applyOpenAIRealtimeConfig()
         applyGrokRealtimeConfig()
+    }
+
+    /// Creates a speech service with Apple local Speech configuration.
+    ///
+    /// Use this initializer only on OS versions that expose `SpeechAnalyzer`
+    /// and `SpeechTranscriber`. The base ``SpeechService/init(elevenLabs:cohere:grok:aqua:openAI:)``
+    /// initializer remains available for the package's lower deployment targets.
+    @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
+    @available(watchOS, unavailable)
+    public convenience init(
+        elevenLabs: ElevenLabsConfiguration? = nil,
+        cohere: CohereConfiguration? = nil,
+        grok: GrokConfiguration? = nil,
+        aqua: AquaConfiguration? = nil,
+        openAI: OpenAIConfiguration? = nil,
+        apple: AppleSpeechConfiguration? = nil
+    ) {
+        self.init(
+            elevenLabs: elevenLabs,
+            cohere: cohere,
+            grok: grok,
+            aqua: aqua,
+            openAI: openAI
+        )
+        self.apple = apple
     }
 
     init(
@@ -102,6 +136,9 @@ public final class SpeechService {
             sessionModelID: config.realtimeSessionModelID,
             transcriptionModelID: config.realtimeTranscriptionModelID,
             language: config.language,
+            languages: config.languages,
+            prompt: config.prompt,
+            keywords: config.keywords,
             delay: config.realtimeDelay,
             commitInterval: config.realtimeCommitInterval
         )

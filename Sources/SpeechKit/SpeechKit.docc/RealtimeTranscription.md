@@ -1,6 +1,6 @@
 # Realtime Transcription
 
-Stream microphone audio to ElevenLabs, OpenAI, or xAI Grok and observe partial and committed transcript text.
+Stream microphone audio to ElevenLabs, OpenAI, xAI Grok, or Apple local Speech and observe partial and committed transcript text.
 
 ## Overview
 
@@ -42,14 +42,25 @@ await speech.startListening(provider: .openAI)
 await speech.startListening(provider: .grok)
 ```
 
+Apple local Speech is available on iOS 26, macOS 26, and visionOS 26. SpeechKit omits `.apple` from ``SpeechRealtimeProvider/allCases`` before those OS versions and on watchOS.
+
+```swift
+if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+    try await speech.prepareAppleSpeechAssets()
+    await speech.startListening(provider: .apple)
+}
+```
+
 Configure provider-specific realtime defaults when creating ``SpeechService``:
 
 ```swift
 let speech = SpeechService(
     openAI: OpenAIConfiguration(
         apiKey: "<OPENAI_API_KEY>",
-        realtimeTranscriptionModelID: .gpt4oTranscribe,
-        realtimeDelay: .milliseconds(300),
+        realtimeTranscriptionModelID: .gptLiveTranscribe,
+        languages: ["en", "fr"],
+        keywords: ["SpeechKit", "AC-42"],
+        realtimeDelay: .low,
         realtimeCommitInterval: 1
     ),
     grok: GrokConfiguration(
@@ -62,7 +73,13 @@ let speech = SpeechService(
 )
 ```
 
+`gpt-live-transcribe` is the low-latency default. Select `gpt-transcribe` for committed WebSocket turns when your app needs OpenAI's detected-language output. Both models use `languages` instead of the legacy singular `language` hint.
+
 For provider-by-provider setup examples, see <doc:ProviderHowToGuides>.
+
+## Apple Volatile Results
+
+Apple Speech can emit volatile text and later replace it with a final result for the same audio range. SpeechKit keeps the volatile result in ``SpeechService/partialTranscriptEntry`` and upserts final entries by Apple's audio time range. This avoids duplicate committed text when Apple adds punctuation or revises words before finalization.
 
 ## Failure Handling
 
@@ -80,6 +97,7 @@ When a realtime provider is not configured, ``SpeechService/startListening(provi
 - ``SpeechService/transcriptText``
 - ``SpeechService/lastError``
 - ``SpeechError/realtimeProviderNotConfigured(_:)``
+- ``SpeechError/appleSpeechUnavailable``
 - ``SpeechRealtimeProvider``
 - ``SpeechRealtimeConnectionState``
 - ``SpeechTranscriptEntry``

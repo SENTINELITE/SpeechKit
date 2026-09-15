@@ -6,6 +6,16 @@ SpeechKit follows semantic versioning. Source-breaking changes ship in a new maj
 
 ## [Unreleased]
 
+### Added
+
+- OpenAI `gpt-transcribe` support for file transcription and committed Realtime turns, including plural language hints, keyword hints, and detected-language decoding.
+- OpenAI `gpt-live-transcribe` support for low-latency Realtime transcription, including named latency/accuracy delay tiers.
+- Demo controls for OpenAI language lists, keywords, and live transcription delay selection.
+
+### Changed
+
+- OpenAI configuration defaults now use `gpt-transcribe` for files and `gpt-live-transcribe` for Realtime transcription.
+
 ## [1.0.0] - 2026-05-31
 
 ### Added

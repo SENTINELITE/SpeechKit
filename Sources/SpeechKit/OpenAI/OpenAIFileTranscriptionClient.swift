@@ -10,12 +10,18 @@ public enum OpenAIFileTranscriptionModelID: String, Sendable, CaseIterable {
     case gpt4oMiniTranscribe = "gpt-4o-mini-transcribe"
     /// GPT-4o mini transcription snapshot.
     case gpt4oMiniTranscribe20251215 = "gpt-4o-mini-transcribe-2025-12-15"
+    /// OpenAI's recommended high-accuracy transcription model for completed audio files.
+    case gptTranscribe = "gpt-transcribe"
     /// GPT-4o transcription with speaker diarization.
     case gpt4oTranscribeDiarize = "gpt-4o-transcribe-diarize"
 }
 
 /// OpenAI realtime transcription model identifiers supported by SpeechKit.
 public enum OpenAIRealtimeTranscriptionModelID: String, Sendable, CaseIterable {
+    /// OpenAI's low-latency live transcription model.
+    case gptLiveTranscribe = "gpt-live-transcribe"
+    /// OpenAI's high-accuracy transcription model for committed Realtime turns.
+    case gptTranscribe = "gpt-transcribe"
     /// GPT-4o realtime transcription.
     case gpt4oTranscribe = "gpt-4o-transcribe"
     /// GPT-4o mini realtime transcription.
@@ -24,6 +30,18 @@ public enum OpenAIRealtimeTranscriptionModelID: String, Sendable, CaseIterable {
     case gpt4oTranscribeLatest = "gpt-4o-transcribe-latest"
     /// OpenAI Whisper transcription.
     case whisper1 = "whisper-1"
+}
+
+extension OpenAIFileTranscriptionModelID {
+    var usesLanguageList: Bool {
+        self == .gptTranscribe
+    }
+}
+
+extension OpenAIRealtimeTranscriptionModelID {
+    var usesLanguageList: Bool {
+        self == .gptLiveTranscribe || self == .gptTranscribe
+    }
 }
 
 /// OpenAI Realtime connection model identifiers supported by SpeechKit.
@@ -108,8 +126,12 @@ public struct OpenAIFileTranscriptionOptions: Sendable, Equatable {
     public var modelID: OpenAIFileTranscriptionModelID
     /// An optional ISO-639-1 language hint.
     public var language: String?
+    /// Expected input language codes for models that support multiple language hints.
+    public var languages: [String]
     /// An optional prompt to guide transcription style or spelling.
     public var prompt: String?
+    /// Literal terms that may appear in the recording.
+    public var keywords: [String]
     /// An optional sampling temperature.
     public var temperature: Double?
     /// A Boolean value that indicates whether OpenAI should return token log probabilities.
@@ -125,9 +147,11 @@ public struct OpenAIFileTranscriptionOptions: Sendable, Equatable {
 
     /// Creates OpenAI file transcription options.
     public init(
-        modelID: OpenAIFileTranscriptionModelID = .gpt4oTranscribe,
+        modelID: OpenAIFileTranscriptionModelID = .gptTranscribe,
         language: String? = nil,
+        languages: [String] = [],
         prompt: String? = nil,
+        keywords: [String] = [],
         temperature: Double? = nil,
         includeLogprobs: Bool = false,
         timestampGranularities: [OpenAITimestampGranularity] = [],
@@ -137,13 +161,26 @@ public struct OpenAIFileTranscriptionOptions: Sendable, Equatable {
     ) {
         self.modelID = modelID
         self.language = language
+        self.languages = languages
         self.prompt = prompt
+        self.keywords = keywords
         self.temperature = temperature
         self.includeLogprobs = includeLogprobs
         self.timestampGranularities = timestampGranularities
         self.diarizationChunkingStrategy = diarizationChunkingStrategy
         self.knownSpeakers = knownSpeakers
         self.timeoutInterval = timeoutInterval
+    }
+}
+
+/// A language detected by an OpenAI transcription model.
+public struct OpenAITranscriptionLanguage: Decodable, Sendable, Equatable {
+    /// The detected language code.
+    public let code: String
+
+    /// Creates a detected-language value.
+    public init(code: String) {
+        self.code = code
     }
 }
 
@@ -241,6 +278,8 @@ public struct OpenAIFileTranscriptionResponse: Decodable, Sendable, Equatable {
     public let text: String
     /// The detected or requested language code.
     public let language: String?
+    /// Input languages detected by models such as `gpt-transcribe`.
+    public let languages: [OpenAITranscriptionLanguage]?
     /// The audio duration, in seconds.
     public let duration: Double?
     /// Usage metadata for the transcription request.
@@ -257,6 +296,7 @@ public struct OpenAIFileTranscriptionResponse: Decodable, Sendable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case text
         case language
+        case languages
         case duration
         case usage
         case logprobs
@@ -269,6 +309,7 @@ public struct OpenAIFileTranscriptionResponse: Decodable, Sendable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         text = try container.decode(String.self, forKey: .text)
         language = try container.decodeIfPresent(String.self, forKey: .language)
+        languages = try container.decodeIfPresent([OpenAITranscriptionLanguage].self, forKey: .languages)
         duration = try container.decodeIfPresent(Double.self, forKey: .duration)
         usage = try container.decodeIfPresent(OpenAITranscriptionUsage.self, forKey: .usage)
         logprobs = try container.decodeIfPresent([OpenAITranscriptionLogprob].self, forKey: .logprobs)
@@ -358,7 +399,12 @@ struct OpenAIFileTranscriptionClient {
             .text(name: "response_format", value: responseFormat(for: options))
         ]
 
-        if let language = options.language {
+        if options.modelID.usesLanguageList {
+            let languages = options.languages.isEmpty ? options.language.map { [$0] } ?? [] : options.languages
+            for language in languages {
+                parts.append(.text(name: "languages[]", value: language))
+            }
+        } else if let language = options.language {
             parts.append(.text(name: "language", value: language))
         }
         if let prompt = options.prompt {
@@ -366,6 +412,9 @@ struct OpenAIFileTranscriptionClient {
         }
         if let temperature = options.temperature {
             parts.append(.text(name: "temperature", value: String(temperature)))
+        }
+        for keyword in options.keywords {
+            parts.append(.text(name: "keywords[]", value: keyword))
         }
         if options.includeLogprobs {
             parts.append(.text(name: "include[]", value: "logprobs"))
@@ -391,6 +440,26 @@ struct OpenAIFileTranscriptionClient {
     }
 
     private func validate(_ options: OpenAIFileTranscriptionOptions) throws {
+        if options.modelID.usesLanguageList {
+            if options.language != nil, !options.languages.isEmpty {
+                throw SpeechError.providerFailure(provider: .openAI, reason: "Use either language or languages with gpt-transcribe, not both.")
+            }
+        } else if !options.languages.isEmpty {
+            throw SpeechError.providerFailure(provider: .openAI, reason: "languages is only supported with gpt-transcribe.")
+        }
+
+        for language in options.languages where language.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            throw SpeechError.providerFailure(provider: .openAI, reason: "languages cannot contain empty values.")
+        }
+        for keyword in options.keywords {
+            if keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                throw SpeechError.providerFailure(provider: .openAI, reason: "keywords cannot contain empty values.")
+            }
+            if keyword.contains("<") || keyword.contains(">") || keyword.contains("\r") || keyword.contains("\n") {
+                throw SpeechError.providerFailure(provider: .openAI, reason: "keywords cannot contain <, >, carriage returns, or line feeds.")
+            }
+        }
+
         if options.modelID == .gpt4oTranscribeDiarize {
             if options.prompt != nil {
                 throw SpeechError.providerFailure(provider: .openAI, reason: "prompt is not supported with gpt-4o-transcribe-diarize.")

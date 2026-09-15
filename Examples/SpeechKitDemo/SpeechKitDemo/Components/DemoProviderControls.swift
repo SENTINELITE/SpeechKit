@@ -106,7 +106,14 @@ struct FileProviderOptionsView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
 
+            TextField("Languages (comma separated)", text: $configuration.openAILanguages)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
             TextField("Prompt", text: $configuration.openAIPrompt, axis: .vertical)
+                .lineLimit(2...4)
+
+            TextField("Keywords (comma separated)", text: $configuration.openAIKeywords, axis: .vertical)
                 .lineLimit(2...4)
 
             TextField("Temperature", text: $configuration.openAITemperature)

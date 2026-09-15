@@ -74,9 +74,10 @@ struct SpeechServiceTests {
         let service = SpeechService(openAI: OpenAIConfiguration(apiKey: "openai"))
 
         #expect(service.openAI?.apiKey == "openai")
-        #expect(service.openAI?.fileTranscriptionModelID == .gpt4oTranscribe)
+        #expect(service.openAI?.fileTranscriptionModelID == .gptTranscribe)
         #expect(service.openAI?.realtimeSessionModelID == .gptRealtime)
-        #expect(service.openAI?.realtimeTranscriptionModelID == .gpt4oTranscribe)
+        #expect(service.openAI?.realtimeTranscriptionModelID == .gptLiveTranscribe)
+        #expect(service.openAI?.realtimeDelay == .low)
         #expect(service.openAI?.realtimeCommitInterval == 1)
     }
 
@@ -126,6 +127,32 @@ struct SpeechServiceTests {
         #expect(service.connectionState == .error("Grok is not configured"))
         #expect(service.lastError as? SpeechError == .realtimeProviderNotConfigured(.grok))
     }
+
+    #if !os(watchOS)
+    @Test("Apple providers are gated from allCases until OS 26")
+    func appleProvidersAreGatedFromAllCasesUntilOS26() {
+        if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+            #expect(SpeechRealtimeProvider.allCases.contains(.apple))
+            #expect(SpeechFileTranscriptionProvider.allCases.contains(.apple))
+        } else {
+            #expect(!SpeechRealtimeProvider.allCases.contains { $0.rawValue == "apple" })
+            #expect(!SpeechFileTranscriptionProvider.allCases.contains { $0.rawValue == "apple" })
+        }
+    }
+
+    @MainActor
+    @Test("startListening surfaces Apple OS availability before configuration on older OS versions")
+    func startListeningWithAppleBeforeOS26SurfacesAvailabilityError() async {
+        guard #unavailable(iOS 26.0, macOS 26.0, visionOS 26.0) else { return }
+
+        let service = SpeechService()
+
+        await service.startListening(provider: .apple)
+
+        #expect(service.realtimeConnectionState == .error(SpeechError.appleSpeechUnavailable.localizedDescription))
+        #expect(service.lastError as? SpeechError == .appleSpeechUnavailable)
+    }
+    #endif
 
     @MainActor
     @Test("same-provider start is a no-op while lifecycle is active")
@@ -178,6 +205,7 @@ struct SpeechServiceTests {
     func openAIRealtimeSessionUpdateEncodesTranscriptionSession() throws {
         let message = OpenAIRealtimeSessionUpdateMessage(
             options: OpenAIRealtimeSessionOptions(
+                transcriptionModelID: .gpt4oTranscribe,
                 language: "en",
                 delay: .milliseconds(300),
                 commitInterval: 1
@@ -193,6 +221,46 @@ struct SpeechServiceTests {
         #expect(json.contains("\"rate\":24000"))
         #expect(json.contains("\"type\":\"audio\\/pcm\"") || json.contains("\"type\":\"audio/pcm\""))
         #expect(json.contains("\"milliseconds\":300"))
+        #expect(json.contains("\"turn_detection\":null"))
+    }
+
+    @Test("OpenAI live transcription session encodes plural context and a named delay")
+    func openAILiveRealtimeSessionUpdateEncodesNewModelFields() throws {
+        let message = OpenAIRealtimeSessionUpdateMessage(
+            options: OpenAIRealtimeSessionOptions(
+                transcriptionModelID: .gptLiveTranscribe,
+                languages: ["en", "fr"],
+                prompt: "A billing support call.",
+                keywords: ["AC-42", "SpeechKit"],
+                delay: .low
+            )
+        )
+        let data = try JSONEncoder().encode(message)
+        let json = String(decoding: data, as: UTF8.self)
+
+        #expect(json.contains("\"model\":\"gpt-live-transcribe\""))
+        #expect(json.contains("\"languages\":[\"en\",\"fr\"]"))
+        #expect(!json.contains("\"language\":"))
+        #expect(json.contains("\"prompt\":\"A billing support call.\""))
+        #expect(json.contains("\"keywords\":[\"AC-42\",\"SpeechKit\"]"))
+        #expect(json.contains("\"delay\":\"low\""))
+        #expect(json.contains("\"turn_detection\":null"))
+    }
+
+    @Test("OpenAI committed realtime transcript decodes detected languages")
+    func openAIRealtimeCompletionDecodesDetectedLanguages() throws {
+        let data = Data("""
+        {"type":"conversation.item.input_audio_transcription.completed","item_id":"item_003","transcript":"Bonjour","languages":[{"code":"fr"}]}
+        """.utf8)
+
+        let message = try JSONDecoder().decode(OpenAIRealtimeMessage.self, from: data)
+
+        guard case .transcriptionCompleted(let completed) = message else {
+            Issue.record("Expected a completed transcription event.")
+            return
+        }
+        #expect(completed.itemID == "item_003")
+        #expect(completed.languages == [OpenAITranscriptionLanguage(code: "fr")])
     }
 
     @Test("OpenAI realtime audio append encodes base64 audio")
@@ -203,6 +271,20 @@ struct SpeechServiceTests {
 
         #expect(json.contains("\"type\":\"input_audio_buffer.append\""))
         #expect(json.contains("\"audio\":\"AQID\""))
+    }
+
+    @Test("OpenAI realtime only commits after 100 ms of 24 kHz PCM")
+    func openAIRealtimeCommitGateRequiresMinimumAudio() {
+        var gate = OpenAIInputAudioCommitGate()
+
+        gate.append(OpenAIInputAudioCommitGate.minimumAudioBytes - 1)
+        #expect(!gate.isReady)
+
+        gate.append(1)
+        #expect(gate.isReady)
+
+        gate.markCommitted()
+        #expect(!gate.isReady)
     }
 
     @Test("Grok realtime options encode query items")

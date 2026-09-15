@@ -4,6 +4,7 @@ actor OpenAIRealtimeWebSocket {
     private var webSocketTask: URLSessionWebSocketTask?
     private var session: URLSession?
     private var continuation: AsyncThrowingStream<OpenAIRealtimeMessage, Error>.Continuation?
+    private var inputAudioCommitGate = OpenAIInputAudioCommitGate()
 
     private let baseURL = "wss://api.openai.com/v1/realtime"
     private let encoder = JSONEncoder()
@@ -17,13 +18,13 @@ actor OpenAIRealtimeWebSocket {
         apiKey: String,
         options: OpenAIRealtimeSessionOptions
     ) async throws -> AsyncThrowingStream<OpenAIRealtimeMessage, Error> {
+        try options.validate()
         guard let url = URL(string: "\(baseURL)?model=\(options.sessionModelID.rawValue)") else {
             throw OpenAIError.invalidURL
         }
 
         var request = URLRequest(url: url)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("realtime=v1", forHTTPHeaderField: "OpenAI-Beta")
 
         let session = URLSession(configuration: .default)
         self.session = session
@@ -53,10 +54,13 @@ actor OpenAIRealtimeWebSocket {
 
     func send(_ message: OpenAIInputAudioBufferAppendMessage) async throws {
         try await sendEncodable(message)
+        inputAudioCommitGate.append(message.byteCount)
     }
 
     func commitInputAudioBuffer() async throws {
+        guard inputAudioCommitGate.isReady else { return }
         try await sendEncodable(OpenAIInputAudioBufferCommitMessage())
+        inputAudioCommitGate.markCommitted()
     }
 
     func disconnect() {
@@ -64,6 +68,7 @@ actor OpenAIRealtimeWebSocket {
         webSocketTask = nil
         continuation?.finish()
         continuation = nil
+        inputAudioCommitGate.reset()
         session?.invalidateAndCancel()
         session = nil
     }

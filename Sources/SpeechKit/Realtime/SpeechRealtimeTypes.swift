@@ -8,6 +8,25 @@ public enum SpeechRealtimeProvider: String, Sendable, CaseIterable {
     case openAI
     /// xAI Grok realtime transcription.
     case grok
+    /// Apple local Speech framework realtime transcription.
+    ///
+    /// SpeechKit only includes this provider in ``allCases`` on iOS 26,
+    /// macOS 26, and visionOS 26. Calling it directly on older OS versions
+    /// surfaces ``SpeechError/appleSpeechUnavailable``.
+    #if !os(watchOS)
+    case apple
+    #endif
+
+    /// The realtime providers that are callable on the current OS.
+    public static var allCases: [SpeechRealtimeProvider] {
+        var providers: [SpeechRealtimeProvider] = [.elevenLabs, .openAI, .grok]
+        #if !os(watchOS)
+        if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+            providers.append(.apple)
+        }
+        #endif
+        return providers
+    }
 }
 
 /// The realtime connection lifecycle state.

@@ -4,7 +4,7 @@ Add realtime speech-to-text and audio file transcription to Swift and SwiftUI ap
 
 ## Overview
 
-SpeechKit provides one observable service, ``SpeechService``, for realtime microphone transcription and provider-backed audio file transcription. Realtime transcription supports ElevenLabs, OpenAI, and xAI Grok. File transcription supports ElevenLabs, Aqua, Cohere, Grok, and OpenAI.
+SpeechKit provides one observable service, ``SpeechService``, for realtime microphone transcription and provider-backed audio file transcription. Realtime transcription supports ElevenLabs, OpenAI, xAI Grok, and Apple local Speech on supported OS versions. File transcription supports ElevenLabs, Aqua, Cohere, Grok, OpenAI, and Apple local Speech on supported OS versions.
 
 Create a service with the provider configurations your app needs, then place it in SwiftUI's environment or keep it in your own model layer. Use ``SpeechService`` as the main app-facing facade; provider-specific realtime services are advanced APIs for direct provider integrations.
 
@@ -33,6 +33,7 @@ struct DemoApp: App {
 
 - <doc:GettingStarted>
 - <doc:ProviderHowToGuides>
+- <doc:AppleLocalSpeech>
 - ``SpeechService``
 
 ### Realtime Transcription
@@ -107,3 +108,11 @@ struct DemoApp: App {
 - ``OpenAIKnownSpeaker``
 - ``OpenAIRealtimeSessionOptions``
 - ``OpenAIRealtimeService``
+
+### Apple Local Speech
+
+- ``AppleSpeechConfiguration``
+- ``AppleSpeechModelRetention``
+- ``AppleSpeechFileTranscriptionOptions``
+- ``AppleSpeechFileTranscriptionClient``
+- ``AppleSpeechFileTranscriptionResponse``

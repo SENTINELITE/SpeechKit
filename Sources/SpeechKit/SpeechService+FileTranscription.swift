@@ -87,6 +87,30 @@ extension SpeechService {
             } catch {
                 throw wrap(error, for: .openAI)
             }
+
+        #if !os(watchOS)
+        case .apple:
+            if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
+                guard let apple else {
+                    throw SpeechError.providerNotConfigured(.apple)
+                }
+                try validate(options: options, for: .apple)
+                let resolvedOptions = resolvedAppleOptions(from: options)
+                let client = AppleSpeechFileTranscriptionClient()
+
+                do {
+                    return try await client.transcribeAudioFile(
+                        file: file,
+                        configuration: apple,
+                        options: resolvedOptions
+                    )
+                } catch {
+                    throw wrap(error, for: .apple)
+                }
+            } else {
+                throw SpeechError.appleSpeechUnavailable
+            }
+        #endif
         }
     }
 
@@ -204,7 +228,9 @@ extension SpeechService {
         let resolvedOptions = options ?? OpenAIFileTranscriptionOptions(
             modelID: openAI.fileTranscriptionModelID,
             language: openAI.language,
+            languages: openAI.languages,
             prompt: openAI.prompt,
+            keywords: openAI.keywords,
             temperature: openAI.temperature,
             diarizationChunkingStrategy: openAI.diarizationChunkingStrategy,
             knownSpeakers: openAI.knownSpeakers,
@@ -330,7 +356,9 @@ extension SpeechService {
         guard case .openAI(
             let modelID,
             let language,
+            let languages,
             let prompt,
+            let keywords,
             let temperature,
             let includeLogprobs,
             let timestampGranularities,
@@ -341,7 +369,9 @@ extension SpeechService {
             return OpenAIFileTranscriptionOptions(
                 modelID: config.fileTranscriptionModelID,
                 language: config.language,
+                languages: config.languages,
                 prompt: config.prompt,
+                keywords: config.keywords,
                 temperature: config.temperature,
                 diarizationChunkingStrategy: config.diarizationChunkingStrategy,
                 knownSpeakers: config.knownSpeakers,
@@ -352,7 +382,9 @@ extension SpeechService {
         return OpenAIFileTranscriptionOptions(
             modelID: modelID ?? config.fileTranscriptionModelID,
             language: language ?? config.language,
+            languages: languages ?? config.languages,
             prompt: prompt ?? config.prompt,
+            keywords: keywords ?? config.keywords,
             temperature: temperature ?? config.temperature,
             includeLogprobs: includeLogprobs ?? false,
             timestampGranularities: timestampGranularities ?? [],
@@ -361,6 +393,23 @@ extension SpeechService {
             timeoutInterval: timeoutInterval ?? config.timeoutInterval
         )
     }
+
+    #if !os(watchOS)
+    @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
+    @available(watchOS, unavailable)
+    func resolvedAppleOptions(
+        from options: SpeechFileTranscriptionOptions?
+    ) -> AppleSpeechFileTranscriptionOptions? {
+        guard case .apple(let locale, let preparesAssetsAutomatically) = options else {
+            return nil
+        }
+
+        return AppleSpeechFileTranscriptionOptions(
+            locale: locale,
+            preparesAssetsAutomatically: preparesAssetsAutomatically
+        )
+    }
+    #endif
 
     func wrap(_ error: Error, for provider: SpeechFileTranscriptionProvider) -> SpeechError {
         if let speechError = error as? SpeechError {
