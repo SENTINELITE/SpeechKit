@@ -160,6 +160,12 @@ enum SpeechFileUploadSupport {
         }
     }
 
+    /// Validates a file against the ElevenLabs upload limits.
+    ///
+    /// The size limit is always enforced. The duration limit is only enforced
+    /// when AVFoundation can read a duration: files whose metadata cannot be
+    /// read (raw PCM, containers AVFoundation does not parse) are accepted, in
+    /// line with ``validateFileDuration(_:maxDuration:provider:)``.
     static func validateFileForUpload(
         _ fileURL: URL,
         maxUploadBytes: Int64? = nil,
@@ -181,16 +187,15 @@ enum SpeechFileUploadSupport {
 
         if let maxUploadDuration {
             let asset = AVURLAsset(url: fileURL)
-            do {
-                let duration = try await asset.load(.duration)
-                let seconds = duration.seconds
-                if seconds.isFinite, seconds > maxUploadDuration {
-                    throw ElevenLabsError.audioTooLong(maxUploadDuration)
-                }
-            } catch let error as ElevenLabsError {
-                throw error
-            } catch {
-                throw ElevenLabsError.metadataReadFailed
+            // An unreadable duration is tolerated rather than fatal; the limit
+            // is only enforced when AVFoundation reports a finite duration.
+            guard let duration = try? await asset.load(.duration) else {
+                return
+            }
+
+            let seconds = duration.seconds
+            if seconds.isFinite, seconds > maxUploadDuration {
+                throw ElevenLabsError.audioTooLong(maxUploadDuration)
             }
         }
     }

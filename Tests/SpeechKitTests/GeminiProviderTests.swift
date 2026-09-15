@@ -151,8 +151,9 @@ struct GeminiFileTranscriptionTests {
     func geminiAutomaticUploadStrategySwitchesAboveThreshold() throws {
         let client = GeminiFileTranscriptionClient(apiKey: "gemini-key")
         let smallFile = geminiTemporaryAudioFileURL(named: "gemini-small.wav")
-        let largeFile = try geminiTemporarySparseFileURL(named: "gemini-large.wav", size: 4096)
-        let options = GeminiFileTranscriptionOptions(inlineUploadThresholdBytes: 2048)
+        let largeFile = try geminiTemporarySparseFileURL(named: "gemini-large.wav", size: 8192)
+        // The stub WAV is ~3.2 KB, so the threshold sits between the two files.
+        let options = GeminiFileTranscriptionOptions(inlineUploadThresholdBytes: 4096)
 
         #expect(try client.resolvedUploadStrategy(for: smallFile, options: options) == .inline)
         #expect(try client.resolvedUploadStrategy(for: largeFile, options: options) == .filesAPI)
@@ -838,14 +839,26 @@ struct GeminiRealtimeConfigurationTests {
     }
 }
 
+/// A freshly created temporary directory, unique to this call.
+private func uniqueTemporaryDirectory() -> URL {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
+}
+
+/// Writes a stub audio file into a fresh per-call temporary directory.
+///
+/// Tests run in parallel and assert on the multipart `filename`, so the
+/// directory is unique while the last path component stays `fileName`.
 private func geminiTemporaryAudioFileURL(named fileName: String) -> URL {
-    let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+    let url = uniqueTemporaryDirectory().appendingPathComponent(fileName)
     try? geminiMinimalWAVData().write(to: url)
     return url
 }
 
 private func geminiTemporarySparseFileURL(named fileName: String, size: UInt64) throws -> URL {
-    let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "-" + fileName)
+    let url = uniqueTemporaryDirectory().appendingPathComponent(fileName)
     FileManager.default.createFile(atPath: url.path, contents: nil)
     let handle = try FileHandle(forWritingTo: url)
     try handle.truncate(atOffset: size)
@@ -853,22 +866,28 @@ private func geminiTemporarySparseFileURL(named fileName: String, size: UInt64) 
     return url
 }
 
+/// A valid 16 kHz, 16-bit, mono PCM WAV holding 0.1 seconds of silence.
+///
+/// AVFoundation must be able to read a real duration from this file, so the
+/// RIFF and `data` chunk sizes have to match the 3,200 bytes of samples.
 private func geminiMinimalWAVData() -> Data {
-    Data([
-        0x52, 0x49, 0x46, 0x46,
-        0x24, 0x00, 0x00, 0x00,
-        0x57, 0x41, 0x56, 0x45,
-        0x66, 0x6D, 0x74, 0x20,
-        0x10, 0x00, 0x00, 0x00,
-        0x01, 0x00,
-        0x01, 0x00,
-        0x40, 0x1F, 0x00, 0x00,
-        0x40, 0x1F, 0x00, 0x00,
-        0x01, 0x00,
-        0x08, 0x00,
-        0x64, 0x61, 0x74, 0x61,
-        0x00, 0x00, 0x00, 0x00
+    var data = Data([
+        0x52, 0x49, 0x46, 0x46, // "RIFF"
+        0xA4, 0x0C, 0x00, 0x00, // chunk size: 36 + 3200
+        0x57, 0x41, 0x56, 0x45, // "WAVE"
+        0x66, 0x6D, 0x74, 0x20, // "fmt "
+        0x10, 0x00, 0x00, 0x00, // fmt chunk size: 16
+        0x01, 0x00,             // PCM
+        0x01, 0x00,             // 1 channel
+        0x80, 0x3E, 0x00, 0x00, // 16000 Hz
+        0x00, 0x7D, 0x00, 0x00, // 32000 bytes per second
+        0x02, 0x00,             // block align: 2
+        0x10, 0x00,             // 16 bits per sample
+        0x64, 0x61, 0x74, 0x61, // "data"
+        0x80, 0x0C, 0x00, 0x00  // data chunk size: 3200
     ])
+    data.append(Data(repeating: 0, count: 3_200))
+    return data
 }
 
 private func geminiJSONObject(from data: Data) throws -> [String: Any] {

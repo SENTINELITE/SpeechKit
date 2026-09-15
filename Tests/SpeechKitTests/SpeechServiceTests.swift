@@ -625,8 +625,41 @@ struct SpeechServiceTests {
     }
 }
 
+/// A freshly created temporary directory, unique to this call.
+private func uniqueTemporaryDirectory() -> URL {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
+}
+
+/// Writes a stub audio file into a fresh per-call temporary directory.
+///
+/// Tests run in parallel, so each call gets its own directory rather than
+/// sharing one path in the process-wide temporary directory.
 private func temporaryAudioFileURL() -> URL {
-    let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("wav")
-    try? Data("test".utf8).write(to: url)
+    let url = uniqueTemporaryDirectory().appendingPathComponent("sample.wav")
+    try? speechServiceMinimalWAVData().write(to: url)
     return url
+}
+
+/// A valid 16 kHz, 16-bit, mono PCM WAV holding 0.1 seconds of silence.
+private func speechServiceMinimalWAVData() -> Data {
+    var data = Data([
+        0x52, 0x49, 0x46, 0x46, // "RIFF"
+        0xA4, 0x0C, 0x00, 0x00, // chunk size: 36 + 3200
+        0x57, 0x41, 0x56, 0x45, // "WAVE"
+        0x66, 0x6D, 0x74, 0x20, // "fmt "
+        0x10, 0x00, 0x00, 0x00, // fmt chunk size: 16
+        0x01, 0x00,             // PCM
+        0x01, 0x00,             // 1 channel
+        0x80, 0x3E, 0x00, 0x00, // 16000 Hz
+        0x00, 0x7D, 0x00, 0x00, // 32000 bytes per second
+        0x02, 0x00,             // block align: 2
+        0x10, 0x00,             // 16 bits per sample
+        0x64, 0x61, 0x74, 0x61, // "data"
+        0x80, 0x0C, 0x00, 0x00  // data chunk size: 3200
+    ])
+    data.append(Data(repeating: 0, count: 3_200))
+    return data
 }

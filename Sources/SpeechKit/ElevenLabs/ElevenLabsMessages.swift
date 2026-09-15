@@ -194,6 +194,9 @@ public enum ElevenLabsError: Error, LocalizedError, Sendable {
     /// The audio duration exceeds ElevenLabs upload limits.
     case audioTooLong(TimeInterval)
     /// SpeechKit could not read audio metadata.
+    ///
+    /// Upload validation no longer throws this case: a file whose duration
+    /// AVFoundation cannot read skips the duration check instead.
     case metadataReadFailed
     
     /// A localized description of the error.

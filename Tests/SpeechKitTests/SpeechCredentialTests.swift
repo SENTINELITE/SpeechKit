@@ -398,26 +398,44 @@ private extension SpeechRealtimeConnectionState {
     }
 }
 
+/// A freshly created temporary directory, unique to this call.
+private func uniqueTemporaryDirectory() -> URL {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
+}
+
+/// Writes a stub audio file into a fresh per-call temporary directory.
+///
+/// Tests run in parallel and assert on the multipart `filename`, so the
+/// directory is unique while the last path component stays `fileName`.
 private func credentialTemporaryAudioFileURL(named fileName: String) -> URL {
-    let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+    let url = uniqueTemporaryDirectory().appendingPathComponent(fileName)
     try? credentialMinimalWAVData().write(to: url)
     return url
 }
 
+/// A valid 16 kHz, 16-bit, mono PCM WAV holding 0.1 seconds of silence.
+///
+/// AVFoundation must be able to read a real duration from this file, so the
+/// RIFF and `data` chunk sizes have to match the 3,200 bytes of samples.
 private func credentialMinimalWAVData() -> Data {
-    Data([
-        0x52, 0x49, 0x46, 0x46,
-        0x24, 0x00, 0x00, 0x00,
-        0x57, 0x41, 0x56, 0x45,
-        0x66, 0x6D, 0x74, 0x20,
-        0x10, 0x00, 0x00, 0x00,
-        0x01, 0x00,
-        0x01, 0x00,
-        0x40, 0x1F, 0x00, 0x00,
-        0x40, 0x1F, 0x00, 0x00,
-        0x01, 0x00,
-        0x08, 0x00,
-        0x64, 0x61, 0x74, 0x61,
-        0x00, 0x00, 0x00, 0x00
+    var data = Data([
+        0x52, 0x49, 0x46, 0x46, // "RIFF"
+        0xA4, 0x0C, 0x00, 0x00, // chunk size: 36 + 3200
+        0x57, 0x41, 0x56, 0x45, // "WAVE"
+        0x66, 0x6D, 0x74, 0x20, // "fmt "
+        0x10, 0x00, 0x00, 0x00, // fmt chunk size: 16
+        0x01, 0x00,             // PCM
+        0x01, 0x00,             // 1 channel
+        0x80, 0x3E, 0x00, 0x00, // 16000 Hz
+        0x00, 0x7D, 0x00, 0x00, // 32000 bytes per second
+        0x02, 0x00,             // block align: 2
+        0x10, 0x00,             // 16 bits per sample
+        0x64, 0x61, 0x74, 0x61, // "data"
+        0x80, 0x0C, 0x00, 0x00  // data chunk size: 3200
     ])
+    data.append(Data(repeating: 0, count: 3_200))
+    return data
 }

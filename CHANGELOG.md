@@ -4,6 +4,12 @@ All notable changes to SpeechKit will be documented in this file.
 
 SpeechKit follows semantic versioning. Source-breaking changes ship in a new major version.
 
+## [2.0.1] - 2026-09-15
+
+### Fixed
+
+- ElevenLabs file uploads no longer fail with `metadataReadFailed` when AVFoundation cannot read a file's duration; the duration limit is enforced when the duration is readable, matching the other providers.
+
 ## [2.0.0] - 2026-09-15
 
 This is a major release because `SpeechFileTranscriptionProvider`, `SpeechRealtimeProvider`, and `SpeechFileTranscriptionOptions` gained cases. Every other change is additive.

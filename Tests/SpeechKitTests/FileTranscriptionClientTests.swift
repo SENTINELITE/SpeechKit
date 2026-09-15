@@ -666,16 +666,66 @@ struct FileTranscriptionClientTests {
         #expect(body.contains("name=\"language\""))
         #expect(body.contains("\r\n\r\nfil\r\n"))
     }
+
+    @Test("Upload validation tolerates audio whose duration cannot be read")
+    func uploadValidationToleratesUnreadableDuration() async throws {
+        let fileURL = temporaryUnreadableAudioFileURL(named: "unreadable.wav")
+
+        try await SpeechFileUploadSupport.validateFileForUpload(
+            fileURL,
+            maxUploadBytes: 3 * 1024 * 1024 * 1024,
+            maxUploadDuration: 10 * 60 * 60
+        )
+    }
+
+    @Test("Upload validation rejects audio longer than the duration limit")
+    func uploadValidationRejectsAudioOverDurationLimit() async throws {
+        let fileURL = temporaryAudioFileURL(named: "sample.wav")
+
+        await #expect {
+            try await SpeechFileUploadSupport.validateFileForUpload(
+                fileURL,
+                maxUploadBytes: 3 * 1024 * 1024 * 1024,
+                maxUploadDuration: 0.05
+            )
+        } throws: { error in
+            guard case ElevenLabsError.audioTooLong(let limit) = error else { return false }
+            return limit == 0.05
+        }
+    }
+
+    @Test("Upload validation accepts audio within the duration limit")
+    func uploadValidationAcceptsAudioWithinDurationLimit() async throws {
+        let fileURL = temporaryAudioFileURL(named: "sample.wav")
+
+        try await SpeechFileUploadSupport.validateFileForUpload(
+            fileURL,
+            maxUploadBytes: 3 * 1024 * 1024 * 1024,
+            maxUploadDuration: 10
+        )
+    }
 }
 
+/// A freshly created temporary directory, unique to this call.
+private func uniqueTemporaryDirectory() -> URL {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
+}
+
+/// Writes a stub audio file into a fresh per-call temporary directory.
+///
+/// Tests run in parallel and assert on the multipart `filename`, so the
+/// directory is unique while the last path component stays `fileName`.
 private func temporaryAudioFileURL(named fileName: String) -> URL {
-    let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+    let url = uniqueTemporaryDirectory().appendingPathComponent(fileName)
     try? minimalWAVData().write(to: url)
     return url
 }
 
 private func temporarySparseFileURL(named fileName: String, size: UInt64) throws -> URL {
-    let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + "-" + fileName)
+    let url = uniqueTemporaryDirectory().appendingPathComponent(fileName)
     FileManager.default.createFile(atPath: url.path, contents: nil)
     let handle = try FileHandle(forWritingTo: url)
     try handle.truncate(atOffset: size)
@@ -689,20 +739,39 @@ private extension Data {
     }
 }
 
+/// A valid 16 kHz, 16-bit, mono PCM WAV holding 0.1 seconds of silence.
+///
+/// AVFoundation must be able to read a real duration from this file, so the
+/// RIFF and `data` chunk sizes have to match the 3,200 bytes of samples.
 private func minimalWAVData() -> Data {
-    Data([
-        0x52, 0x49, 0x46, 0x46,
-        0x24, 0x00, 0x00, 0x00,
-        0x57, 0x41, 0x56, 0x45,
-        0x66, 0x6D, 0x74, 0x20,
-        0x10, 0x00, 0x00, 0x00,
-        0x01, 0x00,
-        0x01, 0x00,
-        0x40, 0x1F, 0x00, 0x00,
-        0x40, 0x1F, 0x00, 0x00,
-        0x01, 0x00,
-        0x08, 0x00,
-        0x64, 0x61, 0x74, 0x61,
-        0x00, 0x00, 0x00, 0x00
+    var data = Data([
+        0x52, 0x49, 0x46, 0x46, // "RIFF"
+        0xA4, 0x0C, 0x00, 0x00, // chunk size: 36 + 3200
+        0x57, 0x41, 0x56, 0x45, // "WAVE"
+        0x66, 0x6D, 0x74, 0x20, // "fmt "
+        0x10, 0x00, 0x00, 0x00, // fmt chunk size: 16
+        0x01, 0x00,             // PCM
+        0x01, 0x00,             // 1 channel
+        0x80, 0x3E, 0x00, 0x00, // 16000 Hz
+        0x00, 0x7D, 0x00, 0x00, // 32000 bytes per second
+        0x02, 0x00,             // block align: 2
+        0x10, 0x00,             // 16 bits per sample
+        0x64, 0x61, 0x74, 0x61, // "data"
+        0x80, 0x0C, 0x00, 0x00  // data chunk size: 3200
     ])
+    data.append(Data(repeating: 0, count: 3_200))
+    return data
+}
+
+/// Writes a `.wav` file whose bytes are not a valid RIFF container.
+private func temporaryUnreadableAudioFileURL(named fileName: String) -> URL {
+    let url = uniqueTemporaryDirectory().appendingPathComponent(fileName)
+    try? unreadableWAVData().write(to: url)
+    return url
+}
+
+/// Bytes that carry a `.wav` extension but are not a RIFF container, so
+/// AVFoundation cannot read a duration from them.
+private func unreadableWAVData() -> Data {
+    Data("not-a-riff-container".utf8)
 }
