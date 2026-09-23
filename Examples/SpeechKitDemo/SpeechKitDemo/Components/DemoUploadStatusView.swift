@@ -41,7 +41,7 @@ extension TimeInterval {
     }
 }
 
-/// A progress surface for VOZ, whose selected audio stays on this device while it is transcribed.
+/// A progress surface for on-device providers, whose audio stays on this device while it is transcribed.
 struct DemoLocalTranscriptionStatusView: View {
     let startedAt: Date?
 
@@ -50,7 +50,7 @@ struct DemoLocalTranscriptionStatusView: View {
             let elapsed = startedAt.map { timeline.date.timeIntervalSince($0) } ?? 0
 
             VStack(alignment: .leading, spacing: 8) {
-                ProgressView("Transcribing locally with VOZ…")
+                ProgressView("Transcribing on this device…")
                 LabeledContent("Elapsed", value: elapsed.formattedDuration)
                 Text("Audio transcription runs on this device.")
                     .font(.caption)

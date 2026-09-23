@@ -6,6 +6,7 @@ import SwiftUI
 enum SettingsRoute: Hashable {
     case provider(DemoAPIKeyProvider)
     case voz
+    case appleSpeech
 }
 
 /// The settings root: which providers the workflows use, plus one page per provider.
@@ -31,6 +32,10 @@ struct SettingsSheet: View {
                     ProviderSettingsView(configuration: configuration, provider: provider)
                 case .voz:
                     VozSettingsView(speech: speech)
+                case .appleSpeech:
+                    if #available(iOS 26.0, *) {
+                        AppleSpeechSettingsView(configuration: configuration, speech: speech)
+                    }
                 }
             }
             .toolbar {
@@ -62,7 +67,7 @@ struct SettingsSheet: View {
         } header: {
             Text("Default Providers")
         } footer: {
-            Text("A cloud provider becomes selectable once its API key is saved.")
+            Text("A cloud provider becomes selectable once its API key is saved. On-device providers need no key.")
         }
     }
 
@@ -77,9 +82,24 @@ struct SettingsSheet: View {
         }
     }
 
-    /// Links to the on-device VOZ model.
+    /// Links to the on-device providers: VOZ everywhere, Apple Speech on iOS 26 and later.
     private var onDeviceSection: some View {
         Section("On-Device") {
+            if DemoAppleSpeech.isAvailable {
+                NavigationLink(value: SettingsRoute.appleSpeech) {
+                    LabeledContent {
+                        Text(configuration.appleLocaleIdentifier.isEmpty ? "Device Language" : Locale.current.localizedString(forIdentifier: configuration.appleLocaleIdentifier) ?? configuration.appleLocaleIdentifier)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Apple Speech")
+                            Text("Realtime · File & Dictation")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
             NavigationLink(value: SettingsRoute.voz) {
                 LabeledContent {
                     Text(speech.vozModelState.summary)

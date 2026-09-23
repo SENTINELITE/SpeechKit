@@ -24,6 +24,39 @@ enum DemoOpenAIRealtimeDelay: String, CaseIterable, Identifiable {
     }
 }
 
+/// Apple's on-device `SpeechAnalyzer` needs iOS 26; the demo still runs on iOS 18.
+enum DemoAppleSpeech {
+    static var isAvailable: Bool {
+        if #available(iOS 26.0, *) { true } else { false }
+    }
+}
+
+/// How long Apple's speech models stay loaded after analysis.
+enum DemoAppleModelRetention: String, CaseIterable, Identifiable {
+    case whileInUse
+    case lingering
+    case processLifetime
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .whileInUse: "While in use"
+        case .lingering: "Linger briefly"
+        case .processLifetime: "Until the app quits"
+        }
+    }
+
+    @available(iOS 26.0, *)
+    var speechKitValue: AppleSpeechModelRetention {
+        switch self {
+        case .whileInUse: .whileInUse
+        case .lingering: .lingering
+        case .processLifetime: .processLifetime
+        }
+    }
+}
+
 /// File-transcription providers exposed by the demo app.
 enum DemoFileProvider: String, CaseIterable, Identifiable {
     case elevenLabs
@@ -34,8 +67,20 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
     case meta
     case gemini
     case voz
+    case apple
 
     var id: Self { self }
+
+    /// The providers callable on this OS; Apple needs iOS 26.
+    static var allCases: [DemoFileProvider] {
+        let providers: [DemoFileProvider] = [.elevenLabs, .aqua, .cohere, .grok, .openAI, .meta, .gemini, .voz, .apple]
+        return DemoAppleSpeech.isAvailable ? providers : providers.filter { $0 != .apple }
+    }
+
+    /// Whether this provider transcribes on the device instead of uploading audio.
+    var isOnDevice: Bool {
+        self == .voz || self == .apple
+    }
 
     /// The display name shown in menus and settings.
     var title: String {
@@ -48,6 +93,7 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
         case .meta: "Meta"
         case .gemini: "Gemini"
         case .voz: "VOZ (On Device)"
+        case .apple: "Apple (On Device)"
         }
     }
 
@@ -63,12 +109,13 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
         case .meta: .meta
         case .gemini: .gemini
         case .voz: nil
+        case .apple: .apple
         }
     }
 
     /// Whether this provider needs a remote-service API key.
     var requiresAPIKey: Bool {
-        self != .voz
+        !isOnDevice
     }
 
     /// The API key namespace required for this file provider, when it uses one.
@@ -81,7 +128,7 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
         case .openAI: .openAI
         case .meta: .meta
         case .gemini: .gemini
-        case .voz: nil
+        case .voz, .apple: nil
         }
     }
 }
@@ -93,8 +140,15 @@ enum DemoRealtimeProvider: String, CaseIterable, Identifiable {
     case grok
     case meta
     case gemini
+    case apple
 
     var id: Self { self }
+
+    /// The providers callable on this OS; Apple needs iOS 26.
+    static var allCases: [DemoRealtimeProvider] {
+        let providers: [DemoRealtimeProvider] = [.elevenLabs, .openAI, .grok, .meta, .gemini, .apple]
+        return DemoAppleSpeech.isAvailable ? providers : providers.filter { $0 != .apple }
+    }
 
     /// The display name shown in menus and settings.
     var title: String {
@@ -104,6 +158,7 @@ enum DemoRealtimeProvider: String, CaseIterable, Identifiable {
         case .grok: "Grok"
         case .meta: "Meta"
         case .gemini: "Gemini"
+        case .apple: "Apple (On Device)"
         }
     }
 
@@ -115,17 +170,19 @@ enum DemoRealtimeProvider: String, CaseIterable, Identifiable {
         case .grok: .grok
         case .meta: .meta
         case .gemini: .gemini
+        case .apple: .apple
         }
     }
 
-    /// The API key namespace required for this realtime provider.
-    var apiKeyProvider: DemoAPIKeyProvider {
+    /// The API key namespace required for this realtime provider, or `nil` for on-device Apple Speech.
+    var apiKeyProvider: DemoAPIKeyProvider? {
         switch self {
         case .elevenLabs: .elevenLabs
         case .openAI: .openAI
         case .grok: .grok
         case .meta: .meta
         case .gemini: .gemini
+        case .apple: nil
         }
     }
 }
@@ -343,11 +400,27 @@ final class DemoConfiguration {
         didSet { set(geminiBackgroundProcessing, for: "geminiBackgroundProcessing") }
     }
 
+    /// A locale identifier for Apple Speech; empty uses the device's current locale.
+    var appleLocaleIdentifier: String {
+        didSet { set(appleLocaleIdentifier, for: "appleLocaleIdentifier") }
+    }
+
+    var appleContextualStrings: String {
+        didSet { set(appleContextualStrings, for: "appleContextualStrings") }
+    }
+
+    var appleModelRetention: DemoAppleModelRetention {
+        didSet { set(appleModelRetention.rawValue, for: "appleModelRetention") }
+    }
+
     /// Loads persisted provider defaults and keychain-backed secrets.
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        realtimeProvider = Self.enumValue(for: "realtimeProvider", default: .elevenLabs, defaults: defaults)
-        fileProvider = Self.enumValue(for: "fileProvider", default: .openAI, defaults: defaults)
+        // A saved Apple selection is unusable on an OS without SpeechAnalyzer, so fall back.
+        let savedRealtimeProvider: DemoRealtimeProvider = Self.enumValue(for: "realtimeProvider", default: .elevenLabs, defaults: defaults)
+        realtimeProvider = DemoRealtimeProvider.allCases.contains(savedRealtimeProvider) ? savedRealtimeProvider : .elevenLabs
+        let savedFileProvider: DemoFileProvider = Self.enumValue(for: "fileProvider", default: .openAI, defaults: defaults)
+        fileProvider = DemoFileProvider.allCases.contains(savedFileProvider) ? savedFileProvider : .openAI
         elevenLabsRealtimeModel = Self.enumValue(for: "elevenLabsRealtimeModel", default: .scribeV2Realtime, defaults: defaults)
         elevenLabsFileModel = Self.enumValue(for: "elevenLabsFileModel", default: .scribeV2, defaults: defaults)
         aquaModel = Self.enumValue(for: "aquaModel", default: .avalonV15, defaults: defaults)
@@ -389,6 +462,9 @@ final class DemoConfiguration {
         geminiDiarize = defaults.object(forKey: "geminiDiarize") as? Bool ?? false
         geminiWordTimestamps = defaults.object(forKey: "geminiWordTimestamps") as? Bool ?? false
         geminiBackgroundProcessing = defaults.object(forKey: "geminiBackgroundProcessing") as? Bool ?? false
+        appleLocaleIdentifier = defaults.string(forKey: "appleLocaleIdentifier") ?? ""
+        appleContextualStrings = defaults.string(forKey: "appleContextualStrings") ?? ""
+        appleModelRetention = Self.enumValue(for: "appleModelRetention", default: .whileInUse, defaults: defaults)
         loadAPIKeys()
     }
 
@@ -422,7 +498,8 @@ final class DemoConfiguration {
 
     /// Returns whether a realtime provider can be used with the current keychain state.
     func hasAPIKey(for provider: DemoRealtimeProvider) -> Bool {
-        hasAPIKey(for: provider.apiKeyProvider)
+        guard let apiKeyProvider = provider.apiKeyProvider else { return true }
+        return hasAPIKey(for: apiKeyProvider)
     }
 
     /// Builds the missing-key message for file workflows.
@@ -530,6 +607,19 @@ final class DemoConfiguration {
                 mode: geminiMode
             )
         )
+
+        if #available(iOS 26.0, *) {
+            speech.apple = AppleSpeechConfiguration(
+                locale: appleLocale,
+                contextualStrings: commaSeparatedValues(appleContextualStrings),
+                modelRetention: appleModelRetention.speechKitValue
+            )
+        }
+    }
+
+    /// The locale Apple Speech transcribes, from the saved identifier or the device locale.
+    var appleLocale: Locale {
+        appleLocaleIdentifier.isEmpty ? .current : Locale(identifier: appleLocaleIdentifier)
     }
 
     /// Converts the current provider-specific controls into SpeechKit file transcription options.
@@ -587,7 +677,7 @@ final class DemoConfiguration {
                 timestampGranularities: geminiTimestampGranularities,
                 processingMode: geminiProcessingMode
             )
-        case .voz:
+        case .voz, .apple:
             return nil
         }
     }
@@ -614,7 +704,7 @@ final class DemoConfiguration {
             return grokTimeoutMinutes * 60
         case .openAI:
             return openAITimeoutMinutes * 60
-        case .elevenLabs, .aqua, .cohere, .meta, .gemini, .voz:
+        case .elevenLabs, .aqua, .cohere, .meta, .gemini, .voz, .apple:
             return nil
         }
     }

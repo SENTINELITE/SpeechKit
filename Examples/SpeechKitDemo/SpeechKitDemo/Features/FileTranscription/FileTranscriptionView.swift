@@ -142,7 +142,7 @@ struct FileTranscriptionView: View {
     private var resultSection: some View {
         Section("Result") {
             if isTranscribing {
-                if configuration.fileProvider == .voz {
+                if configuration.fileProvider.isOnDevice {
                     DemoLocalTranscriptionStatusView(startedAt: startedAt)
                 } else {
                     DemoUploadStatusView(

@@ -180,6 +180,10 @@ struct FileProviderOptionsView: View {
             Label("Runs locally after its model is downloaded and prepared in Settings. VOZ supports 25 languages but does not detect language or accept a language hint.", systemImage: "lock.fill")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        case .apple:
+            Label("Runs locally with Apple's Speech framework in \(configuration.appleLocale.localizedString(forIdentifier: configuration.appleLocale.identifier) ?? configuration.appleLocale.identifier). Change the language in Settings.", systemImage: "lock.fill")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }
@@ -230,6 +234,8 @@ struct RealtimeOnlyOptionsView: View {
                     Text(model.rawValue).tag(model)
                 }
             }
+        case .apple:
+            EmptyView()
         }
     }
 }

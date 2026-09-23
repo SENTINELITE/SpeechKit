@@ -62,7 +62,7 @@ struct RecordedUploadView: View {
             return "Stop Recording"
         }
         if isTranscribingDictation {
-            return configuration.fileProvider == .voz ? "Transcribing locally" : "Uploading"
+            return configuration.fileProvider.isOnDevice ? "Transcribing locally" : "Uploading"
         }
         return "Record"
     }
@@ -82,7 +82,7 @@ struct RecordedUploadView: View {
             DemoBackground(level: voiceLevel, state: voiceState)
 
             DemoVoiceStage(
-                title: configuration.fileProvider == .voz ? "Record, transcribe locally" : "Record, upload, transcribe",
+                title: configuration.fileProvider.isOnDevice ? "Record, transcribe locally" : "Record, upload, transcribe",
                 providerTitle: configuration.fileProvider.title,
                 iconName: microphoneIconName,
                 voiceLevel: voiceLevel,

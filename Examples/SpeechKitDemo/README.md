@@ -6,6 +6,15 @@ Open `SpeechKitDemo.xcodeproj` in Xcode, choose the `SpeechKitDemo` scheme, and 
 
 The symlink gives the local package the identity `speechkit` no matter what the checkout folder is called (for example `SpeechKit-main` from a GitHub ZIP download). [SpeechKit-Voz](https://github.com/SENTINELITE/SpeechKit-Voz) depends on SpeechKit from GitHub, and Xcode only substitutes the local checkout for that dependency when the identities match.
 
+## Try Apple on-device transcription
+
+On iOS 26 and later, "Apple (On Device)" appears as a provider for Realtime, File Transcription, and Dictation. It uses Apple's Speech framework (`SpeechAnalyzer`), needs no API key, and keeps audio on the device.
+
+1. Open Settings and choose Apple Speech under On-Device.
+2. Pick the language you will speak. Apple Speech does not detect the language.
+3. Optionally choose "Download Speech Assets" so the language's model is installed before your first recording.
+4. Select "Apple (On Device)" as the Realtime or File & Dictation provider.
+
 ## Try VOZ local transcription
 
 The demo pulls in [SpeechKit-Voz](https://github.com/SENTINELITE/SpeechKit-Voz) from GitHub, which adds VOZ on-device transcription through Desert Ant Labs' model. VOZ is available in the File Transcription and Dictation workflows. It transcribes selected files and recordings after recording stops. It does not appear in the Realtime workflow.
