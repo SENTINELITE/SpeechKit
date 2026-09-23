@@ -12,9 +12,8 @@ struct ContentView: View {
     @State private var isRealtimeMode = true
     @State private var isFileSheetPresented = false
     @State private var isSettingsPresented = false
-    @State private var isTranscriptPresented = false
     @State private var isAudioExporterPresented = false
-    @State private var transcriptSheetText = ""
+    @State private var presentedTranscript: DemoTranscript?
     @State private var vozResponse: VozFileTranscriptionResponse?
     @State private var wordEmitterResetID = UUID()
     @State private var exportedAudio = RecordedAudioFileDocument()
@@ -28,8 +27,7 @@ struct ContentView: View {
                     RealtimeTranscriptionView(
                         configuration: configuration,
                         inputPreview: inputPreview,
-                        transcriptSheetText: $transcriptSheetText,
-                        isTranscriptPresented: $isTranscriptPresented,
+                        presentedTranscript: $presentedTranscript,
                         wordEmitterResetID: $wordEmitterResetID,
                         exportErrorMessage: $audioExportError,
                         prepareAudioExport: prepareAudioExport
@@ -39,8 +37,7 @@ struct ContentView: View {
                         configuration: configuration,
                         recorder: recorder,
                         inputPreview: inputPreview,
-                        transcriptSheetText: $transcriptSheetText,
-                        isTranscriptPresented: $isTranscriptPresented,
+                        presentedTranscript: $presentedTranscript,
                         vozResponse: $vozResponse,
                         exportErrorMessage: $audioExportError,
                         prepareAudioExport: prepareAudioExport
@@ -99,8 +96,8 @@ struct ContentView: View {
             .sheet(isPresented: $isSettingsPresented, onDismiss: applyConfiguration) {
                 SettingsSheet(configuration: configuration)
             }
-            .sheet(isPresented: $isTranscriptPresented) {
-                TranscriptSheet(transcript: transcriptSheetText, vozResponse: vozResponse)
+            .sheet(item: $presentedTranscript) { transcript in
+                TranscriptSheet(transcript: transcript.text, vozResponse: transcript.vozResponse)
             }
             .fileExporter(
                 isPresented: $isAudioExporterPresented,

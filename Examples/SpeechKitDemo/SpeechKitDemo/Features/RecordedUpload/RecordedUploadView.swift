@@ -9,8 +9,7 @@ struct RecordedUploadView: View {
     @Bindable var configuration: DemoConfiguration
     let recorder: DemoAudioRecorder
     let inputPreview: DemoInputPreviewMonitor
-    @Binding var transcriptSheetText: String
-    @Binding var isTranscriptPresented: Bool
+    @Binding var presentedTranscript: DemoTranscript?
     @Binding var vozResponse: VozFileTranscriptionResponse?
     @Binding var exportErrorMessage: String?
     let prepareAudioExport: () -> Void
@@ -224,8 +223,7 @@ struct RecordedUploadView: View {
 
     /// Presents the latest dictation transcript in the shared transcript sheet.
     private func showTranscript() {
-        transcriptSheetText = displayedTranscript
-        isTranscriptPresented = true
+        presentedTranscript = DemoTranscript(text: displayedTranscript, vozResponse: vozResponse)
     }
 
     /// Restarts the passive input meter when the recording/upload flow releases the audio session.

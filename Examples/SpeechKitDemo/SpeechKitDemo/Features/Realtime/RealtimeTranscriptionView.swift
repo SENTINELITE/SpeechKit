@@ -7,8 +7,7 @@ struct RealtimeTranscriptionView: View {
 
     @Bindable var configuration: DemoConfiguration
     let inputPreview: DemoInputPreviewMonitor
-    @Binding var transcriptSheetText: String
-    @Binding var isTranscriptPresented: Bool
+    @Binding var presentedTranscript: DemoTranscript?
     @Binding var wordEmitterResetID: UUID
     @Binding var exportErrorMessage: String?
     let prepareAudioExport: () -> Void
@@ -137,8 +136,7 @@ struct RealtimeTranscriptionView: View {
 
     /// Presents the current realtime transcript in the shared transcript sheet.
     private func showTranscript() {
-        transcriptSheetText = displayedTranscript
-        isTranscriptPresented = true
+        presentedTranscript = DemoTranscript(text: displayedTranscript)
     }
 
     /// Restarts the passive meter after realtime capture releases the microphone.
