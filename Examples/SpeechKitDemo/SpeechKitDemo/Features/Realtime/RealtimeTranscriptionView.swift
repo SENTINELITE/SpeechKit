@@ -86,7 +86,14 @@ struct RealtimeTranscriptionView: View {
                 providerTitle: realtimeProviderTitle,
                 iconName: microphoneIconName,
                 voiceLevel: voiceLevel,
-                voiceState: voiceState
+                voiceState: voiceState,
+                actionTitle: primaryControlTitle,
+                isActionDisabled: !isAudioActive && !hasSelectedProviderKey,
+                action: {
+                    Task {
+                        await handleMicrophoneTap()
+                    }
+                }
             )
 
             DemoControlDock(

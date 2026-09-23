@@ -11,12 +11,12 @@ The symlink gives the local package the identity `speechkit` no matter what the 
 The demo pulls in [SpeechKit-Voz](https://github.com/SENTINELITE/SpeechKit-Voz) from GitHub, which adds VOZ on-device transcription through Desert Ant Labs' model. VOZ is available in the File Transcription and Dictation workflows. It transcribes selected files and recordings after recording stops. It does not appear in the Realtime workflow.
 
 1. Run the app on iOS 18 or later. A physical device is recommended.
-2. Open Settings and find "VOZ On-Device Model".
-3. Choose "Download and prepare". The model is roughly 467 MB and needs a network connection only when it is not already cached. When cached files exist, Settings shows "Checking model cache" while the runtime verifies them, then loads the model without downloading it again.
+2. Open Settings and choose VOZ under On-Device.
+3. Choose "Download and Load". The model is roughly 467 MB and needs a network connection only when it is not already cached. The page shows a percentage while downloading. Verifying cached files and loading the model report no progress, so the page shows elapsed time for those steps instead.
 4. Select "VOZ (On Device)" in File Transcription or Dictation.
 5. Select a file or record audio, then transcribe it. The demo shows the text, timing, speed, and word timestamps.
 
-The model has to be loaded into memory on every launch. Once the files are cached, the demo starts loading it in the background at launch, so it is usually ready by the time you pick VOZ. The demo never starts the first download on its own. "Unload model" drops the model from memory and keeps the cached files.
+The model has to be loaded into memory on every launch. Once the files are cached, the demo starts loading it in the background at launch, so it is usually ready by the time you pick VOZ. The demo never starts the first download on its own. "Unload Model" drops the model from memory and keeps the cached files.
 
 The demo does not upload selected or recorded VOZ audio to a transcription API. The underlying VOZ runtime may send the license's minimal device-counting telemetry, which excludes audio, transcripts, and user content.
 

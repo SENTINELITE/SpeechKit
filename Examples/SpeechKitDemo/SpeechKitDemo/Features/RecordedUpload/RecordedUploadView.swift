@@ -87,7 +87,14 @@ struct RecordedUploadView: View {
                 providerTitle: configuration.fileProvider.title,
                 iconName: microphoneIconName,
                 voiceLevel: voiceLevel,
-                voiceState: voiceState
+                voiceState: voiceState,
+                actionTitle: primaryControlTitle,
+                isActionDisabled: isTranscribingDictation || (!isAudioActive && !canStartRecording),
+                action: {
+                    Task {
+                        await handleMicrophoneTap()
+                    }
+                }
             )
 
             DemoControlDock(

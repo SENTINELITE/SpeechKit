@@ -1,12 +1,18 @@
 import SwiftUI
 
 /// The centered title and microphone orb shared by the realtime and recorded-upload samples.
+///
+/// The orb is the same start/stop control as the dock's primary button, so a
+/// session can be ended from the middle of the screen.
 struct DemoVoiceStage: View {
     let title: String
     let providerTitle: String
     let iconName: String
     let voiceLevel: Double
     let voiceState: DemoVoiceState
+    let actionTitle: String
+    let isActionDisabled: Bool
+    let action: () -> Void
 
     private var orbTint: Color {
         switch voiceState {
@@ -45,8 +51,17 @@ struct DemoVoiceStage: View {
         .padding(.horizontal, 24)
     }
 
-    /// Shows the current microphone action and passive/active input state.
+    /// Shows the current microphone action and passive/active input state, and toggles it on tap.
     private var voiceOrb: some View {
+        Button(action: action) {
+            orbLabel
+        }
+        .buttonStyle(.plain)
+        .disabled(isActionDisabled)
+        .accessibilityLabel(actionTitle)
+    }
+
+    private var orbLabel: some View {
         ZStack {
             Circle()
                 .fill(.white.opacity(voiceState == .active ? 0.16 : voiceState == .preview ? 0.12 : 0.08))
@@ -61,6 +76,6 @@ struct DemoVoiceStage: View {
         .glassButtonProminence(tint: orbTint, cornerRadius: 56)
         .animation(.smooth(duration: 0.28), value: voiceLevel)
         .animation(.smooth(duration: 0.22), value: voiceState)
-        .accessibilityHidden(true)
+        .contentShape(Circle())
     }
 }

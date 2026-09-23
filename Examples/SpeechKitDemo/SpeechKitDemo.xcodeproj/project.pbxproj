@@ -13,6 +13,8 @@
 		1A0000010000000000000004 /* DemoConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000014 /* DemoConfiguration.swift */; };
 		1A0000010000000000000005 /* DemoAudioRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000015 /* DemoAudioRecorder.swift */; };
 		1A0000010000000000000006 /* SettingsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000016 /* SettingsSheet.swift */; };
+		1A000001000000000000031E /* ProviderSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000030E /* ProviderSettingsView.swift */; };
+		1A000001000000000000031F /* VozSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000030F /* VozSettingsView.swift */; };
 		1A0000010000000000000007 /* FileTranscriptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000017 /* FileTranscriptionView.swift */; };
 		1A0000010000000000000008 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000018 /* Security.framework */; };
 		1A0000010000000000000201 /* RealtimeTranscriptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000101 /* RealtimeTranscriptionView.swift */; };
@@ -38,6 +40,8 @@
 		1A0000010000000000000014 /* DemoConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoConfiguration.swift; sourceTree = "<group>"; };
 		1A0000010000000000000015 /* DemoAudioRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoAudioRecorder.swift; sourceTree = "<group>"; };
 		1A0000010000000000000016 /* SettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSheet.swift; sourceTree = "<group>"; };
+		1A000001000000000000030E /* ProviderSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderSettingsView.swift; sourceTree = "<group>"; };
+		1A000001000000000000030F /* VozSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VozSettingsView.swift; sourceTree = "<group>"; };
 		1A0000010000000000000017 /* FileTranscriptionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileTranscriptionView.swift; sourceTree = "<group>"; };
 		1A0000010000000000000018 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		1A0000010000000000000101 /* RealtimeTranscriptionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeTranscriptionView.swift; sourceTree = "<group>"; };
@@ -178,6 +182,8 @@
 			isa = PBXGroup;
 			children = (
 				1A0000010000000000000016 /* SettingsSheet.swift */,
+				1A000001000000000000030E /* ProviderSettingsView.swift */,
+				1A000001000000000000030F /* VozSettingsView.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -273,6 +279,8 @@
 				1A0000010000000000000004 /* DemoConfiguration.swift in Sources */,
 				1A0000010000000000000005 /* DemoAudioRecorder.swift in Sources */,
 				1A0000010000000000000006 /* SettingsSheet.swift in Sources */,
+				1A000001000000000000031E /* ProviderSettingsView.swift in Sources */,
+				1A000001000000000000031F /* VozSettingsView.swift in Sources */,
 				1A0000010000000000000007 /* FileTranscriptionView.swift in Sources */,
 				1A0000010000000000000201 /* RealtimeTranscriptionView.swift in Sources */,
 				1A0000010000000000000202 /* RecordedUploadView.swift in Sources */,

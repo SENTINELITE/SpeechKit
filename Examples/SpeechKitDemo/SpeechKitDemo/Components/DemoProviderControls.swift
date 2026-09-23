@@ -39,9 +39,11 @@ struct RealtimeProviderPicker: View {
 /// Shared provider-specific option controls for file import and recorded-upload transcription.
 struct FileProviderOptionsView: View {
     @Bindable var configuration: DemoConfiguration
+    /// The provider whose options to show; `nil` follows the current file provider.
+    var provider: DemoFileProvider?
 
     var body: some View {
-        switch configuration.fileProvider {
+        switch provider ?? configuration.fileProvider {
         case .elevenLabs:
             Picker("Model", selection: $configuration.elevenLabsFileModel) {
                 ForEach(ElevenLabsModelID.allCases.filter { $0 != .scribeV2Realtime }, id: \.self) { model in
@@ -178,6 +180,56 @@ struct FileProviderOptionsView: View {
             Label("Runs locally after its model is downloaded and prepared in Settings. VOZ supports 25 languages but does not detect language or accept a language hint.", systemImage: "lock.fill")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// Option controls that only affect a provider's realtime sessions.
+///
+/// Settings that realtime and file transcription share, such as language or
+/// mode, live in ``FileProviderOptionsView`` so each appears only once.
+struct RealtimeOnlyOptionsView: View {
+    @Bindable var configuration: DemoConfiguration
+    let provider: DemoRealtimeProvider
+
+    var body: some View {
+        switch provider {
+        case .elevenLabs:
+            Picker("Model", selection: $configuration.elevenLabsRealtimeModel) {
+                Text(ElevenLabsModelID.scribeV2Realtime.rawValue).tag(ElevenLabsModelID.scribeV2Realtime)
+            }
+        case .openAI:
+            Picker("Session model", selection: $configuration.openAIRealtimeSessionModel) {
+                ForEach(OpenAIRealtimeSessionModelID.allCases, id: \.self) { model in
+                    Text(model.rawValue).tag(model)
+                }
+            }
+
+            Picker("Transcription model", selection: $configuration.openAIRealtimeTranscriptionModel) {
+                ForEach(OpenAIRealtimeTranscriptionModelID.allCases, id: \.self) { model in
+                    Text(model.rawValue).tag(model)
+                }
+            }
+
+            Picker("Live delay", selection: $configuration.openAIRealtimeDelay) {
+                ForEach(DemoOpenAIRealtimeDelay.allCases) { delay in
+                    Text(delay.rawValue).tag(delay)
+                }
+            }
+        case .grok:
+            Toggle("Filler words", isOn: $configuration.grokRealtimeFillerWords)
+        case .meta:
+            Picker("Partials", selection: $configuration.metaRealtimePartialMode) {
+                ForEach(MetaPartialMode.allCases, id: \.self) { partialMode in
+                    Text(partialMode.rawValue).tag(partialMode)
+                }
+            }
+        case .gemini:
+            Picker("Live model", selection: $configuration.geminiRealtimeModel) {
+                ForEach(GeminiRealtimeModelID.allCases, id: \.self) { model in
+                    Text(model.rawValue).tag(model)
+                }
+            }
         }
     }
 }
