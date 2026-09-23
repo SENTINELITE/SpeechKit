@@ -1,7 +1,8 @@
 import SpeechKit
+import SpeechKitVoz
 import SwiftUI
 
-/// A focused sample for recording local WAV audio and uploading it through SpeechKit file transcription.
+/// A focused sample for recording local WAV audio and transcribing it with a selected SpeechKit file provider.
 struct RecordedUploadView: View {
     @Environment(\.speechService) private var speech
 
@@ -10,15 +11,18 @@ struct RecordedUploadView: View {
     let inputPreview: DemoInputPreviewMonitor
     @Binding var transcriptSheetText: String
     @Binding var isTranscriptPresented: Bool
+    @Binding var vozResponse: VozFileTranscriptionResponse?
     @Binding var exportErrorMessage: String?
     let prepareAudioExport: () -> Void
 
-    @State private var isUploadingDictation = false
+    @State private var isTranscribingDictation = false
     @State private var dictationTranscript: String?
     @State private var dictationError: String?
+    @State private var transcriptionTask: Task<Void, Never>?
+    @State private var activeRequestID: UUID?
 
     private var isAudioActive: Bool {
-        recorder.isRecording || isUploadingDictation
+        recorder.isRecording || isTranscribingDictation
     }
 
     private var voiceLevel: Double {
@@ -44,7 +48,7 @@ struct RecordedUploadView: View {
     }
 
     private var hasCompletedRecording: Bool {
-        !recorder.isRecording && !isUploadingDictation && recorder.lastRecordingURL != nil
+        !recorder.isRecording && !isTranscribingDictation && recorder.lastRecordingURL != nil
     }
 
     private var microphoneIconName: String {
@@ -52,20 +56,23 @@ struct RecordedUploadView: View {
     }
 
     private var primaryControlTitle: String {
-        if !hasSelectedProviderKey && !isAudioActive {
-            return "API Key Required"
+        if !canStartRecording && !isAudioActive {
+            return configuration.fileProvider == .voz ? "VOZ Model Required" : "API Key Required"
         }
         if recorder.isRecording {
             return "Stop Recording"
         }
-        if isUploadingDictation {
-            return "Uploading"
+        if isTranscribingDictation {
+            return configuration.fileProvider == .voz ? "Transcribing locally" : "Uploading"
         }
         return "Record"
     }
 
     private var activeErrorMessage: String? {
-        if !hasSelectedProviderKey && !isAudioActive {
+        if configuration.fileProvider == .voz && !isVozReady && !isAudioActive {
+            return "Download and prepare the VOZ model in Settings before recording local dictation."
+        }
+        if configuration.fileProvider.requiresAPIKey && !hasSelectedProviderKey && !isAudioActive {
             return configuration.missingAPIKeyMessage(for: configuration.fileProvider)
         }
         return dictationError ?? exportErrorMessage
@@ -76,7 +83,7 @@ struct RecordedUploadView: View {
             DemoBackground(level: voiceLevel, state: voiceState)
 
             DemoVoiceStage(
-                title: "Record, upload, transcribe",
+                title: configuration.fileProvider == .voz ? "Record, transcribe locally" : "Record, upload, transcribe",
                 providerTitle: configuration.fileProvider.title,
                 iconName: microphoneIconName,
                 voiceLevel: voiceLevel,
@@ -91,7 +98,7 @@ struct RecordedUploadView: View {
                 isRealtimeMode: false,
                 isAudioActive: isAudioActive,
                 errorMessage: activeErrorMessage,
-                isPrimaryDisabled: isUploadingDictation || (!isAudioActive && !hasSelectedProviderKey),
+                isPrimaryDisabled: isTranscribingDictation || (!isAudioActive && !canStartRecording),
                 primaryAction: {
                     Task {
                         await handleMicrophoneTap()
@@ -101,9 +108,15 @@ struct RecordedUploadView: View {
                 saveRecording: prepareAudioExport
             )
         }
+        .onChange(of: configuration.fileProvider) { _, _ in
+            cancelTranscriptionForProviderChange()
+        }
+        .onDisappear {
+            cancelTranscriptionForProviderChange()
+        }
     }
 
-    /// Toggles between capturing dictation audio and uploading the completed recording.
+    /// Toggles between capturing dictation audio and transcribing the completed recording.
     private func handleMicrophoneTap() async {
         configuration.apply(to: speech)
         exportErrorMessage = nil
@@ -111,7 +124,7 @@ struct RecordedUploadView: View {
         if recorder.isRecording {
             do {
                 if let url = try await recorder.stopRecordingForUpload() {
-                    await uploadDictation(url)
+                    beginDictationTranscription(url)
                 } else {
                     startInputPreviewIfAvailable()
                 }
@@ -122,8 +135,10 @@ struct RecordedUploadView: View {
             return
         }
 
-        guard hasSelectedProviderKey else {
-            dictationError = configuration.missingAPIKeyMessage(for: configuration.fileProvider)
+        guard canStartRecording else {
+            dictationError = configuration.fileProvider == .voz
+                ? "Download and prepare the VOZ model in Settings before recording local dictation."
+                : configuration.missingAPIKeyMessage(for: configuration.fileProvider)
             return
         }
 
@@ -131,44 +146,76 @@ struct RecordedUploadView: View {
         await startDictationRecording()
     }
 
-    /// Requests microphone permission and creates a temporary WAV file for the upload sample.
+    /// Requests microphone permission and creates a temporary WAV file for transcription.
     private func startDictationRecording() async {
         do {
             dictationError = nil
             dictationTranscript = nil
+            vozResponse = nil
             _ = try await recorder.startRecording()
         } catch {
             dictationError = error.localizedDescription
         }
     }
 
-    /// Uploads the recorded WAV file using the selected file-transcription provider and option set.
-    private func uploadDictation(_ url: URL) async {
-        guard hasSelectedProviderKey else {
-            dictationError = configuration.missingAPIKeyMessage(for: configuration.fileProvider)
+    /// Starts a new dictation request and gives it exclusive ownership of the displayed result.
+    private func beginDictationTranscription(_ url: URL) {
+        transcriptionTask?.cancel()
+        let provider = configuration.fileProvider
+        let requestID = UUID()
+        activeRequestID = requestID
+        transcriptionTask = Task {
+            await transcribeDictation(url, provider: provider, requestID: requestID)
+        }
+    }
+
+    /// Transcribes the locally recorded WAV file with the provider selected when recording stopped.
+    private func transcribeDictation(_ url: URL, provider: DemoFileProvider, requestID: UUID) async {
+        guard provider == .voz || configuration.hasAPIKey(for: provider) else {
+            dictationError = configuration.missingAPIKeyMessage(for: provider)
             return
         }
 
-        isUploadingDictation = true
+        guard provider != .voz || isVozReady else {
+            dictationError = "Download and prepare the VOZ model in Settings before transcribing locally."
+            return
+        }
+
+        configuration.apply(to: speech)
+        isTranscribingDictation = true
         dictationError = nil
         dictationTranscript = nil
+        vozResponse = nil
         defer {
-            isUploadingDictation = false
-            startInputPreviewIfAvailable()
+            if activeRequestID == requestID {
+                isTranscribingDictation = false
+                transcriptionTask = nil
+                startInputPreviewIfAvailable()
+            }
         }
 
         do {
-            dictationTranscript = try await speech.transcribeAudioFile(
-                provider: configuration.fileProvider.speechProvider,
-                file: url,
-                options: configuration.fileOptions(for: configuration.fileProvider)
-            )
+            if provider == .voz {
+                let response = try await speech.transcribeVozAudioFile(file: url)
+                guard ownsCurrentResult(for: provider, requestID: requestID) else { return }
+                dictationTranscript = response.text
+                vozResponse = response
+            } else if let speechProvider = provider.speechProvider {
+                let response = try await speech.transcribeAudioFile(
+                    provider: speechProvider,
+                    file: url,
+                    options: configuration.fileOptions(for: provider)
+                )
+                guard ownsCurrentResult(for: provider, requestID: requestID) else { return }
+                dictationTranscript = response
+            }
         } catch {
+            guard ownsCurrentResult(for: provider, requestID: requestID) else { return }
             dictationError = error.localizedDescription
         }
     }
 
-    /// Presents the latest uploaded dictation transcript in the shared transcript sheet.
+    /// Presents the latest dictation transcript in the shared transcript sheet.
     private func showTranscript() {
         transcriptSheetText = displayedTranscript
         isTranscriptPresented = true
@@ -178,5 +225,29 @@ struct RecordedUploadView: View {
     private func startInputPreviewIfAvailable() {
         guard !isAudioActive else { return }
         inputPreview.startIfAuthorized()
+    }
+
+    private var canStartRecording: Bool {
+        configuration.fileProvider == .voz ? isVozReady : hasSelectedProviderKey
+    }
+
+    private var isVozReady: Bool {
+        if case .ready = speech.vozModelState { return true }
+        return false
+    }
+
+    private func ownsCurrentResult(for provider: DemoFileProvider, requestID: UUID) -> Bool {
+        !Task.isCancelled && activeRequestID == requestID && configuration.fileProvider == provider
+    }
+
+    /// Drops all state belonging to a provider that is no longer selected.
+    private func cancelTranscriptionForProviderChange() {
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
+        activeRequestID = nil
+        isTranscribingDictation = false
+        dictationTranscript = nil
+        vozResponse = nil
+        dictationError = nil
     }
 }

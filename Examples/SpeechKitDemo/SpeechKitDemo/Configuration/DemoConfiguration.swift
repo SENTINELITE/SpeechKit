@@ -33,6 +33,7 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
     case openAI
     case meta
     case gemini
+    case voz
 
     var id: Self { self }
 
@@ -46,11 +47,13 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
         case .openAI: "OpenAI"
         case .meta: "Meta"
         case .gemini: "Gemini"
+        case .voz: "VOZ (On Device)"
         }
     }
 
-    /// The SpeechKit provider value used when making a file-transcription request.
-    var speechProvider: SpeechFileTranscriptionProvider {
+    /// The SpeechKit provider value used when making a file-transcription request, or `nil` for
+    /// VOZ, which transcribes through the SpeechKitVoz extension instead.
+    var speechProvider: SpeechFileTranscriptionProvider? {
         switch self {
         case .elevenLabs: .elevenLabs
         case .aqua: .aqua
@@ -59,11 +62,17 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
         case .openAI: .openAI
         case .meta: .meta
         case .gemini: .gemini
+        case .voz: nil
         }
     }
 
-    /// The API key namespace required for this file provider.
-    var apiKeyProvider: DemoAPIKeyProvider {
+    /// Whether this provider needs a remote-service API key.
+    var requiresAPIKey: Bool {
+        self != .voz
+    }
+
+    /// The API key namespace required for this file provider, when it uses one.
+    var apiKeyProvider: DemoAPIKeyProvider? {
         switch self {
         case .elevenLabs: .elevenLabs
         case .aqua: .aqua
@@ -72,6 +81,7 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
         case .openAI: .openAI
         case .meta: .meta
         case .gemini: .gemini
+        case .voz: nil
         }
     }
 }
@@ -406,7 +416,8 @@ final class DemoConfiguration {
 
     /// Returns whether a file provider can be used with the current keychain state.
     func hasAPIKey(for provider: DemoFileProvider) -> Bool {
-        hasAPIKey(for: provider.apiKeyProvider)
+        guard let apiKeyProvider = provider.apiKeyProvider else { return true }
+        return hasAPIKey(for: apiKeyProvider)
     }
 
     /// Returns whether a realtime provider can be used with the current keychain state.
@@ -522,7 +533,7 @@ final class DemoConfiguration {
     }
 
     /// Converts the current provider-specific controls into SpeechKit file transcription options.
-    func fileOptions(for provider: DemoFileProvider) -> SpeechFileTranscriptionOptions {
+    func fileOptions(for provider: DemoFileProvider) -> SpeechFileTranscriptionOptions? {
         switch provider {
         case .elevenLabs:
             return .elevenLabs(modelID: elevenLabsFileModel)
@@ -576,6 +587,8 @@ final class DemoConfiguration {
                 timestampGranularities: geminiTimestampGranularities,
                 processingMode: geminiProcessingMode
             )
+        case .voz:
+            return nil
         }
     }
 
@@ -601,7 +614,7 @@ final class DemoConfiguration {
             return grokTimeoutMinutes * 60
         case .openAI:
             return openAITimeoutMinutes * 60
-        case .elevenLabs, .aqua, .cohere, .meta, .gemini:
+        case .elevenLabs, .aqua, .cohere, .meta, .gemini, .voz:
             return nil
         }
     }

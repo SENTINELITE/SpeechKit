@@ -27,6 +27,7 @@
 		1A000001000000000000020A /* DemoGlassModifiers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000010A /* DemoGlassModifiers.swift */; };
 		1A000001000000000000020B /* SpeechRealtimeConnectionState+Demo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000010B /* SpeechRealtimeConnectionState+Demo.swift */; };
 		A15C2F8B2FCCD54D00DDE69E /* Aurora in Frameworks */ = {isa = PBXBuildFile; productRef = A15C2F8A2FCCD54D00DDE69E /* Aurora */; };
+		5E0A1C012FD0000000000003 /* SpeechKitVoz in Frameworks */ = {isa = PBXBuildFile; productRef = 5E0A1C012FD0000000000002 /* SpeechKitVoz */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -59,6 +60,7 @@
 			files = (
 				1A0000010000000000000008 /* Security.framework in Frameworks */,
 				A15C2F8B2FCCD54D00DDE69E /* Aurora in Frameworks */,
+				5E0A1C012FD0000000000003 /* SpeechKitVoz in Frameworks */,
 				1A0000010000000000000003 /* SpeechKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -207,6 +209,7 @@
 			packageProductDependencies = (
 				1A0000010000000000000031 /* SpeechKit */,
 				A15C2F8A2FCCD54D00DDE69E /* Aurora */,
+				5E0A1C012FD0000000000002 /* SpeechKitVoz */,
 			);
 			productName = SpeechKitDemo;
 			productReference = 1A0000010000000000000010 /* SpeechKitDemo.app */;
@@ -237,8 +240,9 @@
 			);
 			mainGroup = 1A0000010000000000000040;
 			packageReferences = (
-				1A0000010000000000000030 /* XCLocalSwiftPackageReference "../.." */,
+				1A0000010000000000000030 /* XCLocalSwiftPackageReference "Packages/SpeechKit" */,
 				A15C2F892FCCD54D00DDE69E /* XCRemoteSwiftPackageReference "Aurora" */,
+				5E0A1C012FD0000000000001 /* XCRemoteSwiftPackageReference "SpeechKit-Voz" */,
 			);
 			productRefGroup = 1A0000010000000000000042 /* Products */;
 			projectDirPath = "";
@@ -480,9 +484,9 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		1A0000010000000000000030 /* XCLocalSwiftPackageReference "../.." */ = {
+		1A0000010000000000000030 /* XCLocalSwiftPackageReference "Packages/SpeechKit" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ../..;
+			relativePath = Packages/SpeechKit;
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -495,18 +499,31 @@
 				minimumVersion = 0.4.0;
 			};
 		};
+		5E0A1C012FD0000000000001 /* XCRemoteSwiftPackageReference "SpeechKit-Voz" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/SENTINELITE/SpeechKit-Voz.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		1A0000010000000000000031 /* SpeechKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 1A0000010000000000000030 /* XCLocalSwiftPackageReference "../.." */;
+			package = 1A0000010000000000000030 /* XCLocalSwiftPackageReference "Packages/SpeechKit" */;
 			productName = SpeechKit;
 		};
 		A15C2F8A2FCCD54D00DDE69E /* Aurora */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = A15C2F892FCCD54D00DDE69E /* XCRemoteSwiftPackageReference "Aurora" */;
 			productName = Aurora;
+		};
+		5E0A1C012FD0000000000002 /* SpeechKitVoz */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5E0A1C012FD0000000000001 /* XCRemoteSwiftPackageReference "SpeechKit-Voz" */;
+			productName = SpeechKitVoz;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

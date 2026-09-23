@@ -1,5 +1,5 @@
 {
-  "originHash" : "c3c644dfd717dc3b6ccb4d635f6e9e0d3c858298dba8336ac1f72a385f0c36b7",
+  "originHash" : "f358e08ca4dfe91defba0d68f3ae1ef65322f1cb9dbbb68a52e35ad6157100d7",
   "pins" : [
     {
       "identity" : "aurora",
@@ -8,6 +8,33 @@
       "state" : {
         "revision" : "d1bb4fd0e456531069c0bbff15d78c37209b0a57",
         "version" : "0.4.0"
+      }
+    },
+    {
+      "identity" : "desert-ant-core",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Desert-Ant-Labs/desert-ant-core.git",
+      "state" : {
+        "revision" : "9e11fdf9566df2e34b9516ac76403b1ff0f839d8",
+        "version" : "3.1.0"
+      }
+    },
+    {
+      "identity" : "speechkit-voz",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/SENTINELITE/SpeechKit-Voz.git",
+      "state" : {
+        "revision" : "6c6a05fbb9abc2d49b270f84ce3de46fe98b4cb1",
+        "version" : "1.0.0"
+      }
+    },
+    {
+      "identity" : "swift-numerics",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-numerics",
+      "state" : {
+        "revision" : "0c0290ff6b24942dadb83a929ffaaa1481df04a2",
+        "version" : "1.1.1"
       }
     }
   ],

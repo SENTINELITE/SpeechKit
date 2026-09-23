@@ -1,4 +1,5 @@
 import SpeechKit
+import SpeechKitVoz
 import SwiftUI
 
 /// The unified SpeechKit sample screen that wires shared demo state into focused workflow views.
@@ -14,6 +15,7 @@ struct ContentView: View {
     @State private var isTranscriptPresented = false
     @State private var isAudioExporterPresented = false
     @State private var transcriptSheetText = ""
+    @State private var vozResponse: VozFileTranscriptionResponse?
     @State private var wordEmitterResetID = UUID()
     @State private var exportedAudio = RecordedAudioFileDocument()
     @State private var exportedAudioFilename = "speechkit-dictation.wav"
@@ -39,6 +41,7 @@ struct ContentView: View {
                         inputPreview: inputPreview,
                         transcriptSheetText: $transcriptSheetText,
                         isTranscriptPresented: $isTranscriptPresented,
+                        vozResponse: $vozResponse,
                         exportErrorMessage: $audioExportError,
                         prepareAudioExport: prepareAudioExport
                     )
@@ -97,7 +100,7 @@ struct ContentView: View {
                 SettingsSheet(configuration: configuration)
             }
             .sheet(isPresented: $isTranscriptPresented) {
-                TranscriptSheet(transcript: transcriptSheetText)
+                TranscriptSheet(transcript: transcriptSheetText, vozResponse: vozResponse)
             }
             .fileExporter(
                 isPresented: $isAudioExporterPresented,
@@ -128,6 +131,7 @@ struct ContentView: View {
     private func handleModeChange(isRealtimeMode: Bool) {
         resetRealtimeWords()
         audioExportError = nil
+        vozResponse = nil
 
         Task {
             if isRealtimeMode {

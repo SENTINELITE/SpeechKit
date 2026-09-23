@@ -12,7 +12,7 @@ struct FileProviderPicker: View {
                 ForEach(DemoFileProvider.allCases) { provider in
                     Text(provider.title)
                         .tag(provider)
-                        .disabled(!configuration.hasAPIKey(for: provider))
+                        .disabled(provider.requiresAPIKey && !configuration.hasAPIKey(for: provider))
                 }
             }
         }
@@ -172,6 +172,10 @@ struct FileProviderOptionsView: View {
             Toggle("Background processing", isOn: $configuration.geminiBackgroundProcessing)
 
             Text("Gemini rejects a custom vocabulary combined with diarization or word timestamps. Leave the vocabulary empty to use either one.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case .voz:
+            Label("Runs locally after its model is downloaded and prepared in Settings. VOZ supports 25 languages but does not detect language or accept a language hint.", systemImage: "lock.fill")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
