@@ -18,3 +18,10 @@ DerivedData/
 
 # Local credentials
 .netrc
+.env
+.env.*
+
+# GPT-Live spike output
+/Scripts/live-output*.wav
+/Scripts/live-fixtures/
+/Scripts/live-input.wav

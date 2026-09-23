@@ -196,7 +196,17 @@ extension SpeechService {
     }
 
     /// Starts realtime microphone transcription with a configured provider.
+    ///
+    /// A speech-to-speech conversation already owns the microphone while it is
+    /// running, so this refuses with ``SpeechConversationError/transcriptionBusy``
+    /// rather than letting the two layers fight over the input device.
     public func startListening(provider: SpeechRealtimeProvider) async {
+        guard !conversationState.isLifecycleActive else {
+            fallbackConnectionState = .error("A conversation is active")
+            fallbackLastError = SpeechConversationError.transcriptionBusy
+            return
+        }
+
         if provider == activeRealtimeProvider, realtimeConnectionState.isLifecycleActive {
             return
         }

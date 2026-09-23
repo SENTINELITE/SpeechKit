@@ -227,4 +227,173 @@ struct PublicAPISmokeTests {
         #expect(providerOptions == .apple(locale: locale, preparesAssetsAutomatically: false))
     }
     #endif
+
+    @Test("Speech-to-speech conversation public types are constructible")
+    func conversationPublicTypesAreConstructible() {
+        let entry = SpeechConversationTranscriptEntry(
+            provider: .openAI,
+            role: .user,
+            text: " Hello there ",
+            startMilliseconds: 600,
+            endMilliseconds: 1200
+        )
+        let responses = OpenAILiveResponsesDelegation(
+            model: "gpt-5.6-luna",
+            instructions: "Use the tools.",
+            tools: [["type": "function", "name": "lookup_weather"]],
+            toolChoice: .function(name: "lookup_weather"),
+            parallelToolCalls: true,
+            maxOutputTokens: 256,
+            serviceTier: "auto"
+        )
+        let options = OpenAILiveSessionOptions(
+            modelID: .gptLive1,
+            instructions: "Be brief.",
+            voice: .cedar,
+            audioFormat: .pcm16k,
+            delegation: .responses(responses),
+            closeTimeout: 10,
+            turnGapMilliseconds: 900
+        )
+        let info = OpenAILiveSessionInfo(
+            id: "live_1",
+            expiresAt: Date(timeIntervalSince1970: 1789518426),
+            model: "gpt-live-1",
+            voice: .marin,
+            status: "active"
+        )
+        let usage = OpenAILiveUsage(seconds: 7, contextWindowUsageRatio: 0.5)
+        let delegationRequest = OpenAILiveDelegationRequest(id: "del_1", target: "client")
+        let responseEvent = OpenAILiveResponseEvent(
+            delegationID: "del_1",
+            eventType: "response.completed",
+            raw: ["type": "response.completed", "done": true]
+        )
+        let conversationError = SpeechConversationError.commandRejected(code: "invalid_value", message: "Too long.")
+
+        #expect(SpeechConversationProvider.allCases == [.openAI])
+        #expect(SpeechConversationRole.assistant.rawValue == "assistant")
+        #expect(entry.displayText == "Hello there")
+        #expect(entry.isOpen)
+        #expect(SpeechConversationState.active(sessionID: "live_1").isActive)
+        #expect(SpeechConversationState.ended(reason: .closeRequested, seconds: 7).isActive == false)
+        #expect(SpeechConversationEndReason(providerRawValue: "remote_hangup") == .remoteHangup)
+        #expect(SpeechConversationEndReason(providerRawValue: "supernova") == .unknown)
+        #expect(options.modelID == .gptLive1)
+        #expect(options.delegation == .responses(responses))
+        #expect(options.audioFormat.mimeType == "audio/pcm")
+        #expect(options.audioFormat.sampleRate == 16000)
+        #expect(OpenAILiveAudioFormat.pcmu8k.mimeType == "audio/pcmu")
+        #expect(OpenAILiveAudioFormat.pcma8k.sampleRate == 8000)
+        #expect(OpenAILiveVoice.knownVoices == [.marin, .cedar, .alloy])
+        #expect(options.voice == "cedar")
+        #expect(info.voice == .marin)
+        #expect(usage.contextWindowUsageRatio == 0.5)
+        #expect(delegationRequest.target == "client")
+        #expect(responseEvent.raw.objectValue?["done"] == .bool(true))
+        #expect(conversationError.errorDescription == "Too long. (invalid_value)")
+        #expect(OpenAILiveError.closeTimedOut.errorDescription == "Timed out waiting for the session to close")
+    }
+
+    @Test("Conversation service and configuration surfaces are constructible")
+    @MainActor
+    func conversationPublicSurfacesAreConstructible() {
+        let options = OpenAILiveSessionOptions(
+            instructions: "Be brief.",
+            voice: .cedar,
+            audioFormat: .pcm16k,
+            delegation: .client,
+            closeTimeout: 5,
+            turnGapMilliseconds: 900
+        )
+        let liveEndpoint = URL(string: "wss://proxy.example.com/live")
+        let service = OpenAILiveService(
+            credential: .apiKey("proxy-key"),
+            options: options,
+            liveEndpoint: liveEndpoint
+        )
+        let config = OpenAIConfiguration(
+            apiKey: "openai",
+            live: options,
+            liveCredential: .apiKey("live-only"),
+            liveEndpoint: liveEndpoint
+        )
+        let speechService = SpeechService(openAI: config)
+
+        #expect(service.state == .idle)
+        #expect(service.transcript.isEmpty)
+        #expect(service.usageSeconds == 0)
+        #expect(service.contextWindowUsageRatio == nil)
+        #expect(service.isInputMuted == false)
+        #expect(service.assistantIsSpeaking == false)
+        #expect(service.liveEndpoint == liveEndpoint)
+        #expect(service.options.voice == .cedar)
+        #expect(config.live.turnGapMilliseconds == 900)
+        #expect(config.liveCredential == .apiKey("live-only"))
+        #expect(config.liveEndpoint == liveEndpoint)
+        #expect(speechService.activeConversationProvider == .openAI)
+        #expect(speechService.conversationState == .idle)
+        #expect(speechService.conversationTranscript.isEmpty)
+        #expect(speechService.partialUserTranscriptText.isEmpty)
+        #expect(speechService.partialAssistantTranscriptText.isEmpty)
+        #expect(speechService.userTranscriptText.isEmpty)
+        #expect(speechService.assistantTranscriptText.isEmpty)
+        #expect(speechService.conversationInputLevel == 0)
+        #expect(speechService.conversationOutputLevel == 0)
+        #expect(speechService.isConversationInputMuted == false)
+        #expect(speechService.assistantIsSpeaking == false)
+        #expect(speechService.conversationUsageSeconds == 0)
+        #expect(speechService.conversationContextUsageRatio == nil)
+        #expect(speechService.conversationExpiresAt == nil)
+        #expect(speechService.conversationRecordingData == nil)
+        #expect(speechService.conversationLastError == nil)
+        #expect(speechService.conversationPendingContextAppendIDs.isEmpty)
+        #expect(speechService.openAILive === speechService.openAILive)
+        #expect(speechService.openAILive.pendingContextAppendIDs.isEmpty)
+    }
+
+    @Test("Conversation delegation and context event surfaces are constructible")
+    @MainActor
+    func conversationDelegationPublicSurfacesAreConstructible() {
+        let service = OpenAILiveService(apiKey: "openai")
+        let delegationRequest = OpenAILiveDelegationRequest(
+            id: "item_1",
+            target: "responses",
+            responseID: "resp_1",
+            clientEventID: "spk_response_1",
+            offsetMilliseconds: 0
+        )
+        let appended = OpenAILiveContextEvent.appended(
+            kind: .thinking,
+            clientEventID: "spk_thinking_1",
+            startMilliseconds: 4200,
+            endMilliseconds: 4200
+        )
+        let rejected = OpenAILiveContextEvent.rejected(
+            clientEventID: "spk_thinking_1",
+            code: "context_injection_incomplete",
+            message: "Context injection did not complete."
+        )
+
+        #expect(OpenAILiveContextKind.allCases == [.instructions, .thinking, .commentary])
+        #expect(OpenAILiveContextKind.commentary.clientEventType == "session.commentary.append")
+        #expect(OpenAILiveContextKind.commentary.serverEventType == "session.commentary.appended")
+        #expect(delegationRequest.responseID == "resp_1")
+        #expect(delegationRequest.clientEventID == "spk_response_1")
+        #expect(delegationRequest.offsetMilliseconds == 0)
+        #expect(appended != rejected)
+        #expect(SpeechConversationState.connecting.isLifecycleActive)
+        #expect(SpeechConversationState.active(sessionID: "live_1").isLifecycleActive)
+        #expect(SpeechConversationState.ending.isLifecycleActive)
+        #expect(SpeechConversationState.idle.isLifecycleActive == false)
+        #expect(SpeechConversationState.ended(reason: .expired, seconds: 7).isLifecycleActive == false)
+
+        // Every delegation surface hands back a fresh, independent stream.
+        let delegationRequests: AsyncStream<OpenAILiveDelegationRequest> = service.delegationRequests
+        let responseEvents: AsyncStream<OpenAILiveResponseEvent> = service.responseEvents
+        let contextEvents: AsyncStream<OpenAILiveContextEvent> = service.contextEvents
+        _ = delegationRequests
+        _ = responseEvents
+        _ = contextEvents
+    }
 }

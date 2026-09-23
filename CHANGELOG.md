@@ -4,6 +4,25 @@ All notable changes to SpeechKit will be documented in this file.
 
 SpeechKit follows semantic versioning. Source-breaking changes ship in a new major version.
 
+## [2.1.0] - Unreleased
+
+This release is additive. No existing enum gained cases, so exhaustive switches in adopting code keep compiling. The new failures live in `SpeechConversationError` and `OpenAILiveError` rather than in `SpeechError`.
+
+### Added
+
+- A speech-to-speech conversation layer next to realtime transcription and file transcription. SpeechKit streams microphone audio and plays the model's spoken reply back over one full-duplex audio engine with voice-processing echo cancellation.
+- `OpenAILiveService`, a GPT-Live (`gpt-live-1`) conversation service with a role-tagged transcript, input and output levels, mute and unmute, assistant audio flushing for barge-in, cumulative usage seconds, session expiry, and context injection.
+- Conversation types: `SpeechConversationProvider`, `SpeechConversationState`, `SpeechConversationEndReason`, `SpeechConversationRole`, `SpeechConversationTranscriptEntry`, and `SpeechConversationError`.
+- OpenAI GPT-Live types: `OpenAILiveModelID`, `OpenAILiveVoice`, `OpenAILiveAudioFormat`, `OpenAILiveSessionOptions`, `OpenAILiveDelegation`, `OpenAILiveResponsesDelegation`, `OpenAILiveToolChoice`, `OpenAILiveSessionInfo`, `OpenAILiveDelegationRequest`, `OpenAILiveResponseEvent`, `OpenAILiveUsage`, `OpenAIJSONValue`, and `OpenAILiveError`.
+- `OpenAIConfiguration.live`, `OpenAIConfiguration.liveCredential`, and `OpenAIConfiguration.liveEndpoint`. Conversations reuse `credential` unless `liveCredential` names a dedicated key, and `liveEndpoint` routes the GPT-Live socket through your own proxy, which is the only way to keep the key out of a distributed app because OpenAI publishes no short-lived credential for GPT-Live.
+- A `SpeechService` conversation facade: `startConversation(provider:)`, `endConversation()`, `muteConversationInput()`, `unmuteConversationInput()`, `flushAssistantAudio()`, `clearConversationTranscript()`, the `appendConversationInstructions`, `appendConversationThinking`, and `appendConversationCommentary` context methods, and the published state `activeConversationProvider`, `conversationState`, `conversationTranscript`, `partialUserTranscriptText`, `partialAssistantTranscriptText`, `userTranscriptText`, `assistantTranscriptText`, `conversationInputLevel`, `conversationOutputLevel`, `isConversationInputMuted`, `assistantIsSpeaking`, `conversationUsageSeconds`, `conversationContextUsageRatio`, `conversationExpiresAt`, `conversationRecordingData`, and `conversationLastError`.
+- Client and Responses delegation, surfaced as the `delegationRequests` and `responseEvents` streams on `OpenAILiveService`, plus `createResponseItem(_:delegationID:)`, `createResponse(delegationID:)`, and `updateDelegation(_:)` for Responses delegation. `SpeechService.openAILive` exposes the service the facade drives so apps can reach these without a second object.
+- Context append acknowledgement tracking: the append methods return their client event ID without waiting, `OpenAILiveService.contextEvents` publishes `OpenAILiveContextEvent` outcomes, and `pendingContextAppendIDs` (facade: `conversationPendingContextAppendIDs`) lists appends the provider has not yet applied. GPT-Live applies context on the session timeline, which only advances while audio flows.
+- `SpeechService.setConversationInputMuted(_:)`, a non-throwing mute toggle for SwiftUI bindings, and `SpeechService.conversationTranscriptText`, the whole conversation as role-prefixed lines.
+- `SpeechConversationState.isLifecycleActive`, `SpeechConversationEndReason.description`, and `Identifiable` conformance on `OpenAILiveVoice`.
+- A microphone guard between the two layers: `startConversation(provider:)` refuses with `SpeechConversationError.microphoneBusy` while a realtime transcription session is running, and `startListening(provider:)` refuses with `SpeechConversationError.transcriptionBusy` while a conversation is running.
+- A Conversation mode in the SpeechKit Demo app.
+
 ## [2.0.1] - 2026-09-15
 
 ### Fixed

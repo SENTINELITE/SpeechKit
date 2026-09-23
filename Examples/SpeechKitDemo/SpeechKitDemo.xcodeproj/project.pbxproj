@@ -26,6 +26,8 @@
 		1A0000010000000000000209 /* RealtimeWordEmitterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000109 /* RealtimeWordEmitterView.swift */; };
 		1A000001000000000000020A /* DemoGlassModifiers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000010A /* DemoGlassModifiers.swift */; };
 		1A000001000000000000020B /* SpeechRealtimeConnectionState+Demo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000010B /* SpeechRealtimeConnectionState+Demo.swift */; };
+		1A000001000000000000020C /* ConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000010C /* ConversationView.swift */; };
+		1A000001000000000000020D /* SpeechConversationState+Demo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000010D /* SpeechConversationState+Demo.swift */; };
 		A15C2F8B2FCCD54D00DDE69E /* Aurora in Frameworks */ = {isa = PBXBuildFile; productRef = A15C2F8A2FCCD54D00DDE69E /* Aurora */; };
 /* End PBXBuildFile section */
 
@@ -50,6 +52,8 @@
 		1A0000010000000000000109 /* RealtimeWordEmitterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeWordEmitterView.swift; sourceTree = "<group>"; };
 		1A000001000000000000010A /* DemoGlassModifiers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoGlassModifiers.swift; sourceTree = "<group>"; };
 		1A000001000000000000010B /* SpeechRealtimeConnectionState+Demo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SpeechRealtimeConnectionState+Demo.swift"; sourceTree = "<group>"; };
+		1A000001000000000000010C /* ConversationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationView.swift; sourceTree = "<group>"; };
+		1A000001000000000000010D /* SpeechConversationState+Demo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SpeechConversationState+Demo.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -91,6 +95,14 @@
 			path = SpeechKitDemo;
 			sourceTree = "<group>";
 		};
+		1A0000010000000000000042 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1A0000010000000000000010 /* SpeechKitDemo.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
 		1A0000010000000000000110 /* Audio */ = {
 			isa = PBXGroup;
 			children = (
@@ -106,6 +118,7 @@
 				1A0000010000000000000106 /* DemoProviderControls.swift */,
 				1A0000010000000000000107 /* DemoUploadStatusView.swift */,
 				1A0000010000000000000103 /* DemoVoiceStage.swift */,
+				1A000001000000000000010D /* SpeechConversationState+Demo.swift */,
 				1A000001000000000000010B /* SpeechRealtimeConnectionState+Demo.swift */,
 				1A0000010000000000000105 /* TranscriptSheet.swift */,
 			);
@@ -141,6 +154,7 @@
 		1A0000010000000000000115 /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				1A000001000000000000011A /* Conversation */,
 				1A0000010000000000000116 /* FileTranscription */,
 				1A0000010000000000000117 /* Realtime */,
 				1A0000010000000000000118 /* RecordedUpload */,
@@ -180,12 +194,12 @@
 			path = Settings;
 			sourceTree = "<group>";
 		};
-		1A0000010000000000000042 /* Products */ = {
+		1A000001000000000000011A /* Conversation */ = {
 			isa = PBXGroup;
 			children = (
-				1A0000010000000000000010 /* SpeechKitDemo.app */,
+				1A000001000000000000010C /* ConversationView.swift */,
 			);
-			name = Products;
+			path = Conversation;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -281,6 +295,8 @@
 				1A0000010000000000000209 /* RealtimeWordEmitterView.swift in Sources */,
 				1A000001000000000000020A /* DemoGlassModifiers.swift in Sources */,
 				1A000001000000000000020B /* SpeechRealtimeConnectionState+Demo.swift in Sources */,
+				1A000001000000000000020C /* ConversationView.swift in Sources */,
+				1A000001000000000000020D /* SpeechConversationState+Demo.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

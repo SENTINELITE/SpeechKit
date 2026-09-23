@@ -5,12 +5,13 @@
 ![Platforms](https://img.shields.io/badge/platforms-iOS%2018%20%7C%20macOS%2015%20%7C%20watchOS%2011%20%7C%20visionOS%202-lightgrey.svg)
 ![Status](https://img.shields.io/badge/status-2.0.1-blue.svg)
 
-SpeechKit is a Swift package for adding speech-to-text to Swift and SwiftUI apps with a small async/await API.
+SpeechKit is a Swift package for adding speech-to-text and speech-to-speech to Swift and SwiftUI apps with a small async/await API.
 
-It supports two workflows:
+It supports three workflows:
 
 - Realtime microphone transcription with ElevenLabs, OpenAI, xAI Grok, Meta, Gemini, and Apple local Speech on supported OS versions.
 - File transcription with ElevenLabs, Aqua, Cohere, Grok, OpenAI, Meta, Gemini, and Apple local Speech on supported OS versions.
+- Speech-to-speech conversation with OpenAI GPT-Live.
 
 ## Highlights
 
@@ -19,6 +20,7 @@ It supports two workflows:
 - Provider-neutral file transcription for simple text results.
 - Provider-specific options and detailed responses when you need timestamps, diarization, usage metadata, or model-specific controls.
 - Meta Muse Voice Transcribe and Gemini 3.5 Transcribe for both realtime sessions and file uploads.
+- Full-duplex speech-to-speech conversation with OpenAI `gpt-live-1`, including a role-tagged transcript, delegation to a backend model or to your app, and per-session usage seconds.
 - On-device Apple Speech support for apps running on iOS 26, macOS 26, or visionOS 26.
 - Security-scoped file overloads for document picker workflows.
 - A runnable iOS demo app for trying realtime transcription, recorded dictation uploads, and file transcription.
@@ -48,12 +50,14 @@ Apple local Speech support requires iOS 26, macOS 26, or visionOS 26, and is una
 
 ## Platform Support
 
-| Platform | Minimum version | Validation |
-| --- | ---: | --- |
-| iOS | 18.0 | CI generic device build |
-| macOS | 15.0 | SwiftPM build/test, DocC build, CI build |
-| watchOS | 11.0 | CI generic device build |
-| visionOS | 2.0 | CI generic device build |
+| Platform | Minimum version | Conversation | Validation |
+| --- | ---: | --- | --- |
+| iOS | 18.0 | Supported | CI generic device build |
+| macOS | 15.0 | Supported | SwiftPM build/test, DocC build, CI build |
+| watchOS | 11.0 | Best effort | CI generic device build |
+| visionOS | 2.0 | Supported | CI generic device build |
+
+The Conversation column covers the speech-to-speech layer in Chapter 3. The duplex audio engine compiles for watchOS, but full-duplex voice on watch hardware is unverified, so treat watchOS as best effort.
 
 SpeechKit requires the Swift 6.2 toolchain family. CI pins Xcode 26.2 and builds all declared platforms with warnings treated as errors.
 
@@ -76,7 +80,7 @@ import SpeechKit
 
 ## Try the Demo App
 
-This repository includes `SpeechKitDemo`, a SwiftUI iOS app that exercises the package in a real app target. Use it to try realtime transcription, record-and-upload dictation, standalone file transcription, provider selection, and API-key settings.
+This repository includes `SpeechKitDemo`, a SwiftUI iOS app that exercises the package in a real app target. Use it to try realtime transcription, record-and-upload dictation, standalone file transcription, provider selection, and API-key settings. The demo also has a Conversation mode for the speech-to-speech layer.
 
 To run it on your device:
 
@@ -138,6 +142,8 @@ First-party short-lived tokens:
 | Aqua, Cohere, Grok, Meta | No first-party token: use your own proxy |
 
 Google ephemeral tokens only authorize Gemini Live. A token used for Gemini file transcription must be an OAuth access token or a credential your own proxy accepts, because SpeechKit sends it as `Authorization: Bearer`.
+
+OpenAI documents no short-lived credential for GPT-Live speech-to-speech conversations. There is no Live client-secrets endpoint, and a client secret minted for Realtime is rejected by the Live socket. The only way to keep the key out of a distributed app is a proxy: point `liveEndpoint` at your server and pass a `SpeechCredential.token` carrying whatever bearer that proxy expects. Separately, `liveCredential` lets an app send conversations through a dedicated OpenAI key so conversation spend is tracked apart from transcription, while `credential` stays shared by the transcription paths.
 
 ### Proxy Endpoints
 
@@ -361,7 +367,170 @@ if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
 
 SpeechKit maps Apple's volatile results to `partialTranscriptEntry` and upserts final results by audio time range, so revised Apple segments do not duplicate text in `transcriptEntries`.
 
-## Chapter 3: File Transcription
+## Chapter 3: Speech-to-Speech Conversation
+
+A conversation is full duplex: SpeechKit streams microphone audio to the provider while it plays the model's spoken reply back. The provider manages turn taking, so there is no commit step and no client voice-activity detection, and the model may start replying before you finish talking. OpenAI bills GPT-Live at $0.05 per minute of audio, metered per second, and a session expires two hours after it starts, so end sessions your app is no longer showing.
+
+```swift
+struct ConversationView: View {
+    @Environment(\.speechService) private var speech
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach(speech.conversationTranscript) { entry in
+                Text(entry.displayText)
+                    .frame(
+                        maxWidth: .infinity,
+                        alignment: entry.role == .user ? .trailing : .leading
+                    )
+            }
+
+            if !speech.partialUserTranscriptText.isEmpty {
+                Text(speech.partialUserTranscriptText)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !speech.partialAssistantTranscriptText.isEmpty {
+                Text(speech.partialAssistantTranscriptText)
+                    .foregroundStyle(.secondary)
+            }
+
+            if speech.assistantIsSpeaking {
+                Text("Speaking")
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("\(Int(speech.conversationUsageSeconds)) billed seconds")
+
+            Button(speech.conversationState.isActive ? "End" : "Start") {
+                Task {
+                    if speech.conversationState.isActive {
+                        await speech.endConversation()
+                    } else {
+                        await speech.startConversation(provider: .openAI)
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+Conversation state lives on `SpeechService`:
+
+- `activeConversationProvider`
+- `conversationState`
+- `conversationTranscript`
+- `partialUserTranscriptText`
+- `partialAssistantTranscriptText`
+- `userTranscriptText`
+- `assistantTranscriptText`
+- `conversationInputLevel`
+- `conversationOutputLevel`
+- `isConversationInputMuted`
+- `assistantIsSpeaking`
+- `conversationUsageSeconds`
+- `conversationContextUsageRatio`
+- `conversationExpiresAt`
+- `conversationRecordingData`
+- `conversationLastError`
+
+Every entry in `conversationTranscript` carries a `role` of `.user` or `.assistant`, its own `startMilliseconds` and `endMilliseconds` on the session timeline, and an `isOpen` flag. The newest entry of each role stays open while more fragments can land in it, so an interruption leaves both rows growing at once.
+
+### Conversation: OpenAI
+
+Conversations run on `gpt-live-1`. `OpenAIConfiguration` carries the session options in `live`, an optional dedicated credential in `liveCredential`, and an optional proxy URL in `liveEndpoint`.
+
+```swift
+let speech = SpeechService(
+    openAI: OpenAIConfiguration(
+        apiKey: "<OPENAI_API_KEY>",
+        live: OpenAILiveSessionOptions(
+            instructions: "You are a brief, friendly scheduling assistant.",
+            voice: .marin,
+            delegation: .none
+        ),
+        liveCredential: .apiKey("<OPENAI_GPT_LIVE_KEY>"),
+        liveEndpoint: URL(string: "wss://api.example.com/openai/live")
+    )
+)
+
+await speech.startConversation(provider: .openAI)
+```
+
+`OpenAILiveSessionOptions` also takes `modelID`, `audioFormat` (`.pcm24k` by default, plus `.pcm16k`, `.pcmu8k`, and `.pcma8k`), `closeTimeout`, and `turnGapMilliseconds`, which sets how long a gap still continues the same transcript entry. `OpenAILiveVoice` is string-backed, with `.marin`, `.cedar`, and `.alloy` as the voices SpeechKit has verified; pass any other name as a string literal.
+
+`delegation` decides who answers the user:
+
+- `.none` omits the field and lets GPT-Live answer on its own. Use it for plain conversation with no tools.
+- `.responses(OpenAILiveResponsesDelegation(...))` asks OpenAI to run a backend Responses model with your tools and stream the result back for GPT-Live to speak. Backend tokens are billed separately from the audio minutes.
+- `.client` hands each request to your app. You answer with the context-append methods, passing the delegation ID you received.
+
+```swift
+let options = OpenAILiveSessionOptions(
+    instructions: "Answer from the tools when they apply.",
+    voice: .cedar,
+    delegation: .responses(
+        OpenAILiveResponsesDelegation(
+            model: "gpt-5.6-luna",
+            instructions: "Call find_slot before offering a time.",
+            tools: [
+                [
+                    "type": "function",
+                    "name": "find_slot",
+                    "parameters": ["type": "object", "properties": [:]]
+                ]
+            ]
+        )
+    )
+)
+```
+
+Three methods push context into a running session. Pass a `delegationID` to scope the content to one delegation, or leave it `nil` for the whole session. The calls send the content and return its client event ID; they do not wait for the provider. GPT-Live applies context on the session timeline, which only advances while audio is flowing, so the acknowledgement or rejection can arrive much later. Do not block a session on one. Read `conversationPendingContextAppendIDs` for the appends still outstanding, and read `speech.openAILive.contextEvents` when you need the `.appended` and `.rejected` outcomes themselves.
+
+```swift
+try await speech.appendConversationInstructions("The customer is on a trial plan.")
+try await speech.appendConversationThinking("Trial ends 2026-10-01.")
+try await speech.appendConversationCommentary("Their upgrade code is AC-42.")
+```
+
+- Use `appendConversationInstructions(_:delegationID:)` for trusted app directives that change how the model behaves.
+- Use `appendConversationThinking(_:delegationID:)` for quiet facts the model should know but never say out loud.
+- Use `appendConversationCommentary(_:delegationID:)` for content the model may paraphrase aloud.
+
+To stop sending microphone audio without ending the session, call `muteConversationInput()` and `unmuteConversationInput()`. Muting does not stop speech the model has already produced. For a barge-in, call `flushAssistantAudio()` to drop assistant audio that is queued but not yet heard.
+
+```swift
+try await speech.muteConversationInput()
+speech.flushAssistantAudio()
+try await speech.unmuteConversationInput()
+```
+
+Client and Responses delegation payloads are OpenAI-specific, so they have no provider-neutral twin. Reach them through `speech.openAILive`, the `OpenAILiveService` the facade drives. Its credential, endpoint, and options are overwritten from `speech.openAI` each time `startConversation` runs, so configure it there.
+
+```swift
+speech.openAI = OpenAIConfiguration(
+    apiKey: "<OPENAI_API_KEY>",
+    live: OpenAILiveSessionOptions(delegation: .client)
+)
+
+Task {
+    for await request in speech.openAILive.delegationRequests {
+        try await speech.appendConversationCommentary(
+            await backend.answer(for: request.target),
+            delegationID: request.id
+        )
+    }
+}
+
+await speech.startConversation(provider: .openAI)
+```
+
+`speech.openAILive.responseEvents` carries the nested Responses stream events for `.responses` delegation as `OpenAILiveResponseEvent` values, each with `delegationID`, `eventType`, and the raw JSON in `raw`. `speech.openAILive.contextEvents` carries the `.appended` and `.rejected` outcomes of context appends. For Responses delegation, `createResponseItem(_:delegationID:)` adds a Responses input item and `createResponse(delegationID:)` runs the backend over the pending items.
+
+A conversation and a realtime transcription session would fight over the microphone, so SpeechKit keeps them exclusive. `startConversation(provider:)` refuses while transcription is running and reports `SpeechConversationError.microphoneBusy`, and `startListening(provider:)` refuses while a conversation is running and reports `SpeechConversationError.transcriptionBusy`. Stop one layer before starting the other.
+
+## Chapter 4: File Transcription
 
 File transcription uploads an audio file and returns transcript text. Use the provider-neutral API when you only need text:
 
@@ -624,7 +793,7 @@ if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
 }
 ```
 
-## Chapter 4: Security-Scoped Files
+## Chapter 5: Security-Scoped Files
 
 If your app receives a security-scoped file URL from a document picker, use the matching `securityScopedURL` overload:
 
@@ -635,9 +804,9 @@ let text = try await speech.transcribeAudioFile(
 )
 ```
 
-## Chapter 5: Errors and Provider Matching
+## Chapter 6: Errors and Provider Matching
 
-File transcription throws `SpeechError`. Realtime failures are exposed through `realtimeConnectionState` and `lastError`.
+File transcription throws `SpeechError`. Realtime failures are exposed through `realtimeConnectionState` and `lastError`. Conversation failures are exposed through `conversationState` and `conversationLastError`.
 
 ```swift
 do {
@@ -654,6 +823,18 @@ do {
 The `options` value must match the selected file provider. Passing `.cohere(...)` options to `.openAI` throws `SpeechError.invalidOptionsForProvider`.
 
 Apple local Speech can also throw `SpeechError.appleSpeechUnavailable`, `SpeechError.appleSpeechUnsupportedLocale`, and `SpeechError.appleSpeechAssetsUnavailable` when the OS, locale, or local model assets are not ready.
+
+The conversation layer has its own error types, so `SpeechError` stays exhaustive for the transcription paths. `SpeechConversationError` covers the provider-neutral cases: `providerNotConfigured`, `microphoneBusy`, `transcriptionBusy`, `notActive`, and `commandRejected(code:message:)`. `OpenAILiveError` covers the GPT-Live transport and protocol cases, including `invalidOptions`, `sessionRejected(code:message:)`, `commandRejected(clientEventID:code:message:)`, and `closeTimedOut`. Match on the type you care about:
+
+```swift
+do {
+    try await speech.appendConversationInstructions("Keep answers under ten words.")
+} catch let error as SpeechConversationError {
+    print(error.localizedDescription)
+} catch let error as OpenAILiveError {
+    print(error.localizedDescription)
+}
+```
 
 ## Documentation
 

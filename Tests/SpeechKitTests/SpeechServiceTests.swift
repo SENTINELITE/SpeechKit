@@ -623,6 +623,65 @@ struct SpeechServiceTests {
         #expect(transcript.channelIndex == 1)
         #expect(transcript.words?.first?.text == "hello")
     }
+
+    // MARK: - Speech-to-speech conversation
+
+    @MainActor
+    @Test("startConversation surfaces missing OpenAI configuration")
+    func startConversationWithoutOpenAIConfigurationSetsFallbackError() async {
+        let service = SpeechService()
+
+        await service.startConversation()
+
+        #expect(service.conversationState == .error("OpenAI is not configured"))
+        #expect(service.conversationLastError as? SpeechConversationError == .providerNotConfigured(.openAI))
+    }
+
+    @MainActor
+    @Test("the GPT-Live credential falls back to the shared OpenAI credential")
+    func liveCredentialFallsBackToSharedCredential() {
+        let service = SpeechService(openAI: OpenAIConfiguration(apiKey: "shared"))
+
+        #expect(service.openAILiveService.apiKey == "shared")
+    }
+
+    @MainActor
+    @Test("a dedicated GPT-Live credential overrides the shared OpenAI credential")
+    func liveCredentialOverridesSharedCredential() {
+        let service = SpeechService(
+            openAI: OpenAIConfiguration(apiKey: "shared", liveCredential: .apiKey("live-only"))
+        )
+
+        #expect(service.openAILiveService.apiKey == "live-only")
+        #expect(service.openAI?.apiKey == "shared")
+    }
+
+    @MainActor
+    @Test("startConversation refuses while a transcription session owns the microphone")
+    func startConversationRefusesWhileTranscribing() async {
+        let service = SpeechService(openAI: OpenAIConfiguration(apiKey: "openai"))
+        service.elevenLabsRealtimeService.setLifecycleStateForTesting(.listening)
+
+        await service.startConversation()
+
+        #expect(service.conversationState == .error(SpeechConversationError.microphoneBusy.localizedDescription))
+        #expect(service.conversationLastError as? SpeechConversationError == .microphoneBusy)
+        #expect(service.openAILiveService.state == .idle)
+    }
+
+    @MainActor
+    @Test("startListening refuses while a conversation owns the microphone")
+    func startListeningRefusesWhileConversing() async {
+        let service = SpeechService(openAI: OpenAIConfiguration(apiKey: "openai"))
+        service.openAILiveService.setLifecycleStateForTesting(.active(sessionID: "live_1"))
+
+        await service.startListening(provider: .openAI)
+
+        #expect(service.connectionState == .error("A conversation is active"))
+        #expect(service.lastError as? SpeechConversationError == .transcriptionBusy)
+        #expect(service.openAIRealtimeService.connectionState == .disconnected)
+    }
+
 }
 
 /// A freshly created temporary directory, unique to this call.
@@ -662,4 +721,40 @@ private func speechServiceMinimalWAVData() -> Data {
     ])
     data.append(Data(repeating: 0, count: 3_200))
     return data
+}
+
+@Suite("SpeechService conversation conveniences")
+struct SpeechServiceConversationConvenienceTests {
+    @MainActor
+    @Test("setConversationInputMuted records the failure instead of throwing when idle")
+    func setConversationInputMutedRecordsFailureWhenIdle() async {
+        let service = SpeechService(openAI: OpenAIConfiguration(apiKey: "openai"))
+
+        await service.setConversationInputMuted(true)
+
+        #expect(service.conversationLastError as? SpeechConversationError == .notActive)
+        #expect(service.isConversationInputMuted == false)
+    }
+
+    @MainActor
+    @Test("conversationTranscriptText joins entries as role-prefixed lines")
+    func conversationTranscriptTextJoinsRolePrefixedLines() {
+        let service = SpeechService(openAI: OpenAIConfiguration(apiKey: "openai"))
+        service.openAILiveService.setLifecycleStateForTesting(.active(sessionID: "live_1"))
+        service.openAILiveService.handleMessageForTesting(
+            .inputTranscriptDelta(OpenAILiveTranscriptDelta(delta: "Hello", startMilliseconds: 0, endMilliseconds: 200, eventID: nil))
+        )
+        service.openAILiveService.handleMessageForTesting(
+            .outputTranscriptDelta(OpenAILiveTranscriptDelta(delta: " Hi there.", startMilliseconds: 400, endMilliseconds: 600, eventID: nil))
+        )
+
+        #expect(service.conversationTranscriptText == "You: Hello\nAssistant: Hi there.")
+    }
+
+    @Test("End reasons describe themselves")
+    func endReasonsDescribeThemselves() {
+        #expect(SpeechConversationEndReason.closeRequested.description == "The conversation was ended by the app.")
+        #expect(SpeechConversationEndReason(providerRawValue: "something_new").description == "The conversation ended for an unknown reason.")
+        #expect(OpenAILiveVoice.marin.id == "marin")
+    }
 }

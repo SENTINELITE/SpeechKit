@@ -120,6 +120,24 @@ enum DemoRealtimeProvider: String, CaseIterable, Identifiable {
     }
 }
 
+/// Who answers the user during a demo GPT-Live conversation.
+enum DemoLiveDelegationMode: String, CaseIterable, Identifiable {
+    case none
+    case responses
+    case client
+
+    var id: Self { self }
+
+    /// The display name shown in the settings picker.
+    var title: String {
+        switch self {
+        case .none: "None"
+        case .responses: "Responses"
+        case .client: "Client"
+        }
+    }
+}
+
 /// API key namespaces saved by the demo keychain wrapper.
 enum DemoAPIKeyProvider: String, CaseIterable, Identifiable {
     case elevenLabs
@@ -333,6 +351,39 @@ final class DemoConfiguration {
         didSet { set(geminiBackgroundProcessing, for: "geminiBackgroundProcessing") }
     }
 
+    /// The GPT-Live voice chosen from ``OpenAILiveVoice/knownVoices``.
+    var openAILiveVoice: String {
+        didSet { set(openAILiveVoice, for: "openAILiveVoice") }
+    }
+
+    /// A free-text voice name that wins over ``openAILiveVoice`` when it is not blank.
+    var openAILiveVoiceOverride: String {
+        didSet { set(openAILiveVoiceOverride, for: "openAILiveVoiceOverride") }
+    }
+
+    /// Instructions that shape how the GPT-Live model speaks.
+    var openAILiveInstructions: String {
+        didSet { set(openAILiveInstructions, for: "openAILiveInstructions") }
+    }
+
+    /// Who answers the user during a GPT-Live conversation.
+    var openAILiveDelegationMode: DemoLiveDelegationMode {
+        didSet { set(openAILiveDelegationMode.rawValue, for: "openAILiveDelegationMode") }
+    }
+
+    /// The backend model used when GPT-Live delegates answers to the Responses API.
+    var openAILiveBackendModel: String {
+        didSet { set(openAILiveBackendModel, for: "openAILiveBackendModel") }
+    }
+
+    /// Whether conversations use their own key instead of the shared OpenAI key.
+    var openAILiveUsesSeparateKey: Bool {
+        didSet { set(openAILiveUsesSeparateKey, for: "openAILiveUsesSeparateKey") }
+    }
+
+    /// The GPT-Live secret, kept in the keychain beside the other provider keys.
+    private(set) var openAILiveAPIKey: String = ""
+
     /// Loads persisted provider defaults and keychain-backed secrets.
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -379,6 +430,12 @@ final class DemoConfiguration {
         geminiDiarize = defaults.object(forKey: "geminiDiarize") as? Bool ?? false
         geminiWordTimestamps = defaults.object(forKey: "geminiWordTimestamps") as? Bool ?? false
         geminiBackgroundProcessing = defaults.object(forKey: "geminiBackgroundProcessing") as? Bool ?? false
+        openAILiveVoice = defaults.string(forKey: "openAILiveVoice") ?? OpenAILiveVoice.marin.rawValue
+        openAILiveVoiceOverride = defaults.string(forKey: "openAILiveVoiceOverride") ?? ""
+        openAILiveInstructions = defaults.string(forKey: "openAILiveInstructions") ?? ""
+        openAILiveDelegationMode = Self.enumValue(for: "openAILiveDelegationMode", default: DemoLiveDelegationMode.none, defaults: defaults)
+        openAILiveBackendModel = defaults.string(forKey: "openAILiveBackendModel") ?? Self.defaultLiveBackendModel
+        openAILiveUsesSeparateKey = defaults.object(forKey: "openAILiveUsesSeparateKey") as? Bool ?? false
         loadAPIKeys()
     }
 
@@ -414,6 +471,69 @@ final class DemoConfiguration {
         hasAPIKey(for: provider.apiKeyProvider)
     }
 
+    /// Saves or clears the separate GPT-Live secret in the keychain.
+    func setOpenAILiveAPIKey(_ value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            try? keychain.delete(account: Self.liveKeyAccount)
+            openAILiveAPIKey = ""
+        } else {
+            try? keychain.save(trimmed, account: Self.liveKeyAccount)
+            openAILiveAPIKey = trimmed
+        }
+    }
+
+    /// Whether a speech-to-speech conversation can start with the current keychain state.
+    var hasConversationAPIKey: Bool {
+        if openAILiveUsesSeparateKey, !openAILiveAPIKey.isEmpty {
+            return true
+        }
+        return hasAPIKey(for: DemoAPIKeyProvider.openAI)
+    }
+
+    /// The missing-key message shown by the conversation workflow.
+    var missingConversationAPIKeyMessage: String {
+        openAILiveUsesSeparateKey
+            ? "Add a GPT-Live API key in Settings."
+            : "Add an OpenAI API key in Settings."
+    }
+
+    /// The voice sent to GPT-Live, where the free-text override wins over the picker.
+    var resolvedOpenAILiveVoice: OpenAILiveVoice {
+        guard let override = nilIfBlank(openAILiveVoiceOverride) else {
+            return OpenAILiveVoice(openAILiveVoice)
+        }
+        return OpenAILiveVoice(override)
+    }
+
+    /// The delegation mode sent to GPT-Live, including the backend model for Responses delegation.
+    var resolvedOpenAILiveDelegation: OpenAILiveDelegation {
+        switch openAILiveDelegationMode {
+        case .none:
+            return OpenAILiveDelegation.none
+        case .client:
+            return .client
+        case .responses:
+            let model = nilIfBlank(openAILiveBackendModel) ?? Self.defaultLiveBackendModel
+            return .responses(OpenAILiveResponsesDelegation(model: model))
+        }
+    }
+
+    /// The credential GPT-Live uses, or `nil` when conversations reuse the OpenAI key.
+    var openAILiveCredential: SpeechCredential? {
+        guard openAILiveUsesSeparateKey, !openAILiveAPIKey.isEmpty else { return nil }
+        return .apiKey(openAILiveAPIKey)
+    }
+
+    /// The GPT-Live session options built from the current demo settings.
+    var openAILiveOptions: OpenAILiveSessionOptions {
+        OpenAILiveSessionOptions(
+            instructions: nilIfBlank(openAILiveInstructions),
+            voice: resolvedOpenAILiveVoice,
+            delegation: resolvedOpenAILiveDelegation
+        )
+    }
+
     /// Builds the missing-key message for file workflows.
     func missingAPIKeyMessage(for provider: DemoFileProvider) -> String {
         "Add a \(provider.title) API key in Settings."
@@ -447,7 +567,9 @@ final class DemoConfiguration {
             diarizationChunkingStrategy: openAIDiarization ? .auto : nil,
             realtimeDelay: openAIRealtimeDelay.speechKitValue,
             realtimeCommitInterval: 1,
-            timeoutInterval: openAITimeoutMinutes * 60
+            timeoutInterval: openAITimeoutMinutes * 60,
+            live: openAILiveOptions,
+            liveCredential: openAILiveCredential
         )
 
         let grokKey = apiKey(for: .grok)
@@ -606,11 +728,18 @@ final class DemoConfiguration {
         }
     }
 
+    /// The default backend model used with GPT-Live Responses delegation.
+    static let defaultLiveBackendModel = "gpt-5.6-luna"
+
+    /// The keychain account holding the separate GPT-Live secret.
+    private static let liveKeyAccount = "openAILive"
+
     /// Loads provider secrets into observable state for the current run.
     private func loadAPIKeys() {
         for provider in DemoAPIKeyProvider.allCases {
             apiKeys[provider] = (try? keychain.read(account: provider.account)) ?? ""
         }
+        openAILiveAPIKey = (try? keychain.read(account: Self.liveKeyAccount)) ?? ""
     }
 
     /// Writes a persisted demo option value.

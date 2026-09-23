@@ -19,7 +19,10 @@ public final class SpeechService {
     public var aqua: AquaConfiguration?
     /// The OpenAI configuration used for OpenAI realtime and file transcription.
     public var openAI: OpenAIConfiguration? {
-        didSet { applyOpenAIRealtimeConfig() }
+        didSet {
+            applyOpenAIRealtimeConfig()
+            applyOpenAILiveConfig()
+        }
     }
     /// The Meta configuration used for Meta realtime and file transcription.
     public var meta: MetaConfiguration? {
@@ -39,6 +42,7 @@ public final class SpeechService {
 
     let elevenLabsRealtimeService: ElevenLabsService
     let openAIRealtimeService: OpenAIRealtimeService
+    let openAILiveService: OpenAILiveService
     let grokRealtimeService: GrokRealtimeService
     let metaRealtimeService: MetaRealtimeService
     let geminiRealtimeService: GeminiRealtimeService
@@ -55,6 +59,10 @@ public final class SpeechService {
     public internal(set) var activeRealtimeProvider: SpeechRealtimeProvider = .elevenLabs
     var fallbackConnectionState: SpeechRealtimeConnectionState?
     var fallbackLastError: Error?
+    /// The provider currently used for speech-to-speech conversation state.
+    public internal(set) var activeConversationProvider: SpeechConversationProvider = .openAI
+    var fallbackConversationState: SpeechConversationState?
+    var fallbackConversationError: Error?
 
     /// Creates a speech service with any provider configurations your app needs.
     public init(
@@ -75,12 +83,14 @@ public final class SpeechService {
         self.gemini = gemini
         self.elevenLabsRealtimeService = ElevenLabsService()
         self.openAIRealtimeService = OpenAIRealtimeService()
+        self.openAILiveService = OpenAILiveService()
         self.grokRealtimeService = GrokRealtimeService()
         self.metaRealtimeService = MetaRealtimeService()
         self.geminiRealtimeService = GeminiRealtimeService()
         self.urlSession = .shared
         applyRealtimeConfig()
         applyOpenAIRealtimeConfig()
+        applyOpenAILiveConfig()
         applyGrokRealtimeConfig()
         applyMetaRealtimeConfig()
         applyGeminiRealtimeConfig()
@@ -126,6 +136,7 @@ public final class SpeechService {
         urlSession: URLSession,
         elevenLabsRealtimeService: ElevenLabsService,
         openAIRealtimeService: OpenAIRealtimeService = OpenAIRealtimeService(),
+        openAILiveService: OpenAILiveService = OpenAILiveService(),
         grokRealtimeService: GrokRealtimeService = GrokRealtimeService(),
         metaRealtimeService: MetaRealtimeService = MetaRealtimeService(),
         geminiRealtimeService: GeminiRealtimeService = GeminiRealtimeService()
@@ -140,11 +151,13 @@ public final class SpeechService {
         self.urlSession = urlSession
         self.elevenLabsRealtimeService = elevenLabsRealtimeService
         self.openAIRealtimeService = openAIRealtimeService
+        self.openAILiveService = openAILiveService
         self.grokRealtimeService = grokRealtimeService
         self.metaRealtimeService = metaRealtimeService
         self.geminiRealtimeService = geminiRealtimeService
         applyRealtimeConfig()
         applyOpenAIRealtimeConfig()
+        applyOpenAILiveConfig()
         applyGrokRealtimeConfig()
         applyMetaRealtimeConfig()
         applyGeminiRealtimeConfig()
@@ -161,6 +174,18 @@ public final class SpeechService {
         openAIRealtimeService.realtimeEndpoint = openAI?.realtimeEndpoint
         if let openAI {
             openAIRealtimeService.options = resolvedOpenAIRealtimeOptions(from: openAI)
+        }
+    }
+
+    /// Applies the OpenAI configuration to the GPT-Live conversation service.
+    ///
+    /// Conversations reuse the OpenAI credential unless
+    /// ``OpenAIConfiguration/liveCredential`` names a dedicated one.
+    private func applyOpenAILiveConfig() {
+        openAILiveService.credential = openAI?.resolvedLiveCredential ?? .apiKey("")
+        openAILiveService.liveEndpoint = openAI?.liveEndpoint
+        if let openAI {
+            openAILiveService.options = openAI.live
         }
     }
 

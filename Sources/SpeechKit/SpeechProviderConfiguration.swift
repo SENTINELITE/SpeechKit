@@ -460,6 +460,26 @@ public struct OpenAIConfiguration: Sendable, Equatable {
     public var fileEndpoint: URL?
     /// An override for the OpenAI Realtime WebSocket endpoint, or `nil` to use the vendor default.
     public var realtimeEndpoint: URL?
+    /// Options for OpenAI GPT-Live speech-to-speech conversation sessions.
+    public var live: OpenAILiveSessionOptions
+    /// A credential used only for GPT-Live conversation sessions, or `nil` to reuse ``credential``.
+    ///
+    /// Pointing conversations at a separate OpenAI project key keeps
+    /// speech-to-speech spend apart from transcription spend on the dashboard.
+    public var liveCredential: SpeechCredential?
+    /// An override for the GPT-Live WebSocket endpoint, or `nil` to use the vendor default.
+    ///
+    /// OpenAI publishes no ephemeral client secret for GPT-Live, so routing the
+    /// socket through your own proxy is the only way to keep the API key off the device.
+    public var liveEndpoint: URL?
+
+    /// The credential GPT-Live conversation sessions use.
+    ///
+    /// ``liveCredential`` wins when it is set; otherwise conversations reuse the
+    /// same ``credential`` as realtime and file transcription.
+    var resolvedLiveCredential: SpeechCredential {
+        liveCredential ?? credential
+    }
 
     /// Creates an OpenAI configuration with a long-lived API key.
     public init(
@@ -478,7 +498,10 @@ public struct OpenAIConfiguration: Sendable, Equatable {
         realtimeCommitInterval: TimeInterval = 1,
         timeoutInterval: TimeInterval = 10 * 60,
         fileEndpoint: URL? = nil,
-        realtimeEndpoint: URL? = nil
+        realtimeEndpoint: URL? = nil,
+        live: OpenAILiveSessionOptions = OpenAILiveSessionOptions(),
+        liveCredential: SpeechCredential? = nil,
+        liveEndpoint: URL? = nil
     ) {
         self.init(
             credential: .apiKey(apiKey),
@@ -496,7 +519,10 @@ public struct OpenAIConfiguration: Sendable, Equatable {
             realtimeCommitInterval: realtimeCommitInterval,
             timeoutInterval: timeoutInterval,
             fileEndpoint: fileEndpoint,
-            realtimeEndpoint: realtimeEndpoint
+            realtimeEndpoint: realtimeEndpoint,
+            live: live,
+            liveCredential: liveCredential,
+            liveEndpoint: liveEndpoint
         )
     }
 
@@ -517,7 +543,10 @@ public struct OpenAIConfiguration: Sendable, Equatable {
         realtimeCommitInterval: TimeInterval = 1,
         timeoutInterval: TimeInterval = 10 * 60,
         fileEndpoint: URL? = nil,
-        realtimeEndpoint: URL? = nil
+        realtimeEndpoint: URL? = nil,
+        live: OpenAILiveSessionOptions = OpenAILiveSessionOptions(),
+        liveCredential: SpeechCredential? = nil,
+        liveEndpoint: URL? = nil
     ) {
         self.credential = credential
         self.fileTranscriptionModelID = fileTranscriptionModelID
@@ -535,6 +564,9 @@ public struct OpenAIConfiguration: Sendable, Equatable {
         self.timeoutInterval = timeoutInterval
         self.fileEndpoint = fileEndpoint
         self.realtimeEndpoint = realtimeEndpoint
+        self.live = live
+        self.liveCredential = liveCredential
+        self.liveEndpoint = liveEndpoint
     }
 }
 

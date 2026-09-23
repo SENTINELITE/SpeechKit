@@ -18,6 +18,16 @@ swift test
 
 To work on the demo app, open `Examples/SpeechKitDemo/SpeechKitDemo.xcodeproj`, choose the `SpeechKitDemo` scheme, and run the app on an iOS simulator or device. The demo project depends on the local package and keeps demo-only dependencies separate from the root `Package.swift`.
 
+## Verifying GPT-Live against the API
+
+`Scripts/live-spike.mjs` opens a real `gpt-live-1` session, logs every server event, saves assistant audio, and writes event JSON under `Scripts/live-fixtures/` for the conversation tests. It needs Node 22 or newer and no dependencies, and it reads the key from `OPENAI_API_KEY`.
+
+```sh
+node --env-file=.env Scripts/live-spike.mjs --delegation responses --wav Scripts/live-input.wav
+```
+
+Keep the key in a gitignored `.env` at the repository root, or export it in your shell. `.env`, `.env.*`, and the spike's audio and fixture output are already ignored. Sessions bill per second of audio, so keep spike runs short, and do not commit captured audio, fixtures, or transcripts.
+
 ## Pull Request Checklist
 
 Before opening a pull request, please run the relevant checks:

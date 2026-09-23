@@ -6,6 +6,7 @@ struct SettingsSheet: View {
     @Bindable var configuration: DemoConfiguration
     @Environment(\.dismiss) private var dismiss
     @State private var keyDrafts: [DemoAPIKeyProvider: String]
+    @State private var liveKeyDraft: String
 
     /// Seeds editable key drafts from the current keychain-backed configuration.
     init(configuration: DemoConfiguration) {
@@ -13,6 +14,7 @@ struct SettingsSheet: View {
         _keyDrafts = State(initialValue: Dictionary(uniqueKeysWithValues: DemoAPIKeyProvider.allCases.map {
             ($0, configuration.apiKey(for: $0))
         }))
+        _liveKeyDraft = State(initialValue: configuration.openAILiveAPIKey)
     }
 
     var body: some View {
@@ -20,6 +22,7 @@ struct SettingsSheet: View {
             Form {
                 apiKeysSection
                 realtimeDefaultsSection
+                conversationDefaultsSection
                 fileDefaultsSection
             }
             .navigationTitle("Settings")
@@ -146,6 +149,73 @@ struct SettingsSheet: View {
         Text("Gemini Live does not support diarization or word timestamps.")
             .font(.caption)
             .foregroundStyle(.secondary)
+    }
+
+    /// Controls defaults used when the conversation sample opens a GPT-Live session.
+    private var conversationDefaultsSection: some View {
+        Section("OpenAI GPT-Live") {
+            Picker("Voice", selection: $configuration.openAILiveVoice) {
+                ForEach(OpenAILiveVoice.knownVoices, id: \.rawValue) { voice in
+                    Text(voice.rawValue).tag(voice.rawValue)
+                }
+            }
+
+            TextField("Voice override", text: $configuration.openAILiveVoiceOverride)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            TextField(
+                "Instructions",
+                text: $configuration.openAILiveInstructions,
+                axis: .vertical
+            )
+            .lineLimit(2...6)
+
+            Picker("Delegation", selection: $configuration.openAILiveDelegationMode) {
+                ForEach(DemoLiveDelegationMode.allCases) { delegation in
+                    Text(delegation.title).tag(delegation)
+                }
+            }
+
+            if configuration.openAILiveDelegationMode == .responses {
+                TextField("Backend model", text: $configuration.openAILiveBackendModel)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
+
+            Toggle("Use a separate GPT-Live API key", isOn: $configuration.openAILiveUsesSeparateKey)
+
+            if configuration.openAILiveUsesSeparateKey {
+                liveKeyEditor
+            }
+
+            Text("GPT-Live bills per second of streamed audio. The demo ends the session when you leave the screen or background the app.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Edits the optional conversation-only secret without touching the shared OpenAI key.
+    private var liveKeyEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SecureField("GPT-Live API Key", text: $liveKeyDraft)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            HStack {
+                Text(configuration.openAILiveAPIKey.isEmpty ? "Not configured" : "Saved")
+                    .font(.caption)
+                    .foregroundStyle(configuration.openAILiveAPIKey.isEmpty ? Color.secondary : Color.green)
+
+                Spacer()
+
+                Button("Save") {
+                    configuration.setOpenAILiveAPIKey(liveKeyDraft)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
     }
 
     /// Controls defaults used by both file import and recorded-upload samples.

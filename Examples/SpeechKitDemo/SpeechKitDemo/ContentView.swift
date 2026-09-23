@@ -1,6 +1,27 @@
 import SpeechKit
 import SwiftUI
 
+/// The workflow shown by the unified SpeechKit sample screen.
+enum DemoMode: String, CaseIterable, Identifiable {
+    /// Streaming microphone transcription.
+    case realtime
+    /// Record-then-upload transcription.
+    case dictation
+    /// Full-duplex speech-to-speech conversation.
+    case conversation
+
+    var id: Self { self }
+
+    /// The display name shown in the toolbar mode picker.
+    var title: String {
+        switch self {
+        case .realtime: "Realtime"
+        case .dictation: "Dictation"
+        case .conversation: "Conversation"
+        }
+    }
+}
+
 /// The unified SpeechKit sample screen that wires shared demo state into focused workflow views.
 struct ContentView: View {
     @Environment(\.speechService) private var speech
@@ -8,7 +29,7 @@ struct ContentView: View {
     @State private var configuration = DemoConfiguration()
     @State private var recorder = DemoAudioRecorder()
     @State private var inputPreview = DemoInputPreviewMonitor()
-    @State private var isRealtimeMode = true
+    @State private var mode: DemoMode = .realtime
     @State private var isFileSheetPresented = false
     @State private var isSettingsPresented = false
     @State private var isTranscriptPresented = false
@@ -22,7 +43,8 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                if isRealtimeMode {
+                switch mode {
+                case .realtime:
                     RealtimeTranscriptionView(
                         configuration: configuration,
                         inputPreview: inputPreview,
@@ -32,7 +54,7 @@ struct ContentView: View {
                         exportErrorMessage: $audioExportError,
                         prepareAudioExport: prepareAudioExport
                     )
-                } else {
+                case .dictation:
                     RecordedUploadView(
                         configuration: configuration,
                         recorder: recorder,
@@ -41,6 +63,13 @@ struct ContentView: View {
                         isTranscriptPresented: $isTranscriptPresented,
                         exportErrorMessage: $audioExportError,
                         prepareAudioExport: prepareAudioExport
+                    )
+                case .conversation:
+                    ConversationView(
+                        configuration: configuration,
+                        inputPreview: inputPreview,
+                        transcriptSheetText: $transcriptSheetText,
+                        isTranscriptPresented: $isTranscriptPresented
                     )
                 }
             }
@@ -56,16 +85,22 @@ struct ContentView: View {
 
                     Menu {
                         Section("Mode") {
-                            Picker("Mode", selection: $isRealtimeMode) {
-                                Text("Realtime").tag(true)
-                                Text("Dictation").tag(false)
+                            Picker("Mode", selection: $mode) {
+                                ForEach(DemoMode.allCases) { demoMode in
+                                    Text(demoMode.title).tag(demoMode)
+                                }
                             }
                         }
 
-                        if isRealtimeMode {
+                        switch mode {
+                        case .realtime:
                             RealtimeProviderPicker(configuration: configuration)
-                        } else {
+                        case .dictation:
                             FileProviderPicker(configuration: configuration, title: "Dictation Provider")
+                        case .conversation:
+                            Section("Conversation Provider") {
+                                Text("OpenAI GPT-Live")
+                            }
                         }
 
                         Section {
@@ -82,8 +117,8 @@ struct ContentView: View {
             }
             .onAppear(perform: configureDemo)
             .onDisappear(perform: stopDemo)
-            .onChange(of: isRealtimeMode) { _, newValue in
-                handleModeChange(isRealtimeMode: newValue)
+            .onChange(of: mode) { oldValue, newValue in
+                handleModeChange(from: oldValue, to: newValue)
             }
             .onChange(of: configuration.realtimeProvider) { _, _ in
                 Task {
@@ -121,23 +156,35 @@ struct ContentView: View {
         _ = recorder.stopRecording()
         Task {
             await speech.stopListening()
+            await speech.endConversation()
         }
     }
 
-    /// Reconciles audio capture state when the unified sample switches between realtime and recorded-upload modes.
-    private func handleModeChange(isRealtimeMode: Bool) {
+    /// Reconciles audio capture state when the unified sample switches workflows.
+    ///
+    /// Leaving conversation mode ends the GPT-Live session immediately, because
+    /// the provider bills for every second of streamed audio.
+    private func handleModeChange(from oldMode: DemoMode, to newMode: DemoMode) {
         resetRealtimeWords()
         audioExportError = nil
 
         Task {
-            if isRealtimeMode {
+            if oldMode == .conversation {
+                await speech.endConversation()
+            }
+
+            switch newMode {
+            case .realtime:
                 _ = recorder.stopRecording()
-                startInputPreviewIfAvailable()
-            } else {
+            case .dictation:
                 inputPreview.stop()
                 await speech.stopListening()
-                startInputPreviewIfAvailable()
+            case .conversation:
+                _ = recorder.stopRecording()
+                await speech.stopListening()
             }
+
+            startInputPreviewIfAvailable()
         }
     }
 
@@ -158,14 +205,18 @@ struct ContentView: View {
 
     /// Starts the passive microphone meter unless a workflow already owns the audio session.
     private func startInputPreviewIfAvailable() {
-        let isAudioActive = isRealtimeMode ? speech.realtimeConnectionState.isWorking : recorder.isRecording
+        let isAudioActive: Bool = switch mode {
+        case .realtime: speech.realtimeConnectionState.isWorking
+        case .dictation: recorder.isRecording
+        case .conversation: speech.conversationState.isWorking
+        }
         guard !isAudioActive else { return }
         inputPreview.startIfAuthorized()
     }
 
     /// Restarts the realtime session after a provider change so the active WebSocket uses the selected configuration.
     private func restartRealtimeIfNeeded() async {
-        guard isRealtimeMode, speech.realtimeConnectionState.isWorking else { return }
+        guard mode == .realtime, speech.realtimeConnectionState.isWorking else { return }
         await speech.stopListening()
         applyConfiguration()
         speech.clearTranscript()
@@ -180,7 +231,7 @@ struct ContentView: View {
 
     /// Prepares either the realtime WAV capture or the last recorded-upload file for the system file exporter.
     private func prepareAudioExport() {
-        if let realtimeRecordingData = speech.realtimeRecordingData, isRealtimeMode || recorder.lastRecordingURL == nil {
+        if let realtimeRecordingData = speech.realtimeRecordingData, mode != .dictation || recorder.lastRecordingURL == nil {
             exportedAudio = RecordedAudioFileDocument(data: realtimeRecordingData)
             exportedAudioFilename = "speechkit-realtime-\(UUID().uuidString).wav"
             audioExportError = nil
