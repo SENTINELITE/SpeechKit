@@ -13,7 +13,8 @@ let speech = SpeechService(
     grok: GrokConfiguration(apiKey: "<XAI_API_KEY>"),
     openAI: OpenAIConfiguration(apiKey: "<OPENAI_API_KEY>"),
     meta: MetaConfiguration(apiKey: "<META_API_KEY>"),
-    gemini: GeminiConfiguration(apiKey: "<GOOGLE_API_KEY>")
+    gemini: GeminiConfiguration(apiKey: "<GOOGLE_API_KEY>"),
+    mistral: MistralConfiguration(apiKey: "<MISTRAL_API_KEY>")
 )
 ```
 
@@ -67,6 +68,16 @@ let speech = SpeechService(
         mode: .verbatim,
         diarize: true,
         timestampGranularities: [.word]
+    ),
+    mistral: MistralConfiguration(
+        apiKey: "<MISTRAL_API_KEY>",
+        fileTranscriptionModelID: .voxtralSmallTranscribe3,
+        contextBias: ["SpeechKit"],
+        diarize: true,
+        realtimeOptions: MistralRealtimeOptions(
+            targetStreamingDelayMilliseconds: 480,
+            diarize: true
+        )
     )
 )
 ```
@@ -81,7 +92,7 @@ let grok = try GrokConfiguration(apiKey: "<XAI_API_KEY>", languageCode: "fil")
 let aqua = try AquaConfiguration(apiKey: "<AQUA_API_KEY>", languageCode: "ja")
 ```
 
-Meta biases transcription with language names instead of codes, so ``MetaConfiguration/init(apiKey:modelID:mode:languageNames:keywords:realtimeOptions:timeoutInterval:fileEndpoint:realtimeEndpoint:)`` takes names such as `"English"` or `"Mandarin Chinese"` and throws when a name is not supported. Gemini takes free-form BCP-47 codes in ``GeminiConfiguration/languageCodes``, so it needs no typed language enum; an empty array lets Gemini detect the language.
+Meta biases transcription with language names instead of codes, so ``MetaConfiguration/init(apiKey:modelID:mode:languageNames:keywords:realtimeOptions:timeoutInterval:fileEndpoint:realtimeEndpoint:)`` takes names such as `"English"` or `"Mandarin Chinese"` and throws when a name is not supported. Gemini takes free-form BCP-47 codes in ``GeminiConfiguration/languageCodes``, so it needs no typed language enum; an empty array lets Gemini detect the language. Mistral takes a two-letter ISO 639-1 code such as `"en"` in ``MistralConfiguration/language``, or `nil` to detect the language.
 
 ```swift
 let meta = try MetaConfiguration(apiKey: "<META_API_KEY>", languageNames: ["English", "Spanish"])
@@ -100,9 +111,9 @@ let openAI = OpenAIConfiguration(
 
 The `apiKey` property remains available on every configuration and realtime service. Reading it returns the key for an API-key credential and an empty string for a token credential; writing it replaces the credential with ``SpeechCredential/apiKey(_:)``.
 
-ElevenLabs issues single-use tokens for realtime Scribe, OpenAI issues ephemeral client secrets for Realtime, and Google issues ephemeral tokens for Gemini Live. Aqua, Cohere, Grok, and Meta have no first-party short-lived token, so route those through your own proxy. A Google ephemeral token only authorizes Gemini Live; a token used for Gemini file transcription must be an OAuth access token or a credential your proxy accepts.
+ElevenLabs issues single-use tokens for realtime Scribe, OpenAI issues ephemeral client secrets for Realtime, and Google issues ephemeral tokens for Gemini Live. Aqua, Cohere, Grok, Meta, and Mistral have no first-party short-lived token, so route those through your own proxy. A Google ephemeral token only authorizes Gemini Live; a token used for Gemini file transcription must be an OAuth access token or a credential your proxy accepts.
 
-Each configuration also takes endpoint overrides so your app can route provider traffic through a proxy that injects the vendor key. `fileEndpoint` replaces the file transcription URL, `realtimeEndpoint` replaces the realtime WebSocket URL for ElevenLabs, OpenAI, Grok, Meta, and Gemini, and ``GeminiConfiguration/filesEndpoint`` replaces the Gemini Files API upload URL. A `nil` value keeps the vendor default, and SpeechKit still appends the query items each provider needs.
+Each configuration also takes endpoint overrides so your app can route provider traffic through a proxy that injects the vendor key. `fileEndpoint` replaces the file transcription URL, `realtimeEndpoint` replaces the realtime WebSocket URL for ElevenLabs, OpenAI, Grok, Meta, Gemini, and Mistral, and ``GeminiConfiguration/filesEndpoint`` replaces the Gemini Files API upload URL. A `nil` value keeps the vendor default, and SpeechKit still appends the query items each provider needs.
 
 ```swift
 let grok = GrokConfiguration(
@@ -128,6 +139,7 @@ let grok = GrokConfiguration(
 - ``OpenAIConfiguration``
 - ``MetaConfiguration``
 - ``GeminiConfiguration``
+- ``MistralConfiguration``
 - ``AppleSpeechConfiguration``
 - ``AppleSpeechModelRetention``
 
@@ -143,6 +155,8 @@ let grok = GrokConfiguration(
 - ``MetaModelID``
 - ``GeminiFileTranscriptionModelID``
 - ``GeminiRealtimeModelID``
+- ``MistralFileTranscriptionModelID``
+- ``MistralRealtimeModelID``
 
 ### Request Options
 
@@ -160,6 +174,10 @@ let grok = GrokConfiguration(
 - ``GeminiTimestampGranularity``
 - ``GeminiFileUploadStrategy``
 - ``GeminiProcessingMode``
+- ``MistralRealtimeOptions``
+- ``MistralTurnDetection``
+- ``MistralSpeakerReference``
+- ``MistralTimestampGranularity``
 
 ### Language Hints
 

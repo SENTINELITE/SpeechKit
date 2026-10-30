@@ -158,6 +158,29 @@ let response = try await speech.transcribeGeminiAudioFile(
 
 SpeechKit sends audio inline below the 20 MB default threshold and uploads larger files with the Gemini Files API.
 
+### Mistral Files
+
+Mistral offers Voxtral Mini Transcribe 3, the default, and Voxtral Small Transcribe 3 for higher accuracy. Turn on diarization to label each segment with its speaker.
+
+```swift
+let speech = SpeechService(
+    mistral: MistralConfiguration(
+        apiKey: "<MISTRAL_API_KEY>",
+        fileTranscriptionModelID: .voxtralSmallTranscribe3,
+        language: "en",
+        contextBias: ["Northwind", "Alder Creek Design"],
+        diarize: true
+    )
+)
+
+let response = try await speech.transcribeMistralAudioFile(file: audioFileURL)
+for segment in response.segments {
+    print(segment.speakerID ?? "?", segment.text)
+}
+```
+
+Mistral returns timestamps per segment only, and requires them for diarization, so SpeechKit requests segment timestamps whenever `diarize` is on.
+
 ### Apple Local Files
 
 Apple local Speech runs on device and requires iOS 26, macOS 26, or visionOS 26. It is unavailable on watchOS and may need local speech assets for the selected locale.
@@ -266,6 +289,28 @@ let speech = SpeechService(
 await speech.startListening(provider: .gemini)
 ```
 
+### Mistral Realtime
+
+Mistral realtime sessions stream 16 kHz mono PCM by default. Lower ``MistralRealtimeOptions/targetStreamingDelayMilliseconds`` for faster text, or raise it for more accurate text.
+
+```swift
+let speech = SpeechService(
+    mistral: MistralConfiguration(
+        apiKey: "<MISTRAL_API_KEY>",
+        realtimeOptions: MistralRealtimeOptions(
+            targetStreamingDelayMilliseconds: 480,
+            language: "en",
+            contextBias: ["SpeechKit"],
+            diarize: true
+        )
+    )
+)
+
+await speech.startListening(provider: .mistral)
+```
+
+With `diarize` on, each committed entry carries its speaker in ``SpeechTranscriptEntry/speaker``. Turn detection, on by default, is left out of diarized sessions because Mistral cannot combine the two.
+
 ### Apple Local Realtime
 
 ```swift
@@ -293,4 +338,5 @@ if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
 - ``OpenAIConfiguration``
 - ``MetaConfiguration``
 - ``GeminiConfiguration``
+- ``MistralConfiguration``
 - ``AppleSpeechConfiguration``

@@ -1,6 +1,6 @@
 # File Transcription
 
-Transcribe audio files with ElevenLabs, Aqua, Cohere, Grok, OpenAI, Meta, Gemini, or Apple local Speech.
+Transcribe audio files with ElevenLabs, Aqua, Cohere, Grok, OpenAI, Meta, Gemini, Mistral, or Apple local Speech.
 
 ## Overview
 
@@ -17,7 +17,7 @@ let text = try await speech.transcribeAudioFile(
 )
 ```
 
-Provider defaults come from ``ElevenLabsConfiguration``, ``AquaConfiguration``, ``CohereConfiguration``, ``GrokConfiguration``, ``OpenAIConfiguration``, ``MetaConfiguration``, ``GeminiConfiguration``, and ``AppleSpeechConfiguration``. Override defaults for one request with ``SpeechFileTranscriptionOptions``.
+Provider defaults come from ``ElevenLabsConfiguration``, ``AquaConfiguration``, ``CohereConfiguration``, ``GrokConfiguration``, ``OpenAIConfiguration``, ``MetaConfiguration``, ``GeminiConfiguration``, ``MistralConfiguration``, and ``AppleSpeechConfiguration``. Override defaults for one request with ``SpeechFileTranscriptionOptions``.
 
 ```swift
 let text = try await speech.transcribeAudioFile(
@@ -100,6 +100,22 @@ let longResponse = try await speech.transcribeGeminiAudioFile(
 )
 ```
 
+Mistral returns segment timestamps, and a speaker label on each segment when ``MistralFileTranscriptionOptions/diarize`` is `true`. Diarization is off by default. SpeechKit requests segment timestamps whenever diarization is on, because Mistral requires them.
+
+```swift
+let mistralResponse = try await speech.transcribeMistralAudioFile(
+    file: audioFileURL,
+    options: MistralFileTranscriptionOptions(
+        modelID: .voxtralSmallTranscribe3,
+        contextBias: ["Northwind"],
+        diarize: true
+    )
+)
+
+print(mistralResponse.text)
+print(mistralResponse.segments)
+```
+
 Apple local Speech file transcription runs on device on iOS 26, macOS 26, and visionOS 26. It is not available on watchOS.
 
 ```swift
@@ -166,6 +182,7 @@ The `options` value must match the selected provider. Passing `.elevenLabs(...)`
 - ``SpeechService/transcribeOpenAIAudioFile(file:options:)``
 - ``SpeechService/transcribeMetaAudioFile(file:options:)``
 - ``SpeechService/transcribeGeminiAudioFile(file:options:)``
+- ``SpeechService/transcribeMistralAudioFile(file:options:)``
 - ``SpeechService/transcribeAppleAudioFile(file:options:)``
 - ``ElevenLabsFileTranscriptionResponse``
 - ``ElevenLabsWordTimestamp``
@@ -178,6 +195,10 @@ The `options` value must match the selected provider. Passing `.elevenLabs(...)`
 - ``GeminiFileTranscriptionOptions``
 - ``GeminiFileTranscriptionResponse``
 - ``GeminiWordInfo``
+- ``MistralFileTranscriptionOptions``
+- ``MistralFileTranscriptionResponse``
+- ``MistralTranscriptionSegment``
+- ``MistralTranscriptionUsage``
 - ``AppleSpeechFileTranscriptionResponse``
 - ``AppleSpeechFileTranscriptionOptions``
 - ``OpenAIDiarizationChunkingStrategy``

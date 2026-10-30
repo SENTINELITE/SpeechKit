@@ -125,6 +125,24 @@ extension SpeechService {
                 throw wrap(error, for: .gemini)
             }
 
+        case .mistral:
+            guard let mistral else {
+                throw SpeechError.providerNotConfigured(.mistral)
+            }
+            try validate(options: options, for: .mistral)
+            let resolvedOptions = resolvedMistralOptions(from: options, config: mistral)
+            let client = MistralFileTranscriptionClient(
+                credential: mistral.credential,
+                endpoint: mistral.fileEndpoint,
+                urlSession: urlSession
+            )
+
+            do {
+                return try await client.transcribeAudioFile(file: file, options: resolvedOptions)
+            } catch {
+                throw wrap(error, for: .mistral)
+            }
+
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -429,6 +447,49 @@ extension SpeechService {
         return try await transcribeGeminiAudioFile(file: securityScopedURL, options: options)
     }
 
+    /// Transcribes an audio file with Mistral and returns Mistral's detailed response.
+    ///
+    /// Set ``MistralFileTranscriptionOptions/diarize`` to label each segment
+    /// with its speaker.
+    ///
+    /// - Throws: ``SpeechError`` when Mistral is missing, option validation fails, or the provider request fails.
+    public func transcribeMistralAudioFile(
+        file: URL,
+        options: MistralFileTranscriptionOptions? = nil
+    ) async throws -> MistralFileTranscriptionResponse {
+        guard let mistral else {
+            throw SpeechError.providerNotConfigured(.mistral)
+        }
+
+        let client = MistralFileTranscriptionClient(
+            credential: mistral.credential,
+            endpoint: mistral.fileEndpoint,
+            urlSession: urlSession
+        )
+        let resolvedOptions = options ?? resolvedMistralOptions(from: nil, config: mistral)
+
+        do {
+            return try await client.transcribeAudioFileDetailed(file: file, options: resolvedOptions)
+        } catch {
+            throw wrap(error, for: .mistral)
+        }
+    }
+
+    /// Transcribes a security-scoped audio file URL with Mistral and returns Mistral's detailed response.
+    ///
+    /// - Throws: ``SpeechError`` when the file cannot be accessed, Mistral is missing, option validation fails, or the provider request fails.
+    public func transcribeMistralAudioFile(
+        securityScopedURL: URL,
+        options: MistralFileTranscriptionOptions? = nil
+    ) async throws -> MistralFileTranscriptionResponse {
+        let didStartAccess = securityScopedURL.startAccessingSecurityScopedResource()
+        guard didStartAccess else {
+            throw SpeechError.providerFailure(provider: .mistral, reason: "Failed to access security-scoped resource.")
+        }
+        defer { securityScopedURL.stopAccessingSecurityScopedResource() }
+        return try await transcribeMistralAudioFile(file: securityScopedURL, options: options)
+    }
+
     func validate(options: SpeechFileTranscriptionOptions?, for provider: SpeechFileTranscriptionProvider) throws {
         guard let options else { return }
         guard options.provider == provider else {
@@ -632,6 +693,41 @@ extension SpeechService {
             timestampGranularities: timestampGranularities ?? config.timestampGranularities,
             uploadStrategy: uploadStrategy ?? config.uploadStrategy,
             processingMode: processingMode ?? config.processingMode,
+            timeoutInterval: timeoutInterval ?? config.timeoutInterval
+        )
+    }
+
+    func resolvedMistralOptions(
+        from options: SpeechFileTranscriptionOptions?,
+        config: MistralConfiguration
+    ) -> MistralFileTranscriptionOptions {
+        guard case .mistral(
+            let modelID,
+            let language,
+            let contextBias,
+            let diarize,
+            let timestampGranularities,
+            let temperature,
+            let timeoutInterval
+        ) = options else {
+            return MistralFileTranscriptionOptions(
+                modelID: config.fileTranscriptionModelID,
+                language: config.language,
+                contextBias: config.contextBias,
+                diarize: config.diarize,
+                timestampGranularities: config.timestampGranularities,
+                temperature: config.temperature,
+                timeoutInterval: config.timeoutInterval
+            )
+        }
+
+        return MistralFileTranscriptionOptions(
+            modelID: modelID ?? config.fileTranscriptionModelID,
+            language: language ?? config.language,
+            contextBias: contextBias ?? config.contextBias,
+            diarize: diarize ?? config.diarize,
+            timestampGranularities: timestampGranularities ?? config.timestampGranularities,
+            temperature: temperature ?? config.temperature,
             timeoutInterval: timeoutInterval ?? config.timeoutInterval
         )
     }

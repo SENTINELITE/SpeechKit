@@ -4,6 +4,22 @@ All notable changes to SpeechKit will be documented in this file.
 
 SpeechKit follows semantic versioning. Source-breaking changes ship in a new major version.
 
+## [Unreleased]
+
+Planned for 2.1.0. `SpeechFileTranscriptionProvider`, `SpeechRealtimeProvider`, and `SpeechFileTranscriptionOptions` gained `mistral` cases; every other change is additive.
+
+### Added
+
+- Mistral Voxtral Mini Transcribe 3 and Voxtral Small Transcribe 3 support for file transcription, including speaker diarization, segment timestamps, language pinning, and context biasing.
+- Mistral Voxtral Mini Transcribe Realtime 3 support for realtime transcription, including a configurable streaming delay, end-of-turn detection, context biasing, and speaker diarization with optional named speaker references.
+- `MistralConfiguration`, `SpeechService.mistral`, and `SpeechService.transcribeMistralAudioFile(file:options:)` with its security-scoped twin, returning `MistralFileTranscriptionResponse` with speaker-labeled segments.
+- `MistralRealtimeService` for apps that drive Mistral realtime transcription directly.
+
+### Changed
+
+- `SpeechFileTranscriptionProvider`, `SpeechRealtimeProvider`, and `SpeechFileTranscriptionOptions` gained `mistral` cases, so exhaustive switches over these types in adopting code need updating.
+- `SpeechService.init` gained a `mistral:` parameter after `gemini:`.
+
 ## [2.0.1] - 2026-09-15
 
 ### Fixed

@@ -9,8 +9,8 @@ SpeechKit is a Swift package for adding speech-to-text to Swift and SwiftUI apps
 
 It supports two workflows:
 
-- Realtime microphone transcription with ElevenLabs, OpenAI, xAI Grok, Meta, Gemini, and Apple local Speech on supported OS versions.
-- File transcription with ElevenLabs, Aqua, Cohere, Grok, OpenAI, Meta, Gemini, and Apple local Speech on supported OS versions.
+- Realtime microphone transcription with ElevenLabs, OpenAI, xAI Grok, Meta, Gemini, Mistral, and Apple local Speech on supported OS versions.
+- File transcription with ElevenLabs, Aqua, Cohere, Grok, OpenAI, Meta, Gemini, Mistral, and Apple local Speech on supported OS versions.
 
 ## Highlights
 
@@ -19,6 +19,7 @@ It supports two workflows:
 - Provider-neutral file transcription for simple text results.
 - Provider-specific options and detailed responses when you need timestamps, diarization, usage metadata, or model-specific controls.
 - Meta Muse Voice Transcribe and Gemini 3.5 Transcribe for both realtime sessions and file uploads.
+- Mistral Voxtral Transcribe 3 for realtime sessions and file uploads, with speaker diarization you can turn on per request or per session.
 - On-device Apple Speech support for apps running on iOS 26, macOS 26, or visionOS 26.
 - Security-scoped file overloads for document picker workflows.
 - A runnable iOS demo app for trying realtime transcription, recorded dictation uploads, and file transcription.
@@ -108,6 +109,7 @@ Provider references:
 - OpenAI documents speech-to-text authentication and request patterns in its [Speech to text guide](https://platform.openai.com/docs/guides/speech-to-text).
 - Meta documents Muse Voice Transcribe authentication in its [speech-to-text documentation](https://dev.meta.ai/docs/speech-to-text/).
 - Google documents API key handling and ephemeral tokens in its [Gemini API key guide](https://ai.google.dev/gemini-api/docs/api-key).
+- Mistral documents Voxtral transcription and its API key header in its [speech-to-text documentation](https://docs.mistral.ai/studio/audio/speech-to-text/overview).
 
 The Gemini Live WebSocket carries the API key in the URL query string, so a backend proxy or Google's ephemeral tokens are the safer production path for realtime Gemini sessions. When you pass a Google ephemeral token, SpeechKit sends it in an `Authorization: Token` header instead and keeps it out of the URL.
 
@@ -135,7 +137,7 @@ First-party short-lived tokens:
 | ElevenLabs | Single-use token for realtime Scribe |
 | OpenAI | Ephemeral client secret for Realtime |
 | Google Gemini | Ephemeral token for Live (Live only, not REST) |
-| Aqua, Cohere, Grok, Meta | No first-party token: use your own proxy |
+| Aqua, Cohere, Grok, Meta, Mistral | No first-party token: use your own proxy |
 
 Google ephemeral tokens only authorize Gemini Live. A token used for Gemini file transcription must be an OAuth access token or a credential your own proxy accepts, because SpeechKit sends it as `Authorization: Bearer`.
 
@@ -340,6 +342,38 @@ await speech.startListening(provider: .gemini)
 ```
 
 Gemini Live sessions last up to 10 minutes and do not return speaker labels or word timestamps. Use file transcription when you need either one.
+
+### Realtime: Mistral
+
+Mistral Voxtral Mini Transcribe Realtime 3 streams 16-bit mono PCM. `MistralRealtimeOptions` sets the streaming delay, language, context biasing, turn detection, and diarization.
+
+```swift
+let speech = SpeechService(
+    mistral: MistralConfiguration(
+        apiKey: "<MISTRAL_API_KEY>",
+        realtimeOptions: MistralRealtimeOptions(
+            targetStreamingDelayMilliseconds: 480,
+            language: "en",
+            contextBias: ["SpeechKit", "Northwind"]
+        )
+    )
+)
+
+await speech.startListening(provider: .mistral)
+```
+
+By default, Mistral detects the end of each turn and SpeechKit commits one transcript entry per turn. Set `diarize` to label each entry with its speaker:
+
+```swift
+speech.mistral?.realtimeOptions.diarize = true
+await speech.startListening(provider: .mistral)
+
+for entry in speech.transcriptEntries {
+    print(entry.speaker ?? "?", entry.text)
+}
+```
+
+Mistral cannot combine diarization with turn detection, so with `diarize` on SpeechKit leaves turn detection out and starts a new entry each time the speaker changes. Add `speakerReferences` (up to 8 clips of 3 to 15 seconds) to label known voices by name instead of `speaker_1`, `speaker_2`. Mistral locks the settings when the first audio chunk arrives, so a change applies to the next session.
 
 ### Realtime: Apple Local Speech
 
@@ -586,6 +620,38 @@ let response = try await speech.transcribeGeminiAudioFile(
 ```
 
 SpeechKit sends audio inline below the 20 MB default threshold and uploads larger files with the Gemini Files API. Set `uploadStrategy` to `.inline` or `.filesAPI` to force one path.
+
+### File: Mistral
+
+Mistral offers two file models: Voxtral Mini Transcribe 3 (the default) and Voxtral Small Transcribe 3 for higher accuracy. The provider-neutral API returns text:
+
+```swift
+let text = try await speech.transcribeAudioFile(
+    provider: .mistral,
+    file: audioFileURL,
+    options: .mistral(modelID: .voxtralSmallTranscribe3, language: "en")
+)
+```
+
+Use the detailed call when you want speaker labels and segment timestamps. Diarization is off by default; set `diarize` on the configuration or per request:
+
+```swift
+let speech = SpeechService(
+    mistral: MistralConfiguration(
+        apiKey: "<MISTRAL_API_KEY>",
+        contextBias: ["Northwind", "Alder Creek Design"],
+        diarize: true
+    )
+)
+
+let response = try await speech.transcribeMistralAudioFile(file: audioFileURL)
+print(response.text)
+for segment in response.segments {
+    print(segment.speakerID ?? "?", segment.start ?? 0, segment.end ?? 0, segment.text)
+}
+```
+
+Mistral returns timestamps per segment only. Diarization requires segment timestamps, so SpeechKit requests them whenever `diarize` is on. `contextBias` entries can be names, multi-word terms, or a sentence that describes the recording.
 
 ### File: Apple Local Speech
 

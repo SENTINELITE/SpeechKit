@@ -787,6 +787,98 @@ public struct GeminiConfiguration: Sendable, Equatable {
     }
 }
 
+/// Configuration for Mistral Voxtral realtime and file transcription.
+public struct MistralConfiguration: Sendable, Equatable {
+    /// The credential used for realtime and file transcription requests.
+    public var credential: SpeechCredential
+    /// The Mistral API key used for realtime and file transcription requests.
+    ///
+    /// Reading this property returns the key for a ``SpeechCredential/apiKey(_:)``
+    /// credential and an empty string for a ``SpeechCredential/token(_:)``
+    /// credential. Writing it replaces ``credential`` with
+    /// ``SpeechCredential/apiKey(_:)``.
+    public var apiKey: String {
+        get { credential.staticAPIKey }
+        set { credential = .apiKey(newValue) }
+    }
+    /// The Voxtral model used for file transcription.
+    public var fileTranscriptionModelID: MistralFileTranscriptionModelID
+    /// A two-letter ISO 639-1 language code used for file transcription, or `nil` to let Mistral detect the language.
+    public var language: String?
+    /// Names, terms, or a descriptive sentence that bias file transcription.
+    public var contextBias: [String]
+    /// A Boolean value that indicates whether Mistral should label file transcript segments with their speaker.
+    public var diarize: Bool
+    /// The timestamp granularities to request for file transcription.
+    public var timestampGranularities: [MistralTimestampGranularity]
+    /// An optional sampling temperature for file transcription.
+    public var temperature: Double?
+    /// The default Mistral realtime transcription options, including the realtime model and diarization.
+    public var realtimeOptions: MistralRealtimeOptions
+    /// The network timeout for Mistral file uploads.
+    public var timeoutInterval: TimeInterval
+    /// An override for the Mistral file transcription endpoint, or `nil` to use the vendor default.
+    public var fileEndpoint: URL?
+    /// An override for the Mistral realtime WebSocket endpoint, or `nil` to use the vendor default.
+    public var realtimeEndpoint: URL?
+
+    /// Creates a Mistral configuration with a long-lived API key.
+    public init(
+        apiKey: String,
+        fileTranscriptionModelID: MistralFileTranscriptionModelID = .voxtralMiniTranscribe3,
+        language: String? = nil,
+        contextBias: [String] = [],
+        diarize: Bool = false,
+        timestampGranularities: [MistralTimestampGranularity] = [],
+        temperature: Double? = nil,
+        realtimeOptions: MistralRealtimeOptions = MistralRealtimeOptions(),
+        timeoutInterval: TimeInterval = 10 * 60,
+        fileEndpoint: URL? = nil,
+        realtimeEndpoint: URL? = nil
+    ) {
+        self.init(
+            credential: .apiKey(apiKey),
+            fileTranscriptionModelID: fileTranscriptionModelID,
+            language: language,
+            contextBias: contextBias,
+            diarize: diarize,
+            timestampGranularities: timestampGranularities,
+            temperature: temperature,
+            realtimeOptions: realtimeOptions,
+            timeoutInterval: timeoutInterval,
+            fileEndpoint: fileEndpoint,
+            realtimeEndpoint: realtimeEndpoint
+        )
+    }
+
+    /// Creates a Mistral configuration with any credential.
+    public init(
+        credential: SpeechCredential,
+        fileTranscriptionModelID: MistralFileTranscriptionModelID = .voxtralMiniTranscribe3,
+        language: String? = nil,
+        contextBias: [String] = [],
+        diarize: Bool = false,
+        timestampGranularities: [MistralTimestampGranularity] = [],
+        temperature: Double? = nil,
+        realtimeOptions: MistralRealtimeOptions = MistralRealtimeOptions(),
+        timeoutInterval: TimeInterval = 10 * 60,
+        fileEndpoint: URL? = nil,
+        realtimeEndpoint: URL? = nil
+    ) {
+        self.credential = credential
+        self.fileTranscriptionModelID = fileTranscriptionModelID
+        self.language = language
+        self.contextBias = contextBias
+        self.diarize = diarize
+        self.timestampGranularities = timestampGranularities
+        self.temperature = temperature
+        self.realtimeOptions = realtimeOptions
+        self.timeoutInterval = timeoutInterval
+        self.fileEndpoint = fileEndpoint
+        self.realtimeEndpoint = realtimeEndpoint
+    }
+}
+
 /// A provider that can transcribe uploaded audio files.
 public enum SpeechFileTranscriptionProvider: String, Sendable, CaseIterable {
     /// ElevenLabs Scribe file transcription.
@@ -803,6 +895,8 @@ public enum SpeechFileTranscriptionProvider: String, Sendable, CaseIterable {
     case meta
     /// Gemini 3.5 Transcribe file transcription.
     case gemini
+    /// Mistral Voxtral Transcribe file transcription.
+    case mistral
     /// Apple local Speech framework file transcription.
     ///
     /// SpeechKit only includes this provider in ``allCases`` on iOS 26,
@@ -814,7 +908,7 @@ public enum SpeechFileTranscriptionProvider: String, Sendable, CaseIterable {
 
     /// The file transcription providers that are callable on the current OS.
     public static var allCases: [SpeechFileTranscriptionProvider] {
-        var providers: [SpeechFileTranscriptionProvider] = [.elevenLabs, .aqua, .cohere, .grok, .openAI, .meta, .gemini]
+        var providers: [SpeechFileTranscriptionProvider] = [.elevenLabs, .aqua, .cohere, .grok, .openAI, .meta, .gemini, .mistral]
         #if !os(watchOS)
         if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
             providers.append(.apple)
@@ -880,6 +974,16 @@ public enum SpeechFileTranscriptionOptions: Sendable, Equatable {
         processingMode: GeminiProcessingMode? = nil,
         timeoutInterval: TimeInterval? = nil
     )
+    /// Options for a Mistral file transcription request.
+    case mistral(
+        modelID: MistralFileTranscriptionModelID? = nil,
+        language: String? = nil,
+        contextBias: [String]? = nil,
+        diarize: Bool? = nil,
+        timestampGranularities: [MistralTimestampGranularity]? = nil,
+        temperature: Double? = nil,
+        timeoutInterval: TimeInterval? = nil
+    )
     /// Options for an Apple local file transcription request.
     ///
     /// These options are only meaningful when the request runs on iOS 26,
@@ -909,6 +1013,8 @@ public enum SpeechFileTranscriptionOptions: Sendable, Equatable {
             return .meta
         case .gemini:
             return .gemini
+        case .mistral:
+            return .mistral
         #if !os(watchOS)
         case .apple:
             return .apple

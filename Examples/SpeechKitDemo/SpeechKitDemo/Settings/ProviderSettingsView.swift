@@ -101,6 +101,7 @@ extension DemoAPIKeyProvider {
         case .grok: "Language and diarization also apply to realtime sessions."
         case .meta: "Model, mode, language bias, and keywords also apply to realtime sessions."
         case .gemini: "Mode, language codes, and custom vocabulary also apply to Gemini Live. Gemini Live does not support diarization or word timestamps."
+        case .mistral: "Language, context bias, and diarization also apply to realtime sessions. Diarized realtime sessions skip turn detection and start a new entry when the speaker changes."
         case .elevenLabs, .openAI, .cohere, .aqua: nil
         }
     }

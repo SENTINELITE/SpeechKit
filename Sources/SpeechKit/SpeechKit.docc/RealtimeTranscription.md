@@ -1,6 +1,6 @@
 # Realtime Transcription
 
-Stream microphone audio to ElevenLabs, OpenAI, xAI Grok, Meta, Gemini, or Apple local Speech and observe partial and committed transcript text.
+Stream microphone audio to ElevenLabs, OpenAI, xAI Grok, Meta, Gemini, Mistral, or Apple local Speech and observe partial and committed transcript text.
 
 ## Overview
 
@@ -42,6 +42,7 @@ await speech.startListening(provider: .openAI)
 await speech.startListening(provider: .grok)
 await speech.startListening(provider: .meta)
 await speech.startListening(provider: .gemini)
+await speech.startListening(provider: .mistral)
 ```
 
 Apple local Speech is available on iOS 26, macOS 26, and visionOS 26. SpeechKit omits `.apple` from ``SpeechRealtimeProvider/allCases`` before those OS versions and on watchOS.
@@ -87,6 +88,13 @@ let speech = SpeechService(
             languageCodes: ["en-US"],
             mode: .verbatim
         )
+    ),
+    mistral: MistralConfiguration(
+        apiKey: "<MISTRAL_API_KEY>",
+        realtimeOptions: MistralRealtimeOptions(
+            targetStreamingDelayMilliseconds: 480,
+            diarize: true
+        )
     )
 )
 ```
@@ -97,10 +105,13 @@ Meta streams raw PCM and accepts 24 kHz or 16 kHz mono audio only, so ``MetaReal
 
 Gemini Live streams 16 kHz mono PCM, limits a session to 10 minutes, and returns neither speaker labels nor word timestamps. Use <doc:FileTranscription> with ``GeminiConfiguration/diarize`` or ``GeminiTimestampGranularity/word`` when you need either one.
 
+Mistral streams 16-bit mono PCM and sends final text as it arrives, so the partial entry only grows. With turn detection, the default, SpeechKit commits one entry per turn. Mistral cannot combine turn detection with diarization: when ``MistralRealtimeOptions/diarize`` is `true`, SpeechKit leaves turn detection out, starts a new entry each time the speaker changes, and sets ``SpeechTranscriptEntry/speaker`` to Mistral's label, such as `speaker_1`, or to the name of a ``MistralSpeakerReference``. Mistral locks session settings when the first audio chunk arrives, so a change applies to the next session.
+
 | Provider | Capture format | Session limit |
 | --- | --- | --- |
 | Meta | 24 kHz or 16 kHz mono PCM16 | Not documented |
 | Gemini | 16 kHz mono PCM16 | 10 minutes |
+| Mistral | 16 kHz mono PCM16 by default, 8 to 48 kHz | Not documented |
 
 For provider-by-provider setup examples, see <doc:ProviderHowToGuides>.
 
@@ -138,6 +149,8 @@ When a realtime provider is not configured, ``SpeechService/startListening(provi
 - ``MetaRealtimeError``
 - ``GeminiRealtimeService``
 - ``GeminiRealtimeError``
+- ``MistralRealtimeService``
+- ``MistralRealtimeError``
 
 ### Realtime Operations
 

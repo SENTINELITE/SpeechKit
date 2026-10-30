@@ -231,6 +231,11 @@ struct FileTranscriptionView: View {
                 guard ownsCurrentResult(for: provider, requestID: requestID) else { return }
                 transcript = response.text
                 vozResponse = response
+            } else if provider == .mistral, configuration.mistralDiarize {
+                // The detailed response carries per-segment speakers that the plain-text path drops.
+                let response = try await speech.transcribeMistralAudioFile(securityScopedURL: url, options: configuration.mistralFileOptions)
+                guard ownsCurrentResult(for: provider, requestID: requestID) else { return }
+                transcript = response.speakerLabeledText
             } else if let speechProvider = provider.speechProvider {
                 let response = try await speech.transcribeAudioFile(
                     provider: speechProvider,

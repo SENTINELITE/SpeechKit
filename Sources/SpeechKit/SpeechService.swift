@@ -29,6 +29,10 @@ public final class SpeechService {
     public var gemini: GeminiConfiguration? {
         didSet { applyGeminiRealtimeConfig() }
     }
+    /// The Mistral configuration used for Mistral realtime and file transcription.
+    public var mistral: MistralConfiguration? {
+        didSet { applyMistralRealtimeConfig() }
+    }
     /// The Apple local Speech configuration used for realtime and file transcription.
     @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
     @available(watchOS, unavailable)
@@ -42,6 +46,7 @@ public final class SpeechService {
     let grokRealtimeService: GrokRealtimeService
     let metaRealtimeService: MetaRealtimeService
     let geminiRealtimeService: GeminiRealtimeService
+    let mistralRealtimeService: MistralRealtimeService
     let urlSession: URLSession
     var appleConfigurationStorage: Any?
     var appleRealtimeServiceStorage: Any?
@@ -64,7 +69,8 @@ public final class SpeechService {
         aqua: AquaConfiguration? = nil,
         openAI: OpenAIConfiguration? = nil,
         meta: MetaConfiguration? = nil,
-        gemini: GeminiConfiguration? = nil
+        gemini: GeminiConfiguration? = nil,
+        mistral: MistralConfiguration? = nil
     ) {
         self.elevenLabs = elevenLabs
         self.cohere = cohere
@@ -73,23 +79,26 @@ public final class SpeechService {
         self.openAI = openAI
         self.meta = meta
         self.gemini = gemini
+        self.mistral = mistral
         self.elevenLabsRealtimeService = ElevenLabsService()
         self.openAIRealtimeService = OpenAIRealtimeService()
         self.grokRealtimeService = GrokRealtimeService()
         self.metaRealtimeService = MetaRealtimeService()
         self.geminiRealtimeService = GeminiRealtimeService()
+        self.mistralRealtimeService = MistralRealtimeService()
         self.urlSession = .shared
         applyRealtimeConfig()
         applyOpenAIRealtimeConfig()
         applyGrokRealtimeConfig()
         applyMetaRealtimeConfig()
         applyGeminiRealtimeConfig()
+        applyMistralRealtimeConfig()
     }
 
     /// Creates a speech service with Apple local Speech configuration.
     ///
     /// Use this initializer only on OS versions that expose `SpeechAnalyzer`
-    /// and `SpeechTranscriber`. The base ``SpeechService/init(elevenLabs:cohere:grok:aqua:openAI:meta:gemini:)``
+    /// and `SpeechTranscriber`. The base ``SpeechService/init(elevenLabs:cohere:grok:aqua:openAI:meta:gemini:mistral:)``
     /// initializer remains available for the package's lower deployment targets.
     @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
     @available(watchOS, unavailable)
@@ -101,6 +110,7 @@ public final class SpeechService {
         openAI: OpenAIConfiguration? = nil,
         meta: MetaConfiguration? = nil,
         gemini: GeminiConfiguration? = nil,
+        mistral: MistralConfiguration? = nil,
         apple: AppleSpeechConfiguration? = nil
     ) {
         self.init(
@@ -110,7 +120,8 @@ public final class SpeechService {
             aqua: aqua,
             openAI: openAI,
             meta: meta,
-            gemini: gemini
+            gemini: gemini,
+            mistral: mistral
         )
         self.apple = apple
     }
@@ -123,12 +134,14 @@ public final class SpeechService {
         openAI: OpenAIConfiguration? = nil,
         meta: MetaConfiguration? = nil,
         gemini: GeminiConfiguration? = nil,
+        mistral: MistralConfiguration? = nil,
         urlSession: URLSession,
         elevenLabsRealtimeService: ElevenLabsService,
         openAIRealtimeService: OpenAIRealtimeService = OpenAIRealtimeService(),
         grokRealtimeService: GrokRealtimeService = GrokRealtimeService(),
         metaRealtimeService: MetaRealtimeService = MetaRealtimeService(),
-        geminiRealtimeService: GeminiRealtimeService = GeminiRealtimeService()
+        geminiRealtimeService: GeminiRealtimeService = GeminiRealtimeService(),
+        mistralRealtimeService: MistralRealtimeService = MistralRealtimeService()
     ) {
         self.elevenLabs = elevenLabs
         self.cohere = cohere
@@ -137,17 +150,20 @@ public final class SpeechService {
         self.openAI = openAI
         self.meta = meta
         self.gemini = gemini
+        self.mistral = mistral
         self.urlSession = urlSession
         self.elevenLabsRealtimeService = elevenLabsRealtimeService
         self.openAIRealtimeService = openAIRealtimeService
         self.grokRealtimeService = grokRealtimeService
         self.metaRealtimeService = metaRealtimeService
         self.geminiRealtimeService = geminiRealtimeService
+        self.mistralRealtimeService = mistralRealtimeService
         applyRealtimeConfig()
         applyOpenAIRealtimeConfig()
         applyGrokRealtimeConfig()
         applyMetaRealtimeConfig()
         applyGeminiRealtimeConfig()
+        applyMistralRealtimeConfig()
     }
 
     private func applyRealtimeConfig() {
@@ -185,6 +201,14 @@ public final class SpeechService {
         geminiRealtimeService.realtimeEndpoint = gemini?.realtimeEndpoint
         if let gemini {
             geminiRealtimeService.options = resolvedGeminiRealtimeOptions(from: gemini)
+        }
+    }
+
+    private func applyMistralRealtimeConfig() {
+        mistralRealtimeService.credential = mistral?.credential ?? .apiKey("")
+        mistralRealtimeService.realtimeEndpoint = mistral?.realtimeEndpoint
+        if let mistral {
+            mistralRealtimeService.options = mistral.realtimeOptions
         }
     }
 

@@ -176,6 +176,21 @@ struct FileProviderOptionsView: View {
             Text("Gemini rejects a custom vocabulary combined with diarization or word timestamps. Leave the vocabulary empty to use either one.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        case .mistral:
+            Picker("Model", selection: $configuration.mistralFileModel) {
+                ForEach(MistralFileTranscriptionModelID.allCases, id: \.self) { model in
+                    Text(model.rawValue).tag(model)
+                }
+            }
+
+            TextField("Language code (e.g. en)", text: $configuration.mistralLanguage)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            TextField("Context bias (comma separated)", text: $configuration.mistralContextBias, axis: .vertical)
+                .lineLimit(2...4)
+
+            Toggle("Diarize", isOn: $configuration.mistralDiarize)
         case .voz:
             Label("Runs locally after its model is downloaded and prepared in Settings. VOZ supports 25 languages but does not detect language or accept a language hint.", systemImage: "lock.fill")
                 .font(.caption)
@@ -234,6 +249,12 @@ struct RealtimeOnlyOptionsView: View {
                     Text(model.rawValue).tag(model)
                 }
             }
+        case .mistral:
+            Picker("Streaming delay", selection: $configuration.mistralRealtimeDelay) {
+                ForEach(DemoMistralStreamingDelay.allCases) { delay in
+                    Text(delay.title).tag(delay)
+                }
+            }
         case .apple:
             EmptyView()
         }
@@ -275,4 +296,27 @@ extension GrokLanguage {
 /// a display name.
 extension MetaLanguage {
     var displayName: String { rawValue }
+}
+
+/// Speaker-labeled text for diarized Mistral file transcripts.
+extension MistralFileTranscriptionResponse {
+    /// One `speaker_1: text` line per speaker turn, merging consecutive segments
+    /// from the same speaker. Falls back to ``text`` when no segment has a speaker.
+    var speakerLabeledText: String {
+        guard segments.contains(where: { $0.speakerID != nil }) else { return text }
+
+        var turns: [(speaker: String?, text: String)] = []
+        for segment in segments {
+            let segmentText = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !segmentText.isEmpty else { continue }
+            if let last = turns.last, last.speaker == segment.speakerID {
+                turns[turns.count - 1].text = last.text + " " + segmentText
+            } else {
+                turns.append((segment.speakerID, segmentText))
+            }
+        }
+        return turns
+            .map { turn in turn.speaker.map { "\($0): \(turn.text)" } ?? turn.text }
+            .joined(separator: "\n\n")
+    }
 }

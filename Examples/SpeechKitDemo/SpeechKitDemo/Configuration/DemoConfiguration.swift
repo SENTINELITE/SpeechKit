@@ -24,6 +24,40 @@ enum DemoOpenAIRealtimeDelay: String, CaseIterable, Identifiable {
     }
 }
 
+/// Target streaming delays exposed by the Mistral realtime transcription demo.
+///
+/// Mistral accepts 80 to 1200 ms, or 2400 ms; these are a few useful stops.
+enum DemoMistralStreamingDelay: String, CaseIterable, Identifiable {
+    case providerDefault
+    case ms240
+    case ms480
+    case ms960
+    case ms2400
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .providerDefault: "Default"
+        case .ms240: "240 ms"
+        case .ms480: "480 ms"
+        case .ms960: "960 ms"
+        case .ms2400: "2400 ms"
+        }
+    }
+
+    /// The delay sent to Mistral, or `nil` to keep Mistral's default.
+    var milliseconds: Int? {
+        switch self {
+        case .providerDefault: nil
+        case .ms240: 240
+        case .ms480: 480
+        case .ms960: 960
+        case .ms2400: 2400
+        }
+    }
+}
+
 /// Apple's on-device `SpeechAnalyzer` needs iOS 26; the demo still runs on iOS 18.
 enum DemoAppleSpeech {
     static var isAvailable: Bool {
@@ -66,6 +100,7 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
     case openAI
     case meta
     case gemini
+    case mistral
     case voz
     case apple
 
@@ -73,7 +108,7 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
 
     /// The providers callable on this OS; Apple needs iOS 26.
     static var allCases: [DemoFileProvider] {
-        let providers: [DemoFileProvider] = [.elevenLabs, .aqua, .cohere, .grok, .openAI, .meta, .gemini, .voz, .apple]
+        let providers: [DemoFileProvider] = [.elevenLabs, .aqua, .cohere, .grok, .openAI, .meta, .gemini, .mistral, .voz, .apple]
         return DemoAppleSpeech.isAvailable ? providers : providers.filter { $0 != .apple }
     }
 
@@ -92,6 +127,7 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
         case .openAI: "OpenAI"
         case .meta: "Meta"
         case .gemini: "Gemini"
+        case .mistral: "Mistral"
         case .voz: "VOZ (On Device)"
         case .apple: "Apple (On Device)"
         }
@@ -108,6 +144,7 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
         case .openAI: .openAI
         case .meta: .meta
         case .gemini: .gemini
+        case .mistral: .mistral
         case .voz: nil
         case .apple: .apple
         }
@@ -128,6 +165,7 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
         case .openAI: .openAI
         case .meta: .meta
         case .gemini: .gemini
+        case .mistral: .mistral
         case .voz, .apple: nil
         }
     }
@@ -140,13 +178,14 @@ enum DemoRealtimeProvider: String, CaseIterable, Identifiable {
     case grok
     case meta
     case gemini
+    case mistral
     case apple
 
     var id: Self { self }
 
     /// The providers callable on this OS; Apple needs iOS 26.
     static var allCases: [DemoRealtimeProvider] {
-        let providers: [DemoRealtimeProvider] = [.elevenLabs, .openAI, .grok, .meta, .gemini, .apple]
+        let providers: [DemoRealtimeProvider] = [.elevenLabs, .openAI, .grok, .meta, .gemini, .mistral, .apple]
         return DemoAppleSpeech.isAvailable ? providers : providers.filter { $0 != .apple }
     }
 
@@ -158,6 +197,7 @@ enum DemoRealtimeProvider: String, CaseIterable, Identifiable {
         case .grok: "Grok"
         case .meta: "Meta"
         case .gemini: "Gemini"
+        case .mistral: "Mistral"
         case .apple: "Apple (On Device)"
         }
     }
@@ -170,6 +210,7 @@ enum DemoRealtimeProvider: String, CaseIterable, Identifiable {
         case .grok: .grok
         case .meta: .meta
         case .gemini: .gemini
+        case .mistral: .mistral
         case .apple: .apple
         }
     }
@@ -182,6 +223,7 @@ enum DemoRealtimeProvider: String, CaseIterable, Identifiable {
         case .grok: .grok
         case .meta: .meta
         case .gemini: .gemini
+        case .mistral: .mistral
         case .apple: nil
         }
     }
@@ -196,6 +238,7 @@ enum DemoAPIKeyProvider: String, CaseIterable, Identifiable {
     case aqua
     case meta
     case gemini
+    case mistral
 
     var id: Self { self }
 
@@ -209,6 +252,7 @@ enum DemoAPIKeyProvider: String, CaseIterable, Identifiable {
         case .aqua: "Aqua"
         case .meta: "Meta"
         case .gemini: "Gemini"
+        case .mistral: "Mistral"
         }
     }
 
@@ -400,6 +444,28 @@ final class DemoConfiguration {
         didSet { set(geminiBackgroundProcessing, for: "geminiBackgroundProcessing") }
     }
 
+    var mistralFileModel: MistralFileTranscriptionModelID {
+        didSet { set(mistralFileModel.rawValue, for: "mistralFileModel") }
+    }
+
+    /// A two-letter ISO 639-1 code for Mistral; empty lets Mistral detect the language.
+    var mistralLanguage: String {
+        didSet { set(mistralLanguage, for: "mistralLanguage") }
+    }
+
+    var mistralContextBias: String {
+        didSet { set(mistralContextBias, for: "mistralContextBias") }
+    }
+
+    /// Labels speakers in both Mistral file transcripts and realtime sessions.
+    var mistralDiarize: Bool {
+        didSet { set(mistralDiarize, for: "mistralDiarize") }
+    }
+
+    var mistralRealtimeDelay: DemoMistralStreamingDelay {
+        didSet { set(mistralRealtimeDelay.rawValue, for: "mistralRealtimeDelay") }
+    }
+
     /// A locale identifier for Apple Speech; empty uses the device's current locale.
     var appleLocaleIdentifier: String {
         didSet { set(appleLocaleIdentifier, for: "appleLocaleIdentifier") }
@@ -462,6 +528,11 @@ final class DemoConfiguration {
         geminiDiarize = defaults.object(forKey: "geminiDiarize") as? Bool ?? false
         geminiWordTimestamps = defaults.object(forKey: "geminiWordTimestamps") as? Bool ?? false
         geminiBackgroundProcessing = defaults.object(forKey: "geminiBackgroundProcessing") as? Bool ?? false
+        mistralFileModel = Self.enumValue(for: "mistralFileModel", default: .voxtralMiniTranscribe3, defaults: defaults)
+        mistralLanguage = defaults.string(forKey: "mistralLanguage") ?? ""
+        mistralContextBias = defaults.string(forKey: "mistralContextBias") ?? ""
+        mistralDiarize = defaults.object(forKey: "mistralDiarize") as? Bool ?? false
+        mistralRealtimeDelay = Self.enumValue(for: "mistralRealtimeDelay", default: .providerDefault, defaults: defaults)
         appleLocaleIdentifier = defaults.string(forKey: "appleLocaleIdentifier") ?? ""
         appleContextualStrings = defaults.string(forKey: "appleContextualStrings") ?? ""
         appleModelRetention = Self.enumValue(for: "appleModelRetention", default: .whileInUse, defaults: defaults)
@@ -608,6 +679,22 @@ final class DemoConfiguration {
             )
         )
 
+        let mistralKey = apiKey(for: .mistral)
+        speech.mistral = mistralKey.isEmpty ? nil : MistralConfiguration(
+            apiKey: mistralKey,
+            fileTranscriptionModelID: mistralFileModel,
+            language: nilIfBlank(mistralLanguage),
+            contextBias: commaSeparatedValues(mistralContextBias),
+            diarize: mistralDiarize,
+            // Diarized sessions drop turn detection and split entries on speaker change.
+            realtimeOptions: MistralRealtimeOptions(
+                targetStreamingDelayMilliseconds: mistralRealtimeDelay.milliseconds,
+                language: nilIfBlank(mistralLanguage),
+                contextBias: commaSeparatedValues(mistralContextBias),
+                diarize: mistralDiarize
+            )
+        )
+
         if #available(iOS 26.0, *) {
             speech.apple = AppleSpeechConfiguration(
                 locale: appleLocale,
@@ -677,9 +764,27 @@ final class DemoConfiguration {
                 timestampGranularities: geminiTimestampGranularities,
                 processingMode: geminiProcessingMode
             )
+        case .mistral:
+            return .mistral(
+                modelID: mistralFileModel,
+                language: nilIfBlank(mistralLanguage),
+                contextBias: commaSeparatedValues(mistralContextBias),
+                diarize: mistralDiarize
+            )
         case .voz, .apple:
             return nil
         }
+    }
+
+    /// Mistral file options for the detailed request the demo makes when diarization is on,
+    /// so the transcript can show who said what.
+    var mistralFileOptions: MistralFileTranscriptionOptions {
+        MistralFileTranscriptionOptions(
+            modelID: mistralFileModel,
+            language: nilIfBlank(mistralLanguage),
+            contextBias: commaSeparatedValues(mistralContextBias),
+            diarize: mistralDiarize
+        )
     }
 
     /// The Meta language bias list built from the single-language demo picker.
@@ -704,7 +809,7 @@ final class DemoConfiguration {
             return grokTimeoutMinutes * 60
         case .openAI:
             return openAITimeoutMinutes * 60
-        case .elevenLabs, .aqua, .cohere, .meta, .gemini, .voz, .apple:
+        case .elevenLabs, .aqua, .cohere, .meta, .gemini, .mistral, .voz, .apple:
             return nil
         }
     }

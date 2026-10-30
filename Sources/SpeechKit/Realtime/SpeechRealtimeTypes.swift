@@ -12,6 +12,8 @@ public enum SpeechRealtimeProvider: String, Sendable, CaseIterable {
     case meta
     /// Gemini 3.5 Transcribe Live realtime transcription.
     case gemini
+    /// Mistral Voxtral Mini Transcribe Realtime transcription.
+    case mistral
     /// Apple local Speech framework realtime transcription.
     ///
     /// SpeechKit only includes this provider in ``allCases`` on iOS 26,
@@ -23,7 +25,7 @@ public enum SpeechRealtimeProvider: String, Sendable, CaseIterable {
 
     /// The realtime providers that are callable on the current OS.
     public static var allCases: [SpeechRealtimeProvider] {
-        var providers: [SpeechRealtimeProvider] = [.elevenLabs, .openAI, .grok, .meta, .gemini]
+        var providers: [SpeechRealtimeProvider] = [.elevenLabs, .openAI, .grok, .meta, .gemini, .mistral]
         #if !os(watchOS)
         if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
             providers.append(.apple)
