@@ -19,6 +19,8 @@ extension SpeechService {
             return geminiRealtimeService.connectionState
         case .mistral:
             return mistralRealtimeService.connectionState
+        case .fishAudio:
+            return fishAudioRealtimeService.connectionState
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -49,6 +51,8 @@ extension SpeechService {
             return geminiRealtimeService.partialTranscriptText
         case .mistral:
             return mistralRealtimeService.partialTranscriptText
+        case .fishAudio:
+            return fishAudioRealtimeService.partialTranscriptText
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -86,6 +90,8 @@ extension SpeechService {
             return geminiRealtimeService.partialTranscriptEntry
         case .mistral:
             return mistralRealtimeService.partialTranscriptEntry
+        case .fishAudio:
+            return fishAudioRealtimeService.partialTranscriptEntry
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -111,6 +117,8 @@ extension SpeechService {
             return geminiRealtimeService.realtimeAudioLevel
         case .mistral:
             return mistralRealtimeService.realtimeAudioLevel
+        case .fishAudio:
+            return fishAudioRealtimeService.realtimeAudioLevel
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -136,6 +144,8 @@ extension SpeechService {
             return geminiRealtimeService.realtimeRecordingData
         case .mistral:
             return mistralRealtimeService.realtimeRecordingData
+        case .fishAudio:
+            return fishAudioRealtimeService.realtimeRecordingData
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -161,6 +171,8 @@ extension SpeechService {
             return geminiRealtimeService.transcriptEntries
         case .mistral:
             return mistralRealtimeService.transcriptEntries
+        case .fishAudio:
+            return fishAudioRealtimeService.transcriptEntries
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -189,6 +201,8 @@ extension SpeechService {
             return geminiRealtimeService.lastError
         case .mistral:
             return mistralRealtimeService.lastError
+        case .fishAudio:
+            return fishAudioRealtimeService.lastError
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -232,6 +246,8 @@ extension SpeechService {
             await startGeminiListening()
         case .mistral:
             await startMistralListening()
+        case .fishAudio:
+            await startFishAudioListening()
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -334,6 +350,21 @@ extension SpeechService {
         await mistralRealtimeService.startListening()
     }
 
+    func startFishAudioListening() async {
+        guard let fishAudio else {
+            fallbackConnectionState = .error("Fish Audio is not configured")
+            fallbackLastError = SpeechError.realtimeProviderNotConfigured(.fishAudio)
+            return
+        }
+
+        fallbackConnectionState = nil
+        fallbackLastError = nil
+        fishAudioRealtimeService.credential = fishAudio.credential
+        fishAudioRealtimeService.realtimeEndpoint = fishAudio.realtimeEndpoint
+        fishAudioRealtimeService.options = fishAudio.realtimeOptions
+        await fishAudioRealtimeService.startListening()
+    }
+
     /// Stops realtime microphone transcription and disconnects from the active provider.
     public func stopListening() async {
         fallbackConnectionState = nil
@@ -355,6 +386,8 @@ extension SpeechService {
             await geminiRealtimeService.stopListening()
         case .mistral:
             await mistralRealtimeService.stopListening()
+        case .fishAudio:
+            await fishAudioRealtimeService.stopListening()
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -381,6 +414,8 @@ extension SpeechService {
             geminiRealtimeService.clearTranscript()
         case .mistral:
             mistralRealtimeService.clearTranscript()
+        case .fishAudio:
+            fishAudioRealtimeService.clearTranscript()
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {

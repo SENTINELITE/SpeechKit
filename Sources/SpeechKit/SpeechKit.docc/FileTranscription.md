@@ -1,6 +1,6 @@
 # File Transcription
 
-Transcribe audio files with ElevenLabs, Aqua, Cohere, Grok, OpenAI, Meta, Gemini, Mistral, or Apple local Speech.
+Transcribe audio files with ElevenLabs, Aqua, Cohere, Grok, OpenAI, Meta, Gemini, Mistral, Fish Audio, or Apple local Speech.
 
 ## Overview
 
@@ -17,7 +17,7 @@ let text = try await speech.transcribeAudioFile(
 )
 ```
 
-Provider defaults come from ``ElevenLabsConfiguration``, ``AquaConfiguration``, ``CohereConfiguration``, ``GrokConfiguration``, ``OpenAIConfiguration``, ``MetaConfiguration``, ``GeminiConfiguration``, ``MistralConfiguration``, and ``AppleSpeechConfiguration``. Override defaults for one request with ``SpeechFileTranscriptionOptions``.
+Provider defaults come from ``ElevenLabsConfiguration``, ``AquaConfiguration``, ``CohereConfiguration``, ``GrokConfiguration``, ``OpenAIConfiguration``, ``MetaConfiguration``, ``GeminiConfiguration``, ``MistralConfiguration``, ``FishAudioConfiguration``, and ``AppleSpeechConfiguration``. Override defaults for one request with ``SpeechFileTranscriptionOptions``.
 
 ```swift
 let text = try await speech.transcribeAudioFile(
@@ -116,6 +116,24 @@ print(mistralResponse.text)
 print(mistralResponse.segments)
 ```
 
+Fish Audio returns word segments and punctuated speaker turns when ``FishAudioFileTranscriptionOptions/timestamps`` is `true`, the default. SpeechKit always sends the `transcribe-1-pro` model header. The response keeps Fish Audio's raw fields, and adds ``FishAudioFileTranscriptionResponse/transcriptText`` without speaker markers and ``FishAudioFileTranscriptionResponse/words``, where each word carries its speaker and, where SpeechKit can match it, punctuation from the speaker turns.
+
+```swift
+let fishAudioResponse = try await speech.transcribeFishAudioAudioFile(
+    file: audioFileURL,
+    options: FishAudioFileTranscriptionOptions(
+        language: "en",
+        diarize: .on,
+        speakerCount: .exact(2)
+    )
+)
+
+print(fishAudioResponse.transcriptText)
+print(fishAudioResponse.words)
+```
+
+Fish Audio responds only after the whole file is transcribed, so ``FishAudioFileTranscriptionOptions/timeoutInterval`` defaults to 15 minutes. A ``FishAudioSpeakerCount`` cannot be combined with ``FishAudioDiarization/off``.
+
 Apple local Speech file transcription runs on device on iOS 26, macOS 26, and visionOS 26. It is not available on watchOS.
 
 ```swift
@@ -159,6 +177,7 @@ SpeechKit validates uploads before sending them: unsupported file types and file
 | --- | --- | --- | --- |
 | Meta | WAV | 32 MB | 10 minutes |
 | Gemini | WAV, MP3, AIFF, AAC, OGG, Opus, FLAC, M4A, WebM | 20 MB inline, then the Files API | 1 hour, or 30 minutes with diarization or word timestamps |
+| Fish Audio | WAV, MP3, AAC, M4A, MP4, FLAC, Ogg Opus or Vorbis, WebM, MOV; not AIFF or CAF | Not published; send compressed audio | 60 minutes |
 
 For provider-by-provider setup examples, see <doc:ProviderHowToGuides>.
 
@@ -183,6 +202,7 @@ The `options` value must match the selected provider. Passing `.elevenLabs(...)`
 - ``SpeechService/transcribeMetaAudioFile(file:options:)``
 - ``SpeechService/transcribeGeminiAudioFile(file:options:)``
 - ``SpeechService/transcribeMistralAudioFile(file:options:)``
+- ``SpeechService/transcribeFishAudioAudioFile(file:options:)``
 - ``SpeechService/transcribeAppleAudioFile(file:options:)``
 - ``ElevenLabsFileTranscriptionResponse``
 - ``ElevenLabsWordTimestamp``
@@ -199,6 +219,11 @@ The `options` value must match the selected provider. Passing `.elevenLabs(...)`
 - ``MistralFileTranscriptionResponse``
 - ``MistralTranscriptionSegment``
 - ``MistralTranscriptionUsage``
+- ``FishAudioFileTranscriptionOptions``
+- ``FishAudioFileTranscriptionResponse``
+- ``FishAudioTranscriptionSegment``
+- ``FishAudioSpeakerTurn``
+- ``FishAudioTranscriptWord``
 - ``AppleSpeechFileTranscriptionResponse``
 - ``AppleSpeechFileTranscriptionOptions``
 - ``OpenAIDiarizationChunkingStrategy``

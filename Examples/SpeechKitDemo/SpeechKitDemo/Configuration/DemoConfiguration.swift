@@ -101,6 +101,7 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
     case meta
     case gemini
     case mistral
+    case fishAudio
     case voz
     case apple
 
@@ -108,7 +109,7 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
 
     /// The providers callable on this OS; Apple needs iOS 26.
     static var allCases: [DemoFileProvider] {
-        let providers: [DemoFileProvider] = [.elevenLabs, .aqua, .cohere, .grok, .openAI, .meta, .gemini, .mistral, .voz, .apple]
+        let providers: [DemoFileProvider] = [.elevenLabs, .aqua, .cohere, .grok, .openAI, .meta, .gemini, .mistral, .fishAudio, .voz, .apple]
         return DemoAppleSpeech.isAvailable ? providers : providers.filter { $0 != .apple }
     }
 
@@ -128,6 +129,7 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
         case .meta: "Meta"
         case .gemini: "Gemini"
         case .mistral: "Mistral"
+        case .fishAudio: "Fish Audio"
         case .voz: "VOZ (On Device)"
         case .apple: "Apple (On Device)"
         }
@@ -145,6 +147,7 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
         case .meta: .meta
         case .gemini: .gemini
         case .mistral: .mistral
+        case .fishAudio: .fishAudio
         case .voz: nil
         case .apple: .apple
         }
@@ -166,6 +169,7 @@ enum DemoFileProvider: String, CaseIterable, Identifiable {
         case .meta: .meta
         case .gemini: .gemini
         case .mistral: .mistral
+        case .fishAudio: .fishAudio
         case .voz, .apple: nil
         }
     }
@@ -179,13 +183,14 @@ enum DemoRealtimeProvider: String, CaseIterable, Identifiable {
     case meta
     case gemini
     case mistral
+    case fishAudio
     case apple
 
     var id: Self { self }
 
     /// The providers callable on this OS; Apple needs iOS 26.
     static var allCases: [DemoRealtimeProvider] {
-        let providers: [DemoRealtimeProvider] = [.elevenLabs, .openAI, .grok, .meta, .gemini, .mistral, .apple]
+        let providers: [DemoRealtimeProvider] = [.elevenLabs, .openAI, .grok, .meta, .gemini, .mistral, .fishAudio, .apple]
         return DemoAppleSpeech.isAvailable ? providers : providers.filter { $0 != .apple }
     }
 
@@ -198,6 +203,7 @@ enum DemoRealtimeProvider: String, CaseIterable, Identifiable {
         case .meta: "Meta"
         case .gemini: "Gemini"
         case .mistral: "Mistral"
+        case .fishAudio: "Fish Audio"
         case .apple: "Apple (On Device)"
         }
     }
@@ -211,6 +217,7 @@ enum DemoRealtimeProvider: String, CaseIterable, Identifiable {
         case .meta: .meta
         case .gemini: .gemini
         case .mistral: .mistral
+        case .fishAudio: .fishAudio
         case .apple: .apple
         }
     }
@@ -224,6 +231,7 @@ enum DemoRealtimeProvider: String, CaseIterable, Identifiable {
         case .meta: .meta
         case .gemini: .gemini
         case .mistral: .mistral
+        case .fishAudio: .fishAudio
         case .apple: nil
         }
     }
@@ -239,6 +247,7 @@ enum DemoAPIKeyProvider: String, CaseIterable, Identifiable {
     case meta
     case gemini
     case mistral
+    case fishAudio
 
     var id: Self { self }
 
@@ -253,6 +262,7 @@ enum DemoAPIKeyProvider: String, CaseIterable, Identifiable {
         case .meta: "Meta"
         case .gemini: "Gemini"
         case .mistral: "Mistral"
+        case .fishAudio: "Fish Audio"
         }
     }
 
@@ -466,6 +476,38 @@ final class DemoConfiguration {
         didSet { set(mistralRealtimeDelay.rawValue, for: "mistralRealtimeDelay") }
     }
 
+    /// A lowercase two-letter ISO 639-1 hint for Fish Audio files; empty lets Fish Audio detect the language.
+    var fishAudioLanguage: String {
+        didSet { set(fishAudioLanguage, for: "fishAudioLanguage") }
+    }
+
+    var fishAudioDiarize: FishAudioDiarization {
+        didSet { set(fishAudioDiarize.rawValue, for: "fishAudioDiarize") }
+    }
+
+    /// Word segments and speaker turns; off is faster but returns plain text only.
+    var fishAudioTimestamps: Bool {
+        didSet { set(fishAudioTimestamps, for: "fishAudioTimestamps") }
+    }
+
+    /// Keeps sound cues such as `[laughter]` in file transcripts.
+    var fishAudioTagAudioEvents: Bool {
+        didSet { set(fishAudioTagAudioEvents, for: "fishAudioTagAudioEvents") }
+    }
+
+    var fishAudioRealtimeMode: FishAudioTurnDetectionMode {
+        didSet { set(fishAudioRealtimeMode.rawValue, for: "fishAudioRealtimeMode") }
+    }
+
+    var fishAudioRealtimeDiarize: Bool {
+        didSet { set(fishAudioRealtimeDiarize, for: "fishAudioRealtimeDiarize") }
+    }
+
+    /// Recognition terms for Fish Audio realtime sessions.
+    var fishAudioRealtimeTerms: String {
+        didSet { set(fishAudioRealtimeTerms, for: "fishAudioRealtimeTerms") }
+    }
+
     /// A locale identifier for Apple Speech; empty uses the device's current locale.
     var appleLocaleIdentifier: String {
         didSet { set(appleLocaleIdentifier, for: "appleLocaleIdentifier") }
@@ -533,6 +575,13 @@ final class DemoConfiguration {
         mistralContextBias = defaults.string(forKey: "mistralContextBias") ?? ""
         mistralDiarize = defaults.object(forKey: "mistralDiarize") as? Bool ?? false
         mistralRealtimeDelay = Self.enumValue(for: "mistralRealtimeDelay", default: .providerDefault, defaults: defaults)
+        fishAudioLanguage = defaults.string(forKey: "fishAudioLanguage") ?? ""
+        fishAudioDiarize = Self.enumValue(for: "fishAudioDiarize", default: .auto, defaults: defaults)
+        fishAudioTimestamps = defaults.object(forKey: "fishAudioTimestamps") as? Bool ?? true
+        fishAudioTagAudioEvents = defaults.object(forKey: "fishAudioTagAudioEvents") as? Bool ?? true
+        fishAudioRealtimeMode = Self.enumValue(for: "fishAudioRealtimeMode", default: .auto, defaults: defaults)
+        fishAudioRealtimeDiarize = defaults.object(forKey: "fishAudioRealtimeDiarize") as? Bool ?? true
+        fishAudioRealtimeTerms = defaults.string(forKey: "fishAudioRealtimeTerms") ?? ""
         appleLocaleIdentifier = defaults.string(forKey: "appleLocaleIdentifier") ?? ""
         appleContextualStrings = defaults.string(forKey: "appleContextualStrings") ?? ""
         appleModelRetention = Self.enumValue(for: "appleModelRetention", default: .whileInUse, defaults: defaults)
@@ -695,6 +744,21 @@ final class DemoConfiguration {
             )
         )
 
+        let fishAudioKey = apiKey(for: .fishAudio)
+        speech.fishAudio = fishAudioKey.isEmpty ? nil : FishAudioConfiguration(
+            apiKey: fishAudioKey,
+            language: nilIfBlank(fishAudioLanguage),
+            timestamps: fishAudioTimestamps,
+            diarize: fishAudioDiarize,
+            tagAudioEvents: fishAudioTagAudioEvents,
+            // Fish Audio bills realtime sessions while the socket is open, idle time included.
+            realtimeOptions: FishAudioRealtimeOptions(
+                mode: fishAudioRealtimeMode,
+                diarize: fishAudioRealtimeDiarize,
+                terms: commaSeparatedValues(fishAudioRealtimeTerms)
+            )
+        )
+
         if #available(iOS 26.0, *) {
             speech.apple = AppleSpeechConfiguration(
                 locale: appleLocale,
@@ -771,6 +835,13 @@ final class DemoConfiguration {
                 contextBias: commaSeparatedValues(mistralContextBias),
                 diarize: mistralDiarize
             )
+        case .fishAudio:
+            return .fishAudio(
+                language: nilIfBlank(fishAudioLanguage),
+                timestamps: fishAudioTimestamps,
+                diarize: fishAudioDiarize,
+                tagAudioEvents: fishAudioTagAudioEvents
+            )
         case .voz, .apple:
             return nil
         }
@@ -785,6 +856,22 @@ final class DemoConfiguration {
             contextBias: commaSeparatedValues(mistralContextBias),
             diarize: mistralDiarize
         )
+    }
+
+    /// Fish Audio file options for the detailed request the demo makes when speaker
+    /// turns are available, so the transcript can show who said what.
+    var fishAudioFileOptions: FishAudioFileTranscriptionOptions {
+        FishAudioFileTranscriptionOptions(
+            language: nilIfBlank(fishAudioLanguage),
+            timestamps: fishAudioTimestamps,
+            diarize: fishAudioDiarize,
+            tagAudioEvents: fishAudioTagAudioEvents
+        )
+    }
+
+    /// Whether a Fish Audio file request returns speaker turns worth showing.
+    var fishAudioReturnsSpeakers: Bool {
+        fishAudioTimestamps && fishAudioDiarize != .off
     }
 
     /// The Meta language bias list built from the single-language demo picker.
@@ -809,6 +896,8 @@ final class DemoConfiguration {
             return grokTimeoutMinutes * 60
         case .openAI:
             return openAITimeoutMinutes * 60
+        case .fishAudio:
+            return fishAudioFileOptions.timeoutInterval
         case .elevenLabs, .aqua, .cohere, .meta, .gemini, .mistral, .voz, .apple:
             return nil
         }

@@ -236,6 +236,11 @@ struct FileTranscriptionView: View {
                 let response = try await speech.transcribeMistralAudioFile(securityScopedURL: url, options: configuration.mistralFileOptions)
                 guard ownsCurrentResult(for: provider, requestID: requestID) else { return }
                 transcript = response.speakerLabeledText
+            } else if provider == .fishAudio, configuration.fishAudioReturnsSpeakers {
+                // The detailed response carries speaker turns that the plain-text path drops.
+                let response = try await speech.transcribeFishAudioAudioFile(securityScopedURL: url, options: configuration.fishAudioFileOptions)
+                guard ownsCurrentResult(for: provider, requestID: requestID) else { return }
+                transcript = response.speakerLabeledText
             } else if let speechProvider = provider.speechProvider {
                 let response = try await speech.transcribeAudioFile(
                     provider: speechProvider,

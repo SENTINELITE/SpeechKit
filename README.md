@@ -3,14 +3,14 @@
 [![CI](https://github.com/SENTINELITE/SpeechKit/actions/workflows/ci.yml/badge.svg)](https://github.com/SENTINELITE/SpeechKit/actions/workflows/ci.yml)
 ![Swift](https://img.shields.io/badge/Swift-6.2-orange.svg)
 ![Platforms](https://img.shields.io/badge/platforms-iOS%2018%20%7C%20macOS%2015%20%7C%20watchOS%2011%20%7C%20visionOS%202-lightgrey.svg)
-![Status](https://img.shields.io/badge/status-2.0.1-blue.svg)
+![Status](https://img.shields.io/badge/status-2.1.0-blue.svg)
 
 SpeechKit is a Swift package for adding speech-to-text to Swift and SwiftUI apps with a small async/await API.
 
 It supports two workflows:
 
-- Realtime microphone transcription with ElevenLabs, OpenAI, xAI Grok, Meta, Gemini, Mistral, and Apple local Speech on supported OS versions.
-- File transcription with ElevenLabs, Aqua, Cohere, Grok, OpenAI, Meta, Gemini, Mistral, and Apple local Speech on supported OS versions.
+- Realtime microphone transcription with ElevenLabs, OpenAI, xAI Grok, Meta, Gemini, Mistral, Fish Audio, and Apple local Speech on supported OS versions.
+- File transcription with ElevenLabs, Aqua, Cohere, Grok, OpenAI, Meta, Gemini, Mistral, Fish Audio, and Apple local Speech on supported OS versions.
 
 ## Highlights
 
@@ -20,13 +20,14 @@ It supports two workflows:
 - Provider-specific options and detailed responses when you need timestamps, diarization, usage metadata, or model-specific controls.
 - Meta Muse Voice Transcribe and Gemini 3.5 Transcribe for both realtime sessions and file uploads.
 - Mistral Voxtral Transcribe 3 for realtime sessions and file uploads, with speaker diarization you can turn on per request or per session.
+- Fish Audio Transcribe 1 Pro for file uploads and Transcribe Stream 1 (in preview) for realtime sessions, with speaker labels and word timings.
 - On-device Apple Speech support for apps running on iOS 26, macOS 26, or visionOS 26.
 - Security-scoped file overloads for document picker workflows.
 - A runnable iOS demo app for trying realtime transcription, recorded dictation uploads, and file transcription.
 
 ## Status
 
-SpeechKit `2.0.1` is the current stable release. The 2.0 line adds Meta and Gemini providers, short-lived credentials, and endpoint overrides. It is a major version because the provider enums gained cases, which affects exhaustive switches in adopting code. Future source-breaking API changes will ship in a new major version.
+SpeechKit `2.1.0` is the current stable release. 2.1 adds the Mistral and Fish Audio providers. It is a minor release: the provider enums gained `mistral` and `fishAudio` cases, which affects exhaustive switches in adopting code, and every other change is additive. The 2.0 line added Meta and Gemini providers, short-lived credentials, and endpoint overrides. Future source-breaking API changes will ship in a new major version.
 
 ## Sponsor the project
 > <img width="1500" height="500" alt="SpeechKit" src="https://github.com/user-attachments/assets/3f3b68e7-37fb-46c7-a139-2b513b2e184c" />
@@ -110,8 +111,11 @@ Provider references:
 - Meta documents Muse Voice Transcribe authentication in its [speech-to-text documentation](https://dev.meta.ai/docs/speech-to-text/).
 - Google documents API key handling and ephemeral tokens in its [Gemini API key guide](https://ai.google.dev/gemini-api/docs/api-key).
 - Mistral documents Voxtral transcription and its API key header in its [speech-to-text documentation](https://docs.mistral.ai/studio/audio/speech-to-text/overview).
+- Fish Audio documents bearer authentication for file transcription in its [Speech to Text API reference](https://docs.fish.audio/api-reference/endpoint/openapi-v1/speech-to-text) and for realtime sessions in its [Realtime STT WebSocket reference](https://docs.fish.audio/api-reference/endpoint/websocket/asr-realtime).
 
 The Gemini Live WebSocket carries the API key in the URL query string, so a backend proxy or Google's ephemeral tokens are the safer production path for realtime Gemini sessions. When you pass a Google ephemeral token, SpeechKit sends it in an `Authorization: Token` header instead and keeps it out of the URL.
+
+Fish Audio has no short-lived tokens. A Fish Audio key in a shipped app can be extracted and used to run transcription on your account, so route Fish Audio traffic through your own proxy. A `.token` credential works, but SpeechKit sends its value as the same bearer secret as an API key.
 
 ### Short-Lived Tokens
 
@@ -137,7 +141,7 @@ First-party short-lived tokens:
 | ElevenLabs | Single-use token for realtime Scribe |
 | OpenAI | Ephemeral client secret for Realtime |
 | Google Gemini | Ephemeral token for Live (Live only, not REST) |
-| Aqua, Cohere, Grok, Meta, Mistral | No first-party token: use your own proxy |
+| Aqua, Cohere, Grok, Meta, Mistral, Fish Audio | No first-party token: use your own proxy |
 
 Google ephemeral tokens only authorize Gemini Live. A token used for Gemini file transcription must be an OAuth access token or a credential your own proxy accepts, because SpeechKit sends it as `Authorization: Bearer`.
 
@@ -374,6 +378,34 @@ for entry in speech.transcriptEntries {
 ```
 
 Mistral cannot combine diarization with turn detection, so with `diarize` on SpeechKit leaves turn detection out and starts a new entry each time the speaker changes. Add `speakerReferences` (up to 8 clips of 3 to 15 seconds) to label known voices by name instead of `speaker_1`, `speaker_2`. Mistral locks the settings when the first audio chunk arrives, so a change applies to the next session.
+
+### Realtime: Fish Audio
+
+Fish Audio Transcribe Stream 1 streams 16-bit mono PCM, 16 kHz by default. The realtime model is in preview, so its behavior may change. `FishAudioRealtimeOptions` sets turn detection, live drafts, word timings, diarization, and recognition terms.
+
+```swift
+let speech = SpeechService(
+    fishAudio: FishAudioConfiguration(
+        apiKey: "<FISH_AUDIO_API_KEY>",
+        realtimeOptions: FishAudioRealtimeOptions(
+            mode: .auto,
+            terms: ["SpeechKit", "Northwind"]
+        )
+    )
+)
+
+await speech.startListening(provider: .fishAudio)
+
+for entry in speech.transcriptEntries {
+    print(entry.speaker ?? "?", entry.text)
+}
+```
+
+Fish Audio transcribes turn by turn. The open turn's latest draft is the partial entry, and each committed turn becomes one final entry per speaker, labeled `speaker:0`, `speaker:1`, and so on. Diarization, drafts, and word timings are on by default.
+
+In `.auto` mode Fish Audio marks other voices and noise as non-user turns. SpeechKit keeps them, so a transcript of a room still includes everyone. `SpeechService` does not report turn kinds. If you only want the user's turns, drive a `FishAudioRealtimeService` directly and read `kind` from `committedTurns` or `turn(for:)`. Use `.vad` to end turns after a silence, or `.manual` with `FishAudioRealtimeService.finalizeTurn()` for push-to-talk.
+
+Fish Audio bills a realtime session for every second the socket is open, idle time included. Call `stopListening()` as soon as you are done. Sessions last up to 60 minutes.
 
 ### Realtime: Apple Local Speech
 
@@ -652,6 +684,45 @@ for segment in response.segments {
 ```
 
 Mistral returns timestamps per segment only. Diarization requires segment timestamps, so SpeechKit requests them whenever `diarize` is on. `contextBias` entries can be names, multi-word terms, or a sentence that describes the recording.
+
+### File: Fish Audio
+
+Fish Audio file transcription uses Transcribe 1 Pro. The provider-neutral API returns text without speaker markers. Sound cues such as `[laughter]` stay in the text unless you set `tagAudioEvents` to `false`.
+
+```swift
+let text = try await speech.transcribeAudioFile(
+    provider: .fishAudio,
+    file: audioFileURL,
+    options: .fishAudio(language: "en", speakerCount: .exact(2))
+)
+```
+
+Use the detailed call when you want speaker labels and word timings:
+
+```swift
+let speech = SpeechService(
+    fishAudio: FishAudioConfiguration(
+        apiKey: "<FISH_AUDIO_API_KEY>",
+        diarize: .on,
+        speakerCount: .range(min: 2, max: 4)
+    )
+)
+
+let response = try await speech.transcribeFishAudioAudioFile(file: audioFileURL)
+print(response.transcriptText)
+for word in response.words {
+    print(word.speaker ?? "?", word.start ?? 0, word.end ?? 0, word.text)
+}
+```
+
+`words` comes from Fish Audio's word segments. SpeechKit labels each word with its speaker and copies punctuation from the punctuated speaker turns where the two match. The raw `text`, `segments`, and `speakerTurns` are also on the response. Timestamps are on by default; set `timestamps` to `false` for a faster request with no words.
+
+Fish Audio limits:
+
+- Audio can be up to 60 minutes long. SpeechKit checks the duration before uploading.
+- AIFF and CAF files are rejected. SpeechKit throws before uploading them, so convert recordings to M4A, WAV, MP3, or FLAC first.
+- The request returns only when the whole file is done, so long files take minutes. The default timeout is 15 minutes.
+- `language` is a lowercase two-letter code such as `"en"`. It helps detection but does not force the language.
 
 ### File: Apple Local Speech
 

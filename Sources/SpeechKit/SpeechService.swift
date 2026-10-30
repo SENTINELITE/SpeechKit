@@ -33,6 +33,10 @@ public final class SpeechService {
     public var mistral: MistralConfiguration? {
         didSet { applyMistralRealtimeConfig() }
     }
+    /// The Fish Audio configuration used for Fish Audio realtime and file transcription.
+    public var fishAudio: FishAudioConfiguration? {
+        didSet { applyFishAudioRealtimeConfig() }
+    }
     /// The Apple local Speech configuration used for realtime and file transcription.
     @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
     @available(watchOS, unavailable)
@@ -47,6 +51,7 @@ public final class SpeechService {
     let metaRealtimeService: MetaRealtimeService
     let geminiRealtimeService: GeminiRealtimeService
     let mistralRealtimeService: MistralRealtimeService
+    let fishAudioRealtimeService: FishAudioRealtimeService
     let urlSession: URLSession
     var appleConfigurationStorage: Any?
     var appleRealtimeServiceStorage: Any?
@@ -70,7 +75,8 @@ public final class SpeechService {
         openAI: OpenAIConfiguration? = nil,
         meta: MetaConfiguration? = nil,
         gemini: GeminiConfiguration? = nil,
-        mistral: MistralConfiguration? = nil
+        mistral: MistralConfiguration? = nil,
+        fishAudio: FishAudioConfiguration? = nil
     ) {
         self.elevenLabs = elevenLabs
         self.cohere = cohere
@@ -80,12 +86,14 @@ public final class SpeechService {
         self.meta = meta
         self.gemini = gemini
         self.mistral = mistral
+        self.fishAudio = fishAudio
         self.elevenLabsRealtimeService = ElevenLabsService()
         self.openAIRealtimeService = OpenAIRealtimeService()
         self.grokRealtimeService = GrokRealtimeService()
         self.metaRealtimeService = MetaRealtimeService()
         self.geminiRealtimeService = GeminiRealtimeService()
         self.mistralRealtimeService = MistralRealtimeService()
+        self.fishAudioRealtimeService = FishAudioRealtimeService()
         self.urlSession = .shared
         applyRealtimeConfig()
         applyOpenAIRealtimeConfig()
@@ -93,12 +101,13 @@ public final class SpeechService {
         applyMetaRealtimeConfig()
         applyGeminiRealtimeConfig()
         applyMistralRealtimeConfig()
+        applyFishAudioRealtimeConfig()
     }
 
     /// Creates a speech service with Apple local Speech configuration.
     ///
     /// Use this initializer only on OS versions that expose `SpeechAnalyzer`
-    /// and `SpeechTranscriber`. The base ``SpeechService/init(elevenLabs:cohere:grok:aqua:openAI:meta:gemini:mistral:)``
+    /// and `SpeechTranscriber`. The base ``SpeechService/init(elevenLabs:cohere:grok:aqua:openAI:meta:gemini:mistral:fishAudio:)``
     /// initializer remains available for the package's lower deployment targets.
     @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
     @available(watchOS, unavailable)
@@ -111,6 +120,7 @@ public final class SpeechService {
         meta: MetaConfiguration? = nil,
         gemini: GeminiConfiguration? = nil,
         mistral: MistralConfiguration? = nil,
+        fishAudio: FishAudioConfiguration? = nil,
         apple: AppleSpeechConfiguration? = nil
     ) {
         self.init(
@@ -121,7 +131,8 @@ public final class SpeechService {
             openAI: openAI,
             meta: meta,
             gemini: gemini,
-            mistral: mistral
+            mistral: mistral,
+            fishAudio: fishAudio
         )
         self.apple = apple
     }
@@ -135,13 +146,15 @@ public final class SpeechService {
         meta: MetaConfiguration? = nil,
         gemini: GeminiConfiguration? = nil,
         mistral: MistralConfiguration? = nil,
+        fishAudio: FishAudioConfiguration? = nil,
         urlSession: URLSession,
         elevenLabsRealtimeService: ElevenLabsService,
         openAIRealtimeService: OpenAIRealtimeService = OpenAIRealtimeService(),
         grokRealtimeService: GrokRealtimeService = GrokRealtimeService(),
         metaRealtimeService: MetaRealtimeService = MetaRealtimeService(),
         geminiRealtimeService: GeminiRealtimeService = GeminiRealtimeService(),
-        mistralRealtimeService: MistralRealtimeService = MistralRealtimeService()
+        mistralRealtimeService: MistralRealtimeService = MistralRealtimeService(),
+        fishAudioRealtimeService: FishAudioRealtimeService = FishAudioRealtimeService()
     ) {
         self.elevenLabs = elevenLabs
         self.cohere = cohere
@@ -151,6 +164,7 @@ public final class SpeechService {
         self.meta = meta
         self.gemini = gemini
         self.mistral = mistral
+        self.fishAudio = fishAudio
         self.urlSession = urlSession
         self.elevenLabsRealtimeService = elevenLabsRealtimeService
         self.openAIRealtimeService = openAIRealtimeService
@@ -158,12 +172,14 @@ public final class SpeechService {
         self.metaRealtimeService = metaRealtimeService
         self.geminiRealtimeService = geminiRealtimeService
         self.mistralRealtimeService = mistralRealtimeService
+        self.fishAudioRealtimeService = fishAudioRealtimeService
         applyRealtimeConfig()
         applyOpenAIRealtimeConfig()
         applyGrokRealtimeConfig()
         applyMetaRealtimeConfig()
         applyGeminiRealtimeConfig()
         applyMistralRealtimeConfig()
+        applyFishAudioRealtimeConfig()
     }
 
     private func applyRealtimeConfig() {
@@ -209,6 +225,14 @@ public final class SpeechService {
         mistralRealtimeService.realtimeEndpoint = mistral?.realtimeEndpoint
         if let mistral {
             mistralRealtimeService.options = mistral.realtimeOptions
+        }
+    }
+
+    private func applyFishAudioRealtimeConfig() {
+        fishAudioRealtimeService.credential = fishAudio?.credential ?? .apiKey("")
+        fishAudioRealtimeService.realtimeEndpoint = fishAudio?.realtimeEndpoint
+        if let fishAudio {
+            fishAudioRealtimeService.options = fishAudio.realtimeOptions
         }
     }
 

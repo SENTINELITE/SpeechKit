@@ -879,6 +879,103 @@ public struct MistralConfiguration: Sendable, Equatable {
     }
 }
 
+/// Configuration for Fish Audio file and realtime transcription.
+///
+/// Fish Audio has no short-lived tokens. A ``SpeechCredential/token(_:)``
+/// credential works, but its value is sent as the same bearer secret as an
+/// API key, so fetch it from your own backend rather than shipping a key in
+/// the app.
+public struct FishAudioConfiguration: Sendable, Equatable {
+    /// The credential used for Fish Audio requests.
+    public var credential: SpeechCredential
+    /// The Fish Audio API key used for Fish Audio requests.
+    ///
+    /// Reading this property returns the key for a ``SpeechCredential/apiKey(_:)``
+    /// credential and an empty string for a ``SpeechCredential/token(_:)``
+    /// credential. Writing it replaces ``credential`` with
+    /// ``SpeechCredential/apiKey(_:)``.
+    public var apiKey: String {
+        get { credential.staticAPIKey }
+        set { credential = .apiKey(newValue) }
+    }
+    /// The Fish Audio model used for file transcription.
+    public var fileTranscriptionModelID: FishAudioFileTranscriptionModelID
+    /// A lowercase two-letter ISO 639-1 language hint used for file transcription, or `nil` to let Fish Audio detect the language.
+    public var language: String?
+    /// A Boolean value that indicates whether file transcription returns word segments and speaker turns.
+    public var timestamps: Bool
+    /// The speaker diarization mode used for file transcription.
+    public var diarize: FishAudioDiarization
+    /// An optional speaker count hint used for file transcription.
+    public var speakerCount: FishAudioSpeakerCount?
+    /// A Boolean value that indicates whether file transcripts keep sound cues such as `[laughter]`.
+    public var tagAudioEvents: Bool
+    /// The default Fish Audio realtime transcription options.
+    public var realtimeOptions: FishAudioRealtimeOptions
+    /// The network timeout for Fish Audio file uploads.
+    public var timeoutInterval: TimeInterval
+    /// An override for the Fish Audio file transcription endpoint, or `nil` to use the vendor default.
+    public var fileEndpoint: URL?
+    /// An override for the Fish Audio realtime WebSocket endpoint, or `nil` to use the vendor default.
+    public var realtimeEndpoint: URL?
+
+    /// Creates a Fish Audio configuration with a long-lived API key.
+    public init(
+        apiKey: String,
+        fileTranscriptionModelID: FishAudioFileTranscriptionModelID = .transcribe1Pro,
+        language: String? = nil,
+        timestamps: Bool = true,
+        diarize: FishAudioDiarization = .auto,
+        speakerCount: FishAudioSpeakerCount? = nil,
+        tagAudioEvents: Bool = true,
+        realtimeOptions: FishAudioRealtimeOptions = FishAudioRealtimeOptions(),
+        timeoutInterval: TimeInterval = 15 * 60,
+        fileEndpoint: URL? = nil,
+        realtimeEndpoint: URL? = nil
+    ) {
+        self.init(
+            credential: .apiKey(apiKey),
+            fileTranscriptionModelID: fileTranscriptionModelID,
+            language: language,
+            timestamps: timestamps,
+            diarize: diarize,
+            speakerCount: speakerCount,
+            tagAudioEvents: tagAudioEvents,
+            realtimeOptions: realtimeOptions,
+            timeoutInterval: timeoutInterval,
+            fileEndpoint: fileEndpoint,
+            realtimeEndpoint: realtimeEndpoint
+        )
+    }
+
+    /// Creates a Fish Audio configuration with any credential.
+    public init(
+        credential: SpeechCredential,
+        fileTranscriptionModelID: FishAudioFileTranscriptionModelID = .transcribe1Pro,
+        language: String? = nil,
+        timestamps: Bool = true,
+        diarize: FishAudioDiarization = .auto,
+        speakerCount: FishAudioSpeakerCount? = nil,
+        tagAudioEvents: Bool = true,
+        realtimeOptions: FishAudioRealtimeOptions = FishAudioRealtimeOptions(),
+        timeoutInterval: TimeInterval = 15 * 60,
+        fileEndpoint: URL? = nil,
+        realtimeEndpoint: URL? = nil
+    ) {
+        self.credential = credential
+        self.fileTranscriptionModelID = fileTranscriptionModelID
+        self.language = language
+        self.timestamps = timestamps
+        self.diarize = diarize
+        self.speakerCount = speakerCount
+        self.tagAudioEvents = tagAudioEvents
+        self.realtimeOptions = realtimeOptions
+        self.timeoutInterval = timeoutInterval
+        self.fileEndpoint = fileEndpoint
+        self.realtimeEndpoint = realtimeEndpoint
+    }
+}
+
 /// A provider that can transcribe uploaded audio files.
 public enum SpeechFileTranscriptionProvider: String, Sendable, CaseIterable {
     /// ElevenLabs Scribe file transcription.
@@ -897,6 +994,8 @@ public enum SpeechFileTranscriptionProvider: String, Sendable, CaseIterable {
     case gemini
     /// Mistral Voxtral Transcribe file transcription.
     case mistral
+    /// Fish Audio Transcribe 1 Pro file transcription.
+    case fishAudio
     /// Apple local Speech framework file transcription.
     ///
     /// SpeechKit only includes this provider in ``allCases`` on iOS 26,
@@ -908,7 +1007,7 @@ public enum SpeechFileTranscriptionProvider: String, Sendable, CaseIterable {
 
     /// The file transcription providers that are callable on the current OS.
     public static var allCases: [SpeechFileTranscriptionProvider] {
-        var providers: [SpeechFileTranscriptionProvider] = [.elevenLabs, .aqua, .cohere, .grok, .openAI, .meta, .gemini, .mistral]
+        var providers: [SpeechFileTranscriptionProvider] = [.elevenLabs, .aqua, .cohere, .grok, .openAI, .meta, .gemini, .mistral, .fishAudio]
         #if !os(watchOS)
         if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
             providers.append(.apple)
@@ -984,6 +1083,16 @@ public enum SpeechFileTranscriptionOptions: Sendable, Equatable {
         temperature: Double? = nil,
         timeoutInterval: TimeInterval? = nil
     )
+    /// Options for a Fish Audio file transcription request.
+    case fishAudio(
+        modelID: FishAudioFileTranscriptionModelID? = nil,
+        language: String? = nil,
+        timestamps: Bool? = nil,
+        diarize: FishAudioDiarization? = nil,
+        speakerCount: FishAudioSpeakerCount? = nil,
+        tagAudioEvents: Bool? = nil,
+        timeoutInterval: TimeInterval? = nil
+    )
     /// Options for an Apple local file transcription request.
     ///
     /// These options are only meaningful when the request runs on iOS 26,
@@ -1015,6 +1124,8 @@ public enum SpeechFileTranscriptionOptions: Sendable, Equatable {
             return .gemini
         case .mistral:
             return .mistral
+        case .fishAudio:
+            return .fishAudio
         #if !os(watchOS)
         case .apple:
             return .apple

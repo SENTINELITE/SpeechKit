@@ -143,6 +143,24 @@ extension SpeechService {
                 throw wrap(error, for: .mistral)
             }
 
+        case .fishAudio:
+            guard let fishAudio else {
+                throw SpeechError.providerNotConfigured(.fishAudio)
+            }
+            try validate(options: options, for: .fishAudio)
+            let resolvedOptions = resolvedFishAudioOptions(from: options, config: fishAudio)
+            let client = FishAudioFileTranscriptionClient(
+                credential: fishAudio.credential,
+                endpoint: fishAudio.fileEndpoint,
+                urlSession: urlSession
+            )
+
+            do {
+                return try await client.transcribeAudioFile(file: file, options: resolvedOptions)
+            } catch {
+                throw wrap(error, for: .fishAudio)
+            }
+
         #if !os(watchOS)
         case .apple:
             if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -490,6 +508,54 @@ extension SpeechService {
         return try await transcribeMistralAudioFile(file: securityScopedURL, options: options)
     }
 
+    /// Transcribes an audio file with Fish Audio and returns Fish Audio's detailed response.
+    ///
+    /// The response keeps Fish Audio's raw text, segments, and speaker turns.
+    /// Use ``FishAudioFileTranscriptionResponse/transcriptText`` for text
+    /// without speaker markers, and ``FishAudioFileTranscriptionResponse/words``
+    /// for punctuated words labelled with their speaker.
+    ///
+    /// Fish Audio rejects AIFF and CAF audio and files longer than 60 minutes,
+    /// so SpeechKit checks both before uploading.
+    ///
+    /// - Throws: ``SpeechError`` when Fish Audio is missing, option or file validation fails, or the provider request fails.
+    public func transcribeFishAudioAudioFile(
+        file: URL,
+        options: FishAudioFileTranscriptionOptions? = nil
+    ) async throws -> FishAudioFileTranscriptionResponse {
+        guard let fishAudio else {
+            throw SpeechError.providerNotConfigured(.fishAudio)
+        }
+
+        let client = FishAudioFileTranscriptionClient(
+            credential: fishAudio.credential,
+            endpoint: fishAudio.fileEndpoint,
+            urlSession: urlSession
+        )
+        let resolvedOptions = options ?? resolvedFishAudioOptions(from: nil, config: fishAudio)
+
+        do {
+            return try await client.transcribeAudioFileDetailed(file: file, options: resolvedOptions)
+        } catch {
+            throw wrap(error, for: .fishAudio)
+        }
+    }
+
+    /// Transcribes a security-scoped audio file URL with Fish Audio and returns Fish Audio's detailed response.
+    ///
+    /// - Throws: ``SpeechError`` when the file cannot be accessed, Fish Audio is missing, option or file validation fails, or the provider request fails.
+    public func transcribeFishAudioAudioFile(
+        securityScopedURL: URL,
+        options: FishAudioFileTranscriptionOptions? = nil
+    ) async throws -> FishAudioFileTranscriptionResponse {
+        let didStartAccess = securityScopedURL.startAccessingSecurityScopedResource()
+        guard didStartAccess else {
+            throw SpeechError.providerFailure(provider: .fishAudio, reason: "Failed to access security-scoped resource.")
+        }
+        defer { securityScopedURL.stopAccessingSecurityScopedResource() }
+        return try await transcribeFishAudioAudioFile(file: securityScopedURL, options: options)
+    }
+
     func validate(options: SpeechFileTranscriptionOptions?, for provider: SpeechFileTranscriptionProvider) throws {
         guard let options else { return }
         guard options.provider == provider else {
@@ -728,6 +794,41 @@ extension SpeechService {
             diarize: diarize ?? config.diarize,
             timestampGranularities: timestampGranularities ?? config.timestampGranularities,
             temperature: temperature ?? config.temperature,
+            timeoutInterval: timeoutInterval ?? config.timeoutInterval
+        )
+    }
+
+    func resolvedFishAudioOptions(
+        from options: SpeechFileTranscriptionOptions?,
+        config: FishAudioConfiguration
+    ) -> FishAudioFileTranscriptionOptions {
+        guard case .fishAudio(
+            let modelID,
+            let language,
+            let timestamps,
+            let diarize,
+            let speakerCount,
+            let tagAudioEvents,
+            let timeoutInterval
+        ) = options else {
+            return FishAudioFileTranscriptionOptions(
+                modelID: config.fileTranscriptionModelID,
+                language: config.language,
+                timestamps: config.timestamps,
+                diarize: config.diarize,
+                speakerCount: config.speakerCount,
+                tagAudioEvents: config.tagAudioEvents,
+                timeoutInterval: config.timeoutInterval
+            )
+        }
+
+        return FishAudioFileTranscriptionOptions(
+            modelID: modelID ?? config.fileTranscriptionModelID,
+            language: language ?? config.language,
+            timestamps: timestamps ?? config.timestamps,
+            diarize: diarize ?? config.diarize,
+            speakerCount: speakerCount ?? config.speakerCount,
+            tagAudioEvents: tagAudioEvents ?? config.tagAudioEvents,
             timeoutInterval: timeoutInterval ?? config.timeoutInterval
         )
     }

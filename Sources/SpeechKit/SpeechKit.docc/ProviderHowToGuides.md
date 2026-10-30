@@ -181,6 +181,28 @@ for segment in response.segments {
 
 Mistral returns timestamps per segment only, and requires them for diarization, so SpeechKit requests segment timestamps whenever `diarize` is on.
 
+### Fish Audio Files
+
+Fish Audio file transcription uses Transcribe 1 Pro. Timestamps are on by default, so the response carries words with speakers.
+
+```swift
+let speech = SpeechService(
+    fishAudio: FishAudioConfiguration(
+        apiKey: "<FISH_AUDIO_API_KEY>",
+        language: "en",
+        diarize: .on,
+        speakerCount: .range(min: 2, max: 4)
+    )
+)
+
+let response = try await speech.transcribeFishAudioAudioFile(file: audioFileURL)
+for word in response.words {
+    print(word.speaker ?? "?", word.text)
+}
+```
+
+Fish Audio accepts up to 60 minutes of audio and rejects AIFF and CAF files. SpeechKit checks both before uploading and throws a ``SpeechError`` without a network round trip. Convert Apple recordings to M4A or WAV first. Set ``FishAudioFileTranscriptionOptions/tagAudioEvents`` to `false` to drop sound cues such as `[laughter]` from the text.
+
 ### Apple Local Files
 
 Apple local Speech runs on device and requires iOS 26, macOS 26, or visionOS 26. It is unavailable on watchOS and may need local speech assets for the selected locale.
@@ -311,6 +333,26 @@ await speech.startListening(provider: .mistral)
 
 With `diarize` on, each committed entry carries its speaker in ``SpeechTranscriptEntry/speaker``. Turn detection, on by default, is left out of diarized sessions because Mistral cannot combine the two.
 
+### Fish Audio Realtime
+
+Fish Audio's realtime model, `transcribe-stream-1`, is in preview. Sessions stream 16 kHz mono PCM by default, with drafts, word timings, and speaker labels on.
+
+```swift
+let speech = SpeechService(
+    fishAudio: FishAudioConfiguration(
+        apiKey: "<FISH_AUDIO_API_KEY>",
+        realtimeOptions: FishAudioRealtimeOptions(
+            mode: .auto,
+            terms: ["SpeechKit", "Northwind"]
+        )
+    )
+)
+
+await speech.startListening(provider: .fishAudio)
+```
+
+Each committed turn becomes one entry per speaker, with ``SpeechTranscriptEntry/speaker`` set to a label such as `speaker:0`. ``FishAudioTurnDetectionMode/auto`` keeps other voices and noise as non-user turns; choose ``FishAudioTurnDetectionMode/vad`` to end turns after ``FishAudioRealtimeOptions/silenceTimeout`` of silence instead. Fish Audio bills a session for every second it is open, including idle time, and ends a session after 60 minutes. Call ``SpeechService/stopListening()`` as soon as you are done.
+
 ### Apple Local Realtime
 
 ```swift
@@ -339,4 +381,5 @@ if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
 - ``MetaConfiguration``
 - ``GeminiConfiguration``
 - ``MistralConfiguration``
+- ``FishAudioConfiguration``
 - ``AppleSpeechConfiguration``

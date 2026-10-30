@@ -6,7 +6,9 @@ SpeechKit follows semantic versioning. Source-breaking changes ship in a new maj
 
 ## [Unreleased]
 
-Planned for 2.1.0. `SpeechFileTranscriptionProvider`, `SpeechRealtimeProvider`, and `SpeechFileTranscriptionOptions` gained `mistral` cases; every other change is additive.
+## [2.1.0] - 2026-10-29
+
+`SpeechFileTranscriptionProvider`, `SpeechRealtimeProvider`, and `SpeechFileTranscriptionOptions` gained `mistral` and `fishAudio` cases; every other change is additive.
 
 ### Added
 
@@ -14,11 +16,15 @@ Planned for 2.1.0. `SpeechFileTranscriptionProvider`, `SpeechRealtimeProvider`, 
 - Mistral Voxtral Mini Transcribe Realtime 3 support for realtime transcription, including a configurable streaming delay, end-of-turn detection, context biasing, and speaker diarization with optional named speaker references.
 - `MistralConfiguration`, `SpeechService.mistral`, and `SpeechService.transcribeMistralAudioFile(file:options:)` with its security-scoped twin, returning `MistralFileTranscriptionResponse` with speaker-labeled segments.
 - `MistralRealtimeService` for apps that drive Mistral realtime transcription directly.
+- Fish Audio Transcribe 1 Pro support for file transcription, including speaker diarization with speaker count hints, word timestamps, a language hint, and sound cue tags. SpeechKit labels each word with its speaker and copies punctuation from Fish Audio's speaker turns. AIFF and CAF files and audio over 60 minutes are rejected before upload.
+- Fish Audio Transcribe Stream 1 support for realtime transcription, in preview, including live drafts, auto, VAD, and manual turn detection, speaker labels, word timestamps, recognition terms, and conversation history.
+- `FishAudioConfiguration`, `SpeechService.fishAudio`, and `SpeechService.transcribeFishAudioAudioFile(file:options:)` with its security-scoped twin, returning `FishAudioFileTranscriptionResponse` with the raw segments and speaker turns plus speaker-labeled words.
+- `FishAudioRealtimeService` for apps that drive Fish Audio realtime transcription directly, with committed turn metadata, `agentSpeaking(_:)`, `addContext(_:resetHistory:)`, and `finalizeTurn()`.
 
 ### Changed
 
-- `SpeechFileTranscriptionProvider`, `SpeechRealtimeProvider`, and `SpeechFileTranscriptionOptions` gained `mistral` cases, so exhaustive switches over these types in adopting code need updating.
-- `SpeechService.init` gained a `mistral:` parameter after `gemini:`.
+- `SpeechFileTranscriptionProvider`, `SpeechRealtimeProvider`, and `SpeechFileTranscriptionOptions` gained `mistral` and `fishAudio` cases, so exhaustive switches over these types in adopting code need updating.
+- `SpeechService.init` gained a `mistral:` parameter after `gemini:`, and a `fishAudio:` parameter after `mistral:`.
 
 ## [2.0.1] - 2026-09-15
 

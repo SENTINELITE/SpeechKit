@@ -191,6 +191,23 @@ struct FileProviderOptionsView: View {
                 .lineLimit(2...4)
 
             Toggle("Diarize", isOn: $configuration.mistralDiarize)
+        case .fishAudio:
+            TextField("Language hint (e.g. en)", text: $configuration.fishAudioLanguage)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            Picker("Diarization", selection: $configuration.fishAudioDiarize) {
+                ForEach(FishAudioDiarization.allCases, id: \.self) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+
+            Toggle("Word timestamps", isOn: $configuration.fishAudioTimestamps)
+            Toggle("Sound tags", isOn: $configuration.fishAudioTagAudioEvents)
+
+            Text("Fish Audio accepts up to 60 minutes of audio and rejects AIFF and CAF files. Speaker labels need word timestamps.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         case .voz:
             Label("Runs locally after its model is downloaded and prepared in Settings. VOZ supports 25 languages but does not detect language or accept a language hint.", systemImage: "lock.fill")
                 .font(.caption)
@@ -255,6 +272,21 @@ struct RealtimeOnlyOptionsView: View {
                     Text(delay.title).tag(delay)
                 }
             }
+        case .fishAudio:
+            Picker("Turn detection", selection: $configuration.fishAudioRealtimeMode) {
+                ForEach(FishAudioTurnDetectionMode.allCases, id: \.self) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+
+            Toggle("Speaker labels", isOn: $configuration.fishAudioRealtimeDiarize)
+
+            TextField("Terms (comma separated)", text: $configuration.fishAudioRealtimeTerms, axis: .vertical)
+                .lineLimit(2...4)
+
+            Text("Realtime is in preview. Fish Audio bills every second the session is open, including silence, so stop when you are done.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         case .apple:
             EmptyView()
         }
@@ -317,6 +349,40 @@ extension MistralFileTranscriptionResponse {
         }
         return turns
             .map { turn in turn.speaker.map { "\($0): \(turn.text)" } ?? turn.text }
+            .joined(separator: "\n\n")
+    }
+}
+
+/// Human-readable names for Fish Audio diarization modes, whose raw values are `auto`, `true`, and `false`.
+extension FishAudioDiarization {
+    var displayName: String {
+        switch self {
+        case .auto: "Auto"
+        case .on: "On"
+        case .off: "Off"
+        }
+    }
+}
+
+/// Speaker-labeled text for Fish Audio file transcripts.
+extension FishAudioFileTranscriptionResponse {
+    /// One `speaker:0: text` line per speaker, merging consecutive turns from the
+    /// same speaker. Falls back to ``transcriptText`` when there are no speaker turns.
+    var speakerLabeledText: String {
+        guard !speakerTurns.isEmpty else { return transcriptText }
+
+        var turns: [(speaker: String, text: String)] = []
+        for turn in speakerTurns {
+            let turnText = turn.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !turnText.isEmpty else { continue }
+            if let last = turns.last, last.speaker == turn.speaker {
+                turns[turns.count - 1].text = last.text + " " + turnText
+            } else {
+                turns.append((turn.speaker, turnText))
+            }
+        }
+        return turns
+            .map { "\($0.speaker): \($0.text)" }
             .joined(separator: "\n\n")
     }
 }

@@ -4,7 +4,7 @@ Add realtime speech-to-text and audio file transcription to Swift and SwiftUI ap
 
 ## Overview
 
-SpeechKit provides one observable service, ``SpeechService``, for realtime microphone transcription and provider-backed audio file transcription. Realtime transcription supports ElevenLabs, OpenAI, xAI Grok, Meta, Gemini, Mistral, and Apple local Speech on supported OS versions. File transcription supports ElevenLabs, Aqua, Cohere, Grok, OpenAI, Meta, Gemini, Mistral, and Apple local Speech on supported OS versions.
+SpeechKit provides one observable service, ``SpeechService``, for realtime microphone transcription and provider-backed audio file transcription. Realtime transcription supports ElevenLabs, OpenAI, xAI Grok, Meta, Gemini, Mistral, Fish Audio, and Apple local Speech on supported OS versions. File transcription supports ElevenLabs, Aqua, Cohere, Grok, OpenAI, Meta, Gemini, Mistral, Fish Audio, and Apple local Speech on supported OS versions.
 
 Create a service with the provider configurations your app needs, then place it in SwiftUI's environment or keep it in your own model layer. Use ``SpeechService`` as the main app-facing facade; provider-specific realtime services are advanced APIs for direct provider integrations.
 
@@ -160,6 +160,26 @@ struct DemoApp: App {
 - ``MistralSpeakerReference``
 - ``MistralRealtimeService``
 - ``MistralRealtimeError``
+
+### Fish Audio
+
+- ``FishAudioConfiguration``
+- ``FishAudioFileTranscriptionModelID``
+- ``FishAudioDiarization``
+- ``FishAudioSpeakerCount``
+- ``FishAudioFileTranscriptionOptions``
+- ``FishAudioTranscriptionSegment``
+- ``FishAudioSpeakerTurn``
+- ``FishAudioTranscriptWord``
+- ``FishAudioFileTranscriptionResponse``
+- ``FishAudioRealtimeOptions``
+- ``FishAudioTurnDetectionMode``
+- ``FishAudioContextItem``
+- ``FishAudioContextRole``
+- ``FishAudioRealtimeService``
+- ``FishAudioRealtimeTurn``
+- ``FishAudioRealtimeTurnKind``
+- ``FishAudioRealtimeError``
 
 ### Apple Local Speech
 
