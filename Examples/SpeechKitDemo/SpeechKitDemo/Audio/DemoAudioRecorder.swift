@@ -10,6 +10,17 @@ import UniformTypeIdentifiers
 final class DemoAudioRecorder {
     private var recorder: AVAudioRecorder?
     private var meteringTimer: Timer?
+    private var recordingGeneration = UUID()
+    private var isStarting = false
+    private var expiryTask: Task<Void, Never>?
+
+    init() {
+        // Crash leftovers expire on the next launch; live recordings have a shorter export lifetime.
+        if let directory = try? DemoProtectedStorage.directory(named: "Recordings") {
+            try? DemoProtectedStorage.removeExpiredFiles(in: directory, olderThan: 24 * 60 * 60)
+        }
+        try? DemoProtectedStorage.removeLegacyRecordings()
+    }
 
     /// Whether the demo is currently recording a dictation file.
     private(set) var isRecording = false
@@ -27,42 +38,66 @@ final class DemoAudioRecorder {
             throw DemoAudioRecorderError.recordingAlreadyActive
         }
 
+        guard !isStarting else { throw DemoAudioRecorderError.recordingAlreadyActive }
+        isStarting = true
+        let generation = UUID()
+        recordingGeneration = generation
+        defer { if recordingGeneration == generation { isStarting = false } }
         let allowed = await requestPermission()
+        try Task.checkCancellation()
+        guard recordingGeneration == generation else { throw CancellationError() }
         guard allowed else {
             throw DemoAudioRecorderError.permissionDenied
         }
 
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
-        try session.setActive(true)
+        discardRecording()
+        recordingGeneration = generation
+        isStarting = true
+        do {
+            let directory = try DemoProtectedStorage.directory(named: "Recordings")
+            let url = directory.appendingPathComponent("Dictation-\(UUID().uuidString).wav")
+            lastRecordingURL = url
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
+            try session.setActive(true)
 
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("SpeechKitDemo-Dictation-\(UUID().uuidString)")
-            .appendingPathExtension("wav")
-
-        let recorder = try AVAudioRecorder(
-            url: url,
-            settings: [
-                AVFormatIDKey: Int(kAudioFormatLinearPCM),
-                AVSampleRateKey: 16_000,
-                AVNumberOfChannelsKey: 1,
-                AVLinearPCMBitDepthKey: 16,
-                AVLinearPCMIsFloatKey: false,
-                AVLinearPCMIsBigEndianKey: false
-            ]
-        )
-        recorder.isMeteringEnabled = true
-        recorder.prepareToRecord()
-
-        guard recorder.record() else {
-            throw DemoAudioRecorderError.failedToStart
+            let recorder = try AVAudioRecorder(
+                url: url,
+                settings: [
+                    AVFormatIDKey: Int(kAudioFormatLinearPCM),
+                    AVSampleRateKey: 16_000,
+                    AVNumberOfChannelsKey: 1,
+                    AVLinearPCMBitDepthKey: 16,
+                    AVLinearPCMIsFloatKey: false,
+                    AVLinearPCMIsBigEndianKey: false
+                ]
+            )
+            self.recorder = recorder
+            recorder.isMeteringEnabled = true
+            guard recorder.prepareToRecord() else { throw DemoAudioRecorderError.failedToStart }
+            // Apply protection before the first microphone samples are recorded.
+            try DemoProtectedStorage.protectFile(at: url)
+            guard recorder.record() else { throw DemoAudioRecorderError.failedToStart }
+            isRecording = true
+            startMetering()
+            return url
+        } catch {
+            discardRecording()
+            throw error
         }
+    }
 
-        self.recorder = recorder
-        lastRecordingURL = url
-        isRecording = true
-        startMetering()
-        return url
+    /// Ends the export lifetime. This URL is created by this recorder, never an imported URL.
+    func discardRecording() {
+        recordingGeneration = UUID()
+        isStarting = false
+        _ = stopRecording()
+        expiryTask?.cancel()
+        expiryTask = nil
+        if let url = lastRecordingURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        lastRecordingURL = nil
     }
 
     /// Stops the current recording and returns the last WAV URL, if one exists.
@@ -77,14 +112,31 @@ final class DemoAudioRecorder {
         return lastRecordingURL
     }
 
+    /// A successful upload retains its audio only for an explicit, bounded export lifetime.
+    func retainForExport() {
+        expiryTask?.cancel()
+        guard let url = lastRecordingURL else { return }
+        expiryTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(15 * 60)) } catch { return }
+            guard let self, self.lastRecordingURL == url else { return }
+            self.discardRecording()
+        }
+    }
+
     /// Stops the current recording and waits until the WAV file is ready to upload.
     func stopRecordingForUpload() async throws -> URL? {
         guard let url = stopRecording() else {
             return nil
         }
 
-        try await waitForReadableRecording(at: url)
-        return url
+        do {
+            try await waitForReadableRecording(at: url)
+            guard lastRecordingURL == url else { throw CancellationError() }
+            return url
+        } catch {
+            if lastRecordingURL == url { discardRecording() }
+            throw error
+        }
     }
 
     /// Gives AVAudioRecorder time to finalize the file before a provider reads it.

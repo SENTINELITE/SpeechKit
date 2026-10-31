@@ -17,19 +17,17 @@ public final class MetaRealtimeService {
     public private(set) var lastError: Error?
 
     /// The credential used for realtime transcription.
-    public var credential: SpeechCredential
-    /// The Meta API key used for realtime transcription.
-    ///
-    /// Reading this property returns the key for a ``SpeechCredential/apiKey(_:)``
-    /// credential and an empty string for a ``SpeechCredential/token(_:)``
-    /// credential. Writing it replaces ``credential`` with
-    /// ``SpeechCredential/apiKey(_:)``.
-    public var apiKey: String {
-        get { credential.staticAPIKey }
-        set { credential = .apiKey(newValue) }
+    var credential: SpeechCredential { didSet { if oldValue != credential { configurationDidChange() } } }
+    /// The configured authorization mode, without exposing its value.
+    public var credentialKind: SpeechCredential.Kind { credential.kind }
+    public var hasCredential: Bool { credential.isConfigured }
+    public func setCredential(_ credential: SpeechCredential) {
+        configurationDidChange()
+        self.credential = credential
     }
+
     /// An override for the Meta realtime WebSocket endpoint, or `nil` to use the vendor default.
-    public var realtimeEndpoint: URL?
+    public var realtimeEndpoint: URL? { didSet { if oldValue != realtimeEndpoint { configurationDidChange() } } }
     /// Options for the Meta realtime transcription session.
     public var options: MetaRealtimeOptions {
         didSet {
@@ -41,6 +39,11 @@ public final class MetaRealtimeService {
     private let webSocket = MetaRealtimeWebSocket()
     private var listeningTask: Task<Void, Never>?
     private var committedFingerprints: Set<String> = []
+    private var authorizationTask: Task<SpeechResolvedCredential, Error>?
+    private var reconfigurationTask: Task<Void, Never>?
+    public var credentialPolicy: SpeechCredentialPolicy = .allowStaticKeys {
+        didSet { if oldValue != credentialPolicy { configurationDidChange() } }
+    }
     private var lifecycleRunID = UUID()
     private var isGracefulStopPending = false
     private var gracefulStopWaiter: CheckedContinuation<Void, Never>?
@@ -61,6 +64,12 @@ public final class MetaRealtimeService {
         audioManager.currentLevel
     }
 
+    /// Recording retention after a session stops. The default preserves export after stop.
+    public var recordingRetention: SpeechRecordingRetention {
+        get { audioManager.recordingRetention }
+        set { audioManager.recordingRetention = newValue }
+    }
+
     /// The latest realtime microphone recording as WAV data, if capture has produced audio.
     public var realtimeRecordingData: Data? {
         audioManager.recordedWAVData
@@ -70,9 +79,11 @@ public final class MetaRealtimeService {
     public init(
         apiKey: String = "",
         options: MetaRealtimeOptions = MetaRealtimeOptions(),
-        realtimeEndpoint: URL? = nil
+        realtimeEndpoint: URL? = nil,
+        credentialPolicy: SpeechCredentialPolicy = .allowStaticKeys
     ) {
         self.credential = .apiKey(apiKey)
+        self.credentialPolicy = credentialPolicy
         self.options = options
         self.realtimeEndpoint = realtimeEndpoint
         self.audioManager = AudioCaptureManager(targetSampleRate: Double(options.sampleRate))
@@ -82,9 +93,11 @@ public final class MetaRealtimeService {
     public init(
         credential: SpeechCredential,
         options: MetaRealtimeOptions = MetaRealtimeOptions(),
-        realtimeEndpoint: URL? = nil
+        realtimeEndpoint: URL? = nil,
+        credentialPolicy: SpeechCredentialPolicy = .allowStaticKeys
     ) {
         self.credential = credential
+        self.credentialPolicy = credentialPolicy
         self.options = options
         self.realtimeEndpoint = realtimeEndpoint
         self.audioManager = AudioCaptureManager(targetSampleRate: Double(options.sampleRate))
@@ -94,6 +107,22 @@ public final class MetaRealtimeService {
     public func startListening() async {
         guard !connectionState.isLifecycleActive else { return }
 
+        let runID = beginLifecycleRun()
+        defer {
+            if isCurrentLifecycleRun(runID) {
+                authorizationTask = nil
+                if Task.isCancelled { configurationDidChange() }
+            }
+        }
+        let credentialPolicy = credentialPolicy
+        let credential = credential
+        let options = options
+        let realtimeEndpoint = realtimeEndpoint
+        connectionState = .connecting
+        let teardown = reconfigurationTask
+        await teardown?.value
+        guard isCurrentLifecycleRun(runID), !Task.isCancelled else { return }
+
         guard credential.isConfigured else {
             connectionState = .error("Meta is not configured")
             lastError = MetaRealtimeError.apiKeyMissing
@@ -102,22 +131,29 @@ public final class MetaRealtimeService {
 
         let resolvedCredential: SpeechResolvedCredential
         do {
-            resolvedCredential = try await credential.resolved()
+            try credential.validate(provider: .meta, capability: .realtime, endpoint: realtimeEndpoint ?? MetaRealtimeWebSocket.defaultURL, policy: credentialPolicy)
+            try options.validate()
+            let task = Task { try await credential.resolved(for: .meta, capability: .realtime, model: options.modelID.rawValue, endpoint: realtimeEndpoint ?? MetaRealtimeWebSocket.defaultURL, policy: credentialPolicy) }
+            authorizationTask = task
+            resolvedCredential = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            guard isCurrentLifecycleRun(runID), !Task.isCancelled else { return }
+            authorizationTask = nil
         } catch {
-            connectionState = .error(error.localizedDescription)
-            lastError = error
+            guard isCurrentLifecycleRun(runID), !Task.isCancelled, !(error is CancellationError) else { return }
+            connectionState = .error(SpeechErrorBoundary.safe(error).localizedDescription)
+            lastError = SpeechErrorBoundary.safe(error)
             return
         }
 
         do {
             try options.validate()
         } catch {
-            connectionState = .error(error.localizedDescription)
-            lastError = error
+            guard isCurrentLifecycleRun(runID), !Task.isCancelled, !(error is CancellationError) else { return }
+            connectionState = .error(SpeechErrorBoundary.safe(error).localizedDescription)
+            lastError = SpeechErrorBoundary.safe(error)
             return
         }
 
-        let runID = beginLifecycleRun()
         connectionState = .connecting
         partialTranscriptText = ""
         partialTranscriptEntry = nil
@@ -125,15 +161,13 @@ public final class MetaRealtimeService {
         resetTurnState()
 
         let hasPermission = await audioManager.requestPermission()
-        guard isCurrentLifecycleRun(runID) else { return }
+        guard isCurrentLifecycleRun(runID), !Task.isCancelled else { return }
         guard hasPermission else {
             connectionState = .error("Microphone permission denied")
             lastError = SpeechAudioCaptureError.permissionDenied
             return
         }
 
-        let options = options
-        let realtimeEndpoint = realtimeEndpoint
 
         listeningTask = Task {
             do {
@@ -142,7 +176,7 @@ public final class MetaRealtimeService {
                     options: options,
                     endpoint: realtimeEndpoint
                 )
-                guard isCurrentLifecycleRun(runID) else {
+                guard isCurrentLifecycleRun(runID), !Task.isCancelled else {
                     await webSocket.disconnect()
                     return
                 }
@@ -150,7 +184,7 @@ public final class MetaRealtimeService {
 
                 for try await message in messageStream {
                     if Task.isCancelled { break }
-                    guard isCurrentLifecycleRun(runID) else { break }
+                    guard isCurrentLifecycleRun(runID), !Task.isCancelled else { break }
 
                     if let startedSendTask = handleMessage(message, runID: runID, startsCapture: true) {
                         sendTask = startedSendTask
@@ -161,8 +195,8 @@ public final class MetaRealtimeService {
                 finishGracefulStopWaiter()
             } catch {
                 if !Task.isCancelled, isCurrentLifecycleRun(runID) {
-                    lastError = error
-                    connectionState = .error(error.localizedDescription)
+                    lastError = SpeechErrorBoundary.safe(error)
+                    connectionState = .error(SpeechErrorBoundary.safe(error).localizedDescription)
                 }
                 finishGracefulStopWaiter()
             }
@@ -173,6 +207,10 @@ public final class MetaRealtimeService {
 
     /// Stops realtime microphone transcription and disconnects from Meta.
     public func stopListening() async {
+        authorizationTask?.cancel()
+        authorizationTask = nil
+        if listeningTask == nil { invalidateLifecycleRun() }
+
         guard connectionState.isLifecycleActive || listeningTask != nil || audioManager.isCapturing else {
             connectionState = .disconnected
             return
@@ -240,7 +278,7 @@ public final class MetaRealtimeService {
                 }
             } catch {
                 if isCurrentLifecycleRun(runID) {
-                    lastError = error
+                    lastError = SpeechErrorBoundary.safe(error)
                     connectionState = .error("Failed to start audio capture")
                 }
                 return nil
@@ -271,9 +309,9 @@ public final class MetaRealtimeService {
         case .audioProgress:
             break
 
-        case .error(let message):
-            lastError = MetaRealtimeError.connectionFailed(message)
-            connectionState = .error(message)
+        case .error:
+            lastError = SpeechFailure(.server)
+            connectionState = .error("The realtime session failed.")
             finishGracefulStopWaiter()
 
         case .unknown:
@@ -412,7 +450,7 @@ public final class MetaRealtimeService {
             } catch {
                 if !Task.isCancelled, isCurrentLifecycleRun(runID) {
                     await MainActor.run {
-                        lastError = error
+                        lastError = SpeechErrorBoundary.safe(error)
                     }
                 }
                 break
@@ -449,4 +487,44 @@ public final class MetaRealtimeService {
     private func isCurrentLifecycleRun(_ runID: UUID) -> Bool {
         lifecycleRunID == runID
     }
+
+    private func configurationDidChange() {
+        invalidateLifecycleRun()
+        authorizationTask?.cancel()
+        authorizationTask = nil
+        listeningTask?.cancel()
+        listeningTask = nil
+        audioManager.stopCapture()
+        connectionState = .disconnected
+        lastError = nil
+        let previous = reconfigurationTask
+        reconfigurationTask = Task { [webSocket] in
+            await previous?.value
+            await webSocket.disconnect()
+        }
+    }
+
+    /// Replaces authorization and its destination together, cancelling the previous session.
+    public func reconfigure(credential: SpeechCredential, realtimeEndpoint: URL? = nil) async {
+        configurationDidChange()
+        self.credential = credential
+        self.realtimeEndpoint = realtimeEndpoint
+        await reconfigurationTask?.value
+    }
+
+    /// Cancels local work. Ordinary stop retains configured authorization and recordings.
+    public func resetSession(discardTranscript: Bool = true, discardRecording: Bool = true) async {
+        configurationDidChange()
+        await reconfigurationTask?.value
+        lastError = nil
+        if discardTranscript { clearTranscript() }
+        if discardRecording { self.discardRecording() }
+    }
+
+    public func clearCredentials() async {
+        credential = .apiKey("")
+        await resetSession()
+    }
+
+    public func discardRecording() { audioManager.discardRecording() }
 }

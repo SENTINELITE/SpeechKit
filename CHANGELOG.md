@@ -6,12 +6,21 @@ SpeechKit follows semantic versioning. Source-breaking changes ship in a new maj
 
 ## [Unreleased]
 
-## [2.1.0] - 2026-10-29
+## [3.0.0] - 2026-10-30
 
-`SpeechFileTranscriptionProvider`, `SpeechRealtimeProvider`, and `SpeechFileTranscriptionOptions` gained `mistral` and `fishAudio` cases; every other change is additive.
+This release includes the never-published 2.1.0 Mistral and Fish Audio work. The last published version is 2.0.1. Credential access and error payloads change in 3.0.
 
 ### Added
 
+- Relay upload optimization passes supported compressed audio and mono WAV at 16 kHz or lower unchanged. Verified providers also accept audio-only AAC M4A/MP4 with a leading `moov` header. AAC with a trailing header, video/extra tracks, or a MOV container uses audio-only AVFoundation passthrough with network optimization, then local MP4 sample-table and byte-range validation. Invalid output falls back to conversion. ALAC and other unsupported imports, plus higher-rate or multichannel PCM WAV, convert to 16 kHz mono FLAC when supported, otherwise canonical PCM16 WAV. OpenAI, Meta, and explicit raw PCM imports use WAV. Protected temporary audio is removed after success, failure, or cancellation; originals never change. Existing 57,600,000 normalized-frame and 128 MiB work limits and tighter provider limits remain. Mistral direct and relay uploads enforce 500,000,000 bytes and 60 minutes.
+- `SpeechRelay(optimizedUploads: .on)` enables optimization by default; `.off` uploads original bytes or refuses unsupported imports before network I/O. Vendor M4A acceptance is documented per provider; unverified providers convert. AAC multipart uploads use `audio.m4a` and `audio/mp4`, with Gemini's documented `audio/m4a` exception. The demo persists an Optimize uploads toggle, default on. Relay HTTP 415 `unsupported_media_type` maps to `SpeechFailure.Category.unsupportedMediaType` without retrying audio. Local failures distinguish `audioTooLarge`, `audioTooLong`, and `audioNormalizationFailed`. Direct uploads retain their behavior apart from Mistral's explicit preflight limits.
+- SwiftUI `.speechKit(relay:)`, `.speechKit(openAI:…)` and `.speechKit(_:)` view modifiers create a `SpeechService` once, or take an existing one, and place it in the environment for `speechService` and `speechTranscriber`.
+- `SpeechRelay` and `SpeechService(relay:)` with built-in App Attest, bearer login, or combined authentication, optional relay SPKI pins, and proxy-first routing. The self-hosted sibling relay template is not yet published.
+- `SpeechRelay.appAttestAccountID` namespaces persisted App Attest keys by relay and account. `resetAppAttestKey() async throws` forgets that identity for registration on the next operation, serializing against outstanding assertions. Invalid Apple keys and explicit session attestation rejections get at most one automatic re-registration per operation, without replaying audio or uncertain requests.
+- `SpeechService.transcriber` returns `SpeechTranscription`, a transcription-only capability with read-only state/results, listening controls, and file transcription. SwiftUI's new `speechTranscriber` environment value defaults to the existing `speechService` capability. Both existing service access and its environment value remain unchanged.
+- `SpeechTokenResolver`, `SpeechTokenContext`, `SpeechAccessToken`, explicit `.vendorToken` and `.bearer` auth modes, and per-capability credential replacement and metadata.
+- `SpeechCredentialPolicy`, `GeminiRoute`, bounded `SpeechFailure` and `SpeechFailureReason`, and numeric HTTP failures.
+- `resetSession()`, `clearCredentials()`, `discardRecording()`, and `SpeechRecordingRetention` for explicit local cleanup.
 - Mistral Voxtral Mini Transcribe 3 and Voxtral Small Transcribe 3 support for file transcription, including speaker diarization, segment timestamps, language pinning, and context biasing.
 - Mistral Voxtral Mini Transcribe Realtime 3 support for realtime transcription, including a configurable streaming delay, end-of-turn detection, context biasing, and speaker diarization with optional named speaker references.
 - `MistralConfiguration`, `SpeechService.mistral`, and `SpeechService.transcribeMistralAudioFile(file:options:)` with its security-scoped twin, returning `MistralFileTranscriptionResponse` with speaker-labeled segments.
@@ -25,6 +34,40 @@ SpeechKit follows semantic versioning. Source-breaking changes ship in a new maj
 
 - `SpeechFileTranscriptionProvider`, `SpeechRealtimeProvider`, and `SpeechFileTranscriptionOptions` gained `mistral` and `fishAudio` cases, so exhaustive switches over these types in adopting code need updating.
 - `SpeechService.init` gained a `mistral:` parameter after `gemini:`, and a `fishAudio:` parameter after `mistral:`.
+- Credentials are opaque values; configurations and realtime services expose metadata and replacement methods instead of credential readback.
+- Native auth uses provider-specific placement: ElevenLabs file/realtime query tokens, OpenAI transcription-intent routing, Gemini constrained Live tokens, and Mistral legacy-model subprotocol tokens. Unsupported combinations fail closed.
+- Error payloads carry bounded reasons and numeric codes instead of provider-controlled strings. Replacing configuration invalidates pending work; direct realtime services provide async credential/endpoint reconfiguration.
+
+### Removed
+
+- `SpeechTokenProvider`, `.token(...)`, public resolver invocation, credential enum payload matching, and public `apiKey` / `credential` getters and setters. `apiKey:` initializer overloads remain available.
+- Arbitrary error text and Fish Audio server-error type/message and session-close type/message fields.
+
+### Security
+
+- SDK-owned ephemeral transports disable caches, cookies, and credential storage; endpoints are validated before credential resolution and redirects are refused. HTTPS/WSS is required except loopback development.
+- Credential-bearing diagnostics and reflection are redacted. Response/callback text is not propagated as error detail.
+- Relay tickets stay on relay routes. App Attest proofs bind protected requests; native tokens are allocated per operation. Renewal is bounded before side effects, with no automatic audio replay after sending or an uncertain outcome.
+- Complete Gemini routes and resource validation prevent partial proxy fallthrough. Meta relay handshakes carry relay authority for server-side replacement, not vendor keys.
+- Local policy and lifecycle controls are guardrails, not remote revocation, secure-memory erasure, a device-owner boundary, or proof of production deployment safety.
+
+### Migrating from 2.x
+
+2.0.1 is the last published release. The unreleased 2.1.0 provider additions ship here, so 3.0.0 includes their exhaustive-switch changes as well as the credential and error breaks.
+
+1. Replace `SpeechTokenProvider` with `SpeechTokenResolver`; it is removed, not a deprecated alias. Resolver closures now accept a `SpeechTokenContext`, so a closure that ignores it starts with `{ _ in ... }`. The result can be a `String` or `SpeechAccessToken`. `token()` is gone; call your own backend adapter when your application needs a token outside SpeechKit. Resolver equality still uses its UUID `id`.
+2. Replace `.token(...)` with `.vendorToken(resolver)` for supported native tokens or `.bearer(resolver)` for your own proxy and separately authorized Gemini REST OAuth. No public `.relay(...)` factory exists; create `SpeechRelay` instead. Unsupported provider/capability combinations fail before token resolution or vendor I/O. In particular, OpenAI file transcription cannot use a Realtime secret, Fish/Grok STT cannot use agent/voice tokens, and Mistral native-token mode permits only `.voxtralMiniTranscribeRealtime2602`, not Voxtral 3.
+3. `SpeechCredential` is now an opaque struct. Remove enum pattern matching, payload extraction, and secret readback. Use `kind` for nonsecret decisions. Configuration and realtime-service `apiKey` properties and public `credential` access are removed. Construct with `credential: .apiKey(...)` and update with `setCredential(_:)`; configuration values also offer `setCredential(_:for:)`, `credentialKind(for:)`, and `hasCredential(for:)`. The `apiKey:` initializer overloads remain supported. `setCredential(_:)` clears both capability overrides; inspect the capability-specific metadata when you use overrides.
+4. For direct realtime services, use `await service.reconfigure(credential:realtimeEndpoint:)` when changing credential and endpoint together. The synchronous `setCredential(_:)` and endpoint setters remain, but invalidate active/pending work. For the facade, replace its provider configuration as one value. Setting a configuration to `nil` now cancels that provider's pending work. A credentialed direct override in a relay-backed service needs the explicit endpoint for the selected capability; credential-free configurations inherit the relay.
+5. Replace partial Gemini proxy configuration with `GeminiRoute` and `setRoute(_:)`. Supply Interactions, Files upload, and Live endpoints from one origin by default, and keep returned upload URLs and file/interaction poll routes on approved origins. Use `.explicitMixedOrigins` only for a deliberate reviewed direct integration; relay tickets cannot use it. Endpoints must use HTTPS/WSS except loopback development; URL userinfo/fragments and redirects are refused. Custom proxies that depended on redirects must return the final approved URL directly.
+6. Update error constructors and switches. `SpeechError.uploadFailed`, `.decodingFailed`, and `.providerFailure` take `SpeechFailureReason` instead of `String`. The same replacement applies to ElevenLabs `connectionFailed`, `decodingFailed`, `audioEngineError`, `uploadFailed`, and `unsupportedModel`; OpenAI `connectionFailed` and `invalidOptions`; Grok/Meta/Mistral `connectionFailed`; Gemini `connectionFailed` and `sessionEnding`; and `SpeechAudioCaptureError.audioEngineError`. Fish Audio `serverError(errorType:code:message:)` becomes `serverError(code:)`, and `sessionClosed(code:errorType:message:)` becomes `sessionClosed(code:)`. Handle the new `SpeechError.httpFailure(provider:statusCode:)` and `SpeechFailure` categories. Do not parse provider bodies, URL-bearing error strings, or arbitrary callback text from errors; they are no longer exposed. Keep cancellation handling separate from failure UI.
+7. Add `.mistral` and `.fishAudio` to exhaustive switches on `SpeechFileTranscriptionProvider`, `SpeechRealtimeProvider`, and `SpeechFileTranscriptionOptions`. `SpeechService` accepts `mistral:` after `gemini:`, then `fishAudio:`, with optional `credentialPolicy:` last. Its provider parameter order is `elevenLabs`, `cohere`, `grok`, `aqua`, `openAI`, `meta`, `gemini`, `mistral`, `fishAudio`. Preserve that order even when skipping arguments.
+8. Remove tests or diagnostics that expect credential/configuration reflection to expose fields. `description`, `debugDescription`, and `customMirror` redact sensitive types. Own any secret persistence in your application; the SDK cannot recover the original secret for a settings form.
+9. For signed-in App Attest, pass a stable account ID through `SpeechRelay(..., appAttestAccountID:)` and create a service/resolver for each account. `clearCredentials()` preserves persisted attestation identity. If you omit the namespace, stop operations and call `try await relay.resetAppAttestKey()` before changing accounts. Neither method revokes server keys or tickets. Prefer injecting `.environment(\.speechTranscriber, speech.transcriber)` into new views; existing `.speechService` injection still works.
+
+Use `credentialPolicy: .disallowStaticKeys` to forbid static-key operations or `.relayOnly` to require proxy routes. The default stays `.allowStaticKeys`. `resetSession()` clears local session data and pending work by default; `clearCredentials()` additionally releases SDK credential/resolver references and the relay. Neither revokes remote authority. Recording retention defaults to `.retainUntilDiscarded`; opt into `.discardOnStop` or call `discardRecording()` explicitly.
+
+See [Migrating to 3.0](Sources/SpeechKit/SpeechKit.docc/MigratingTo3.md) and [Shipping SpeechKit in production](Sources/SpeechKit/SpeechKit.docc/ShippingInProduction.md) for compiling examples and the dated auth matrix.
 
 ## [2.0.1] - 2026-09-15
 

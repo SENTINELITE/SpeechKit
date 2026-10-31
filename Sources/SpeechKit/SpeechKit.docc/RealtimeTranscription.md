@@ -4,7 +4,7 @@ Stream microphone audio to ElevenLabs, OpenAI, xAI Grok, Meta, Gemini, Mistral, 
 
 ## Overview
 
-Realtime transcription requires a provider configuration for the selected realtime provider. Call ``SpeechService/startListening(provider:)`` and ``SpeechService/stopListening()`` from an asynchronous context. Calling ``SpeechService/startListening()`` without a provider starts ElevenLabs transcription. ``SpeechService`` is the recommended app-facing API; provider-specific realtime services are available when an app intentionally needs direct provider control.
+Realtime transcription needs a relay or a credential for the selected provider. See <doc:ShippingInProduction> before using app-owned credentials. Call ``SpeechService/startListening(provider:)`` and ``SpeechService/stopListening()`` from an asynchronous context. Calling ``SpeechService/startListening()`` without a provider starts ElevenLabs transcription. ``SpeechService`` is the recommended app-facing API; provider-specific realtime services are available when an app intentionally needs direct provider control.
 
 ```swift
 struct TranscriptView: View {
@@ -59,23 +59,23 @@ Configure provider-specific realtime defaults when creating ``SpeechService``:
 
 ```swift
 let speech = SpeechService(
+    grok: GrokConfiguration(
+        credential: .apiKey("<XAI_API_KEY>"),
+        realtimeOptions: GrokRealtimeOptions(
+            language: .english,
+            keyTerms: ["SpeechKit"]
+        )
+    ),
     openAI: OpenAIConfiguration(
-        apiKey: "<OPENAI_API_KEY>",
+        credential: .apiKey("<OPENAI_API_KEY>"),
         realtimeTranscriptionModelID: .gptLiveTranscribe,
         languages: ["en", "fr"],
         keywords: ["SpeechKit", "AC-42"],
         realtimeDelay: .low,
         realtimeCommitInterval: 1
     ),
-    grok: GrokConfiguration(
-        apiKey: "<XAI_API_KEY>",
-        realtimeOptions: GrokRealtimeOptions(
-            language: .english,
-            keyTerms: ["SpeechKit"]
-        )
-    ),
     meta: MetaConfiguration(
-        apiKey: "<META_API_KEY>",
+        credential: .apiKey("<META_API_KEY>"),
         realtimeOptions: MetaRealtimeOptions(
             mode: .diarization,
             audioEncoding: .pcm24kHz,
@@ -84,21 +84,21 @@ let speech = SpeechService(
         )
     ),
     gemini: GeminiConfiguration(
-        apiKey: "<GOOGLE_API_KEY>",
+        credential: .apiKey("<GOOGLE_API_KEY>"),
         realtimeOptions: GeminiRealtimeOptions(
             languageCodes: ["en-US"],
             mode: .verbatim
         )
     ),
     mistral: MistralConfiguration(
-        apiKey: "<MISTRAL_API_KEY>",
+        credential: .apiKey("<MISTRAL_API_KEY>"),
         realtimeOptions: MistralRealtimeOptions(
             targetStreamingDelayMilliseconds: 480,
             diarize: true
         )
     ),
     fishAudio: FishAudioConfiguration(
-        apiKey: "<FISH_AUDIO_API_KEY>",
+        credential: .apiKey("<FISH_AUDIO_API_KEY>"),
         realtimeOptions: FishAudioRealtimeOptions(
             mode: .vad,
             silenceTimeout: 0.7,
@@ -136,6 +136,16 @@ Apple Speech can emit volatile text and later replace it with a final result for
 ## Failure Handling
 
 When a realtime provider is not configured, ``SpeechService/startListening(provider:)`` sets ``SpeechService/realtimeConnectionState`` to ``SpeechRealtimeConnectionState/error(_:)`` and exposes ``SpeechError/realtimeProviderNotConfigured(_:)`` through ``SpeechService/lastError``. Provider-specific failures still surface when using provider services directly.
+
+## Session cleanup
+
+`stopListening()` ends capture but can retain results. `resetSession()` cancels local work and discards transcript and recording by default while keeping credentials. `clearCredentials()` also removes credentials, resolver captures, and the relay. None revokes remote credentials or deletes server data. For sensitive audio, choose `.discardOnStop` or call `discardRecording()`; the default retains recordings until discarded.
+
+```swift
+speech.recordingRetention = .discardOnStop
+await speech.resetSession()
+await speech.clearCredentials()
+```
 
 ## Topics
 
@@ -176,3 +186,10 @@ When a realtime provider is not configured, ``SpeechService/startListening(provi
 - ``SpeechService/startListening(provider:)``
 - ``SpeechService/stopListening()``
 - ``SpeechService/clearTranscript()``
+
+### Cleanup
+
+- ``SpeechService/resetSession(discardTranscript:discardRecording:)``
+- ``SpeechService/clearCredentials()``
+- ``SpeechService/discardRecording()``
+- ``SpeechRecordingRetention``

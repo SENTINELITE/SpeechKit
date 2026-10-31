@@ -185,13 +185,13 @@ struct MetaFileTranscriptionClient {
     private let maxUploadBytes: Int64 = 32 * 1024 * 1024
     private let maxUploadDuration: TimeInterval = 600
 
-    init(apiKey: String, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+    init(apiKey: String, endpoint: URL? = nil, urlSession: URLSession = SpeechTransport.session()) {
         self.init(credential: .apiKey(apiKey), endpoint: endpoint, urlSession: urlSession)
     }
 
-    init(credential: SpeechCredential, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+    init(credential: SpeechCredential, endpoint: URL? = nil, urlSession: URLSession = SpeechTransport.session()) {
         self.credential = credential
-        self.urlSession = urlSession
+        self.urlSession = SpeechTransport.session(copying: urlSession, pinnedPublicKeyHashes: credential.pinnedPublicKeyHashes)
         self.uploadURL = endpoint ?? Self.defaultUploadURL
     }
 
@@ -207,20 +207,27 @@ struct MetaFileTranscriptionClient {
         file: URL,
         options: MetaFileTranscriptionOptions = MetaFileTranscriptionOptions()
     ) async throws -> MetaFileTranscriptionResponse {
+        let rawPCM = options.audioEncoding.sampleRate.map { SpeechRelayAudioImport.RawPCM(sampleRate: $0) }
+        let prepared = try await SpeechRelayAudioImport.prepare(file: file, provider: .meta,
+            optimizeUploads: credential.optimizeUploads, rawPCM: rawPCM,
+            maxUploadBytes: maxUploadBytes, maxDuration: maxUploadDuration)
+        defer { prepared.remove() }
+        let file = prepared.file
+        var options = options
+        if prepared.wrappedRawPCM { options.audioEncoding = .wav }
         let request = try await makeRequest(file: file, options: options)
-        let (data, response) = try await urlSession.data(for: request)
+        let (data, response) = try await SpeechTransport.data(for: request, session: urlSession, prepare: self.credential.relayRequestPreparation)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SpeechError.invalidResponse(provider: .meta)
         }
         guard (200...299).contains(httpResponse.statusCode) else {
-            let message = String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)"
-            throw SpeechError.uploadFailed(provider: .meta, reason: message)
+            throw SpeechFailure(.server, statusCode: httpResponse.statusCode)
         }
 
         do {
             return try JSONDecoder().decode(MetaFileTranscriptionResponse.self, from: data)
         } catch {
-            throw SpeechError.decodingFailed(provider: .meta, reason: error.localizedDescription)
+            throw SpeechError.decodingFailed(provider: .meta, reason: .decodingFailed)
         }
     }
 
@@ -231,20 +238,21 @@ struct MetaFileTranscriptionClient {
         guard credential.isConfigured else {
             throw SpeechError.providerNotConfigured(.meta)
         }
-        let resolved = try await credential.resolved(for: .meta)
+        try validate(options)
+        let resolved = try await credential.resolved(for: .meta, model: options.modelID.rawValue, endpoint: uploadURL)
         return try await makeRequest(file: file, options: options, secret: resolved.secret)
     }
 
     /// Builds an upload request from an already-resolved secret.
     ///
-    /// Meta accepts both a long-lived API key and a short-lived token as a
-    /// bearer token.
+    /// Meta API keys and custom proxy credentials use Bearer authorization.
+    /// Native vendor-token mode is unsupported for this capability.
     func makeRequest(
         file: URL,
         options: MetaFileTranscriptionOptions = MetaFileTranscriptionOptions(),
         secret: String
     ) async throws -> URLRequest {
-        guard !secret.isEmpty else {
+        guard !secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw SpeechError.providerNotConfigured(.meta)
         }
         guard let uploadURL else {
@@ -267,7 +275,7 @@ struct MetaFileTranscriptionClient {
             // AVFoundation reads no duration from headerless PCM, but the byte
             // count and the fixed bit rate give it exactly.
             try SpeechFileUploadSupport.validateRawPCMDuration(
-                fileURL: file,
+                fileURL: credential.uploadFileURL(file),
                 sampleRate: sampleRate,
                 maxDuration: maxUploadDuration,
                 provider: .meta
@@ -281,9 +289,9 @@ struct MetaFileTranscriptionClient {
             .json(name: "request", data: payload),
             .file(
                 name: "audio",
-                fileURL: file,
+                fileURL: credential.uploadFileURL(file),
                 fileData: audioData,
-                contentType: SpeechFileUploadSupport.mimeType(for: file)
+                contentType: SpeechFileUploadSupport.mimeType(for: credential.uploadFileURL(file))
             )
         ]
 
@@ -324,21 +332,21 @@ struct MetaFileTranscriptionClient {
         do {
             return try JSONEncoder().encode(payload)
         } catch {
-            throw SpeechError.providerFailure(provider: .meta, reason: error.localizedDescription)
+            throw SpeechError.providerFailure(provider: .meta, reason: .requestFailed)
         }
     }
 
     private func validate(_ options: MetaFileTranscriptionOptions) throws {
-        if let keyword = options.keywords.first(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-            throw SpeechError.providerFailure(provider: .meta, reason: "keywords cannot be empty: \"\(keyword)\".")
+        if options.keywords.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            throw SpeechError.providerFailure(provider: .meta, reason: .requestFailed)
         }
 
         if options.keywords.contains(where: { $0.contains(where: \.isNewline) }) {
-            throw SpeechError.providerFailure(provider: .meta, reason: "keywords cannot contain newlines.")
+            throw SpeechError.providerFailure(provider: .meta, reason: .requestFailed)
         }
 
         if options.timeoutInterval <= 0 {
-            throw SpeechError.providerFailure(provider: .meta, reason: "timeoutInterval must be greater than 0.")
+            throw SpeechError.providerFailure(provider: .meta, reason: .requestFailed)
         }
     }
 
@@ -355,7 +363,7 @@ struct MetaFileTranscriptionClient {
         do {
             return try Data(contentsOf: fileURL)
         } catch {
-            throw SpeechError.providerFailure(provider: .meta, reason: error.localizedDescription)
+            throw SpeechError.providerFailure(provider: .meta, reason: .requestFailed)
         }
     }
 }

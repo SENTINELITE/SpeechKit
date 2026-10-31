@@ -90,8 +90,7 @@ struct GeminiFileTranscriptionTests {
         await #expect(
             throws: SpeechError.providerFailure(
                 provider: .gemini,
-                reason: "customVocabulary cannot be combined with diarization or word timestamps."
-            )
+                reason: .requestFailed)
         ) {
             _ = try await client.makeRequest(
                 file: fileURL,
@@ -108,8 +107,7 @@ struct GeminiFileTranscriptionTests {
         await #expect(
             throws: SpeechError.providerFailure(
                 provider: .gemini,
-                reason: "smart mode cannot be combined with diarization or word timestamps."
-            )
+                reason: .requestFailed)
         ) {
             _ = try await client.makeRequest(
                 file: fileURL,
@@ -127,8 +125,7 @@ struct GeminiFileTranscriptionTests {
         await #expect(
             throws: SpeechError.providerFailure(
                 provider: .gemini,
-                reason: "customVocabulary cannot contain more than 1000 terms."
-            )
+                reason: .requestFailed)
         ) {
             _ = try await client.makeRequest(
                 file: fileURL,
@@ -140,9 +137,9 @@ struct GeminiFileTranscriptionTests {
     @Test("Gemini rejects unsupported file extensions before request creation")
     func geminiRejectsUnsupportedFileExtension() async {
         let client = GeminiFileTranscriptionClient(apiKey: "gemini-key")
-        let fileURL = geminiTemporaryAudioFileURL(named: "gemini-sample.mp4")
+        let fileURL = geminiTemporaryAudioFileURL(named: "gemini-sample.caf")
 
-        await #expect(throws: SpeechError.providerFailure(provider: .gemini, reason: "Unsupported file extension: mp4.")) {
+        await #expect(throws: SpeechError.providerFailure(provider: .gemini, reason: .requestFailed)) {
             _ = try await client.makeRequest(file: fileURL)
         }
     }
@@ -211,10 +208,7 @@ struct GeminiFileTranscriptionTests {
         let client = GeminiFileTranscriptionClient(apiKey: "gemini-key")
 
         #expect(
-            throws: SpeechError.providerFailure(
-                provider: .gemini,
-                reason: "The Gemini response did not include an interaction identifier."
-            )
+            throws: SpeechFailure(.invalidResponse)
         ) {
             _ = try client.makePollRequest(interactionID: "  ")
         }
@@ -367,8 +361,7 @@ struct GeminiInteractionResponseTests {
         await #expect(
             throws: SpeechError.providerFailure(
                 provider: .gemini,
-                reason: "Interaction interactions/abc123 finished with status failed."
-            )
+                reason: .requestFailed)
         ) {
             _ = try await client.transcribeAudioFileDetailed(file: fileURL)
         }
@@ -387,7 +380,7 @@ struct GeminiInteractionResponseTests {
         let client = GeminiFileTranscriptionClient(apiKey: "gemini-key", urlSession: geminiStubbedURLSession())
         let fileURL = geminiTemporaryAudioFileURL(named: "gemini-bad-request.wav")
 
-        await #expect(throws: SpeechError.uploadFailed(provider: .gemini, reason: "Unsupported audio")) {
+        await #expect(throws: SpeechFailure(.server, statusCode: 400)) {
             _ = try await client.transcribeAudioFileDetailed(file: fileURL)
         }
 
@@ -442,8 +435,7 @@ struct GeminiInteractionResponseTests {
         await #expect(
             throws: SpeechError.providerFailure(
                 provider: .gemini,
-                reason: "Interaction interactions/abc123 did not finish within 1 seconds."
-            )
+                reason: .requestFailed)
         ) {
             _ = try await client.transcribeAudioFileDetailed(
                 file: fileURL,
@@ -661,8 +653,8 @@ struct GeminiRealtimeServiceTests {
         await service.handleMessageForTesting(.setupComplete)
         await service.handleMessageForTesting(.error("Bad audio"))
 
-        #expect(service.connectionState == .error("Bad audio"))
-        #expect(service.lastError as? GeminiRealtimeError == .connectionFailed("Bad audio"))
+        #expect(service.connectionState == .error("The realtime session failed."))
+        #expect(service.lastError as? SpeechFailure == SpeechFailure(.server))
     }
 
     @Test("A go away message commits the partial transcript and stops the session")
@@ -673,7 +665,7 @@ struct GeminiRealtimeServiceTests {
         await service.handleMessageForTesting(.interimTranscription("hello there"))
         await service.handleMessageForTesting(.goAway(timeLeft: "10s"))
 
-        #expect(service.lastError as? GeminiRealtimeError == .sessionEnding("10s remaining"))
+        #expect(service.lastError as? GeminiRealtimeError == .sessionEnding(.sessionEnding))
         #expect(service.partialTranscriptEntry == nil)
         #expect(service.transcriptEntries.count == 1)
         #expect(service.transcriptEntries.first?.text == "hello there")
@@ -716,8 +708,7 @@ struct GeminiRealtimeServiceTests {
         #expect(
             service.lastError as? SpeechError == .providerFailure(
                 provider: .gemini,
-                reason: "customVocabulary cannot contain more than 1000 terms."
-            )
+                reason: .requestFailed)
         )
         #expect(service.connectionState != .listening)
     }
@@ -755,13 +746,12 @@ struct SpeechRealtimeErrorRedactionTests {
         #expect(!redacted.localizedDescription.contains("SECRET"))
         #expect(!"\(redacted)".contains("SECRET"))
         #expect(!"\(redactedNSError.userInfo)".contains("SECRET"))
-        #expect(redactedNSError.domain == URLError.errorDomain)
-        #expect(redactedNSError.code == URLError.Code.badServerResponse.rawValue)
+        #expect(redacted as? SpeechFailure == SpeechFailure(.transport))
     }
 
     @Test("Non-URL errors pass through unchanged")
     func nonURLErrorsPassThroughUnchanged() {
-        let error = GeminiRealtimeError.connectionFailed("Bad audio")
+        let error = GeminiRealtimeError.connectionFailed(.requestFailed)
 
         #expect(SpeechRealtimeErrorRedaction.redacted(error) as? GeminiRealtimeError == error)
     }
@@ -775,7 +765,7 @@ struct SpeechFileUploadSupportRawPCMTests {
         let fileURL = try geminiTemporarySparseFileURL(named: "raw-pcm-long.pcm", size: 96_000)
 
         #expect(
-            throws: SpeechError.uploadFailed(provider: .meta, reason: "Audio exceeds the 2 second limit.")
+            throws: SpeechError.uploadFailed(provider: .meta, reason: .uploadFailed)
         ) {
             try SpeechFileUploadSupport.validateRawPCMDuration(
                 fileURL: fileURL,

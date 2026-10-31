@@ -10,6 +10,7 @@ extension SpeechService {
             return service
         }
         let service = AppleSpeechService()
+        service.recordingRetention = recordingRetention
         appleRealtimeServiceStorage = service
         return service
     }
@@ -49,18 +50,20 @@ extension SpeechService {
         file: URL,
         options: AppleSpeechFileTranscriptionOptions? = nil
     ) async throws -> AppleSpeechFileTranscriptionResponse {
-        guard let apple else {
-            throw SpeechError.providerNotConfigured(.apple)
-        }
-        let client = AppleSpeechFileTranscriptionClient()
-        do {
-            return try await client.transcribeAudioFileDetailed(
-                file: file,
-                configuration: apple,
-                options: options
-            )
-        } catch {
-            throw wrap(error, for: .apple)
+        return try await withFileOperation { [self] in
+            guard let apple else {
+                throw SpeechError.providerNotConfigured(.apple)
+            }
+            let client = AppleSpeechFileTranscriptionClient()
+            do {
+                return try await client.transcribeAudioFileDetailed(
+                    file: file,
+                    configuration: apple,
+                    options: options
+                )
+            } catch {
+                throw wrap(error, for: .apple)
+            }
         }
     }
 
@@ -78,7 +81,7 @@ extension SpeechService {
     ) async throws -> AppleSpeechFileTranscriptionResponse {
         let didStartAccess = securityScopedURL.startAccessingSecurityScopedResource()
         guard didStartAccess else {
-            throw SpeechError.providerFailure(provider: .apple, reason: "Failed to access security-scoped resource.")
+            throw SpeechError.providerFailure(provider: .apple, reason: .requestFailed)
         }
         defer { securityScopedURL.stopAccessingSecurityScopedResource() }
         return try await transcribeAppleAudioFile(file: securityScopedURL, options: options)

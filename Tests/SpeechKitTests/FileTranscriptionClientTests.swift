@@ -39,7 +39,7 @@ struct FileTranscriptionClientTests {
         let client = AquaFileTranscriptionClient(apiKey: "aqua-key")
         let fileURL = temporaryAudioFileURL(named: "sample.aac")
 
-        #expect(throws: SpeechError.providerFailure(provider: .aqua, reason: "Unsupported file extension: aac.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .aqua, reason: .requestFailed)) {
             _ = try client.makeRequest(file: fileURL)
         }
     }
@@ -49,7 +49,7 @@ struct FileTranscriptionClientTests {
         let client = AquaFileTranscriptionClient(apiKey: "aqua-key")
         let fileURL = try temporarySparseFileURL(named: "large.mp3", size: 25 * 1024 * 1024 + 1)
 
-        #expect(throws: SpeechError.uploadFailed(provider: .aqua, reason: "Audio file exceeds 26214400 byte limit.")) {
+        #expect(throws: SpeechError.uploadFailed(provider: .aqua, reason: .uploadFailed)) {
             _ = try client.makeRequest(file: fileURL)
         }
     }
@@ -98,7 +98,7 @@ struct FileTranscriptionClientTests {
         let client = CohereFileTranscriptionClient(apiKey: "cohere-key")
         let fileURL = temporaryAudioFileURL(named: "sample.m4a")
 
-        await #expect(throws: SpeechError.providerFailure(provider: .cohere, reason: "Unsupported file extension: m4a.")) {
+        await #expect(throws: SpeechError.providerFailure(provider: .cohere, reason: .requestFailed)) {
             _ = try await client.makeRequest(
                 file: fileURL,
                 modelID: .transcribe032026,
@@ -113,7 +113,7 @@ struct FileTranscriptionClientTests {
         let client = CohereFileTranscriptionClient(apiKey: "cohere-key")
         let fileURL = try temporarySparseFileURL(named: "large.wav", size: 25 * 1024 * 1024 + 1)
 
-        await #expect(throws: SpeechError.uploadFailed(provider: .cohere, reason: "Audio file exceeds 26214400 byte limit.")) {
+        await #expect(throws: SpeechError.uploadFailed(provider: .cohere, reason: .uploadFailed)) {
             _ = try await client.makeRequest(
                 file: fileURL,
                 modelID: .transcribe032026,
@@ -251,13 +251,13 @@ struct FileTranscriptionClientTests {
         let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
         let fileURL = temporaryAudioFileURL(named: "sample.wav")
 
-        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "Use either language or languages with gpt-transcribe, not both.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)) {
             _ = try client.makeRequest(
                 file: fileURL,
                 options: OpenAIFileTranscriptionOptions(modelID: .gptTranscribe, language: "en", languages: ["fr"])
             )
         }
-        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "keywords cannot contain <, >, carriage returns, or line feeds.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)) {
             _ = try client.makeRequest(
                 file: fileURL,
                 options: OpenAIFileTranscriptionOptions(modelID: .gptTranscribe, keywords: ["bad\nkeyword"])
@@ -348,7 +348,7 @@ struct FileTranscriptionClientTests {
         let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
         let fileURL = temporaryAudioFileURL(named: "sample.flac")
 
-        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "Unsupported file extension: flac.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)) {
             _ = try client.makeRequest(file: fileURL)
         }
     }
@@ -358,7 +358,7 @@ struct FileTranscriptionClientTests {
         let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
         let fileURL = try temporarySparseFileURL(named: "large.mp3", size: 25 * 1024 * 1024 + 1)
 
-        #expect(throws: SpeechError.uploadFailed(provider: .openAI, reason: "Audio file exceeds 26214400 byte limit.")) {
+        #expect(throws: SpeechError.uploadFailed(provider: .openAI, reason: .uploadFailed)) {
             _ = try client.makeRequest(file: fileURL)
         }
     }
@@ -368,7 +368,7 @@ struct FileTranscriptionClientTests {
         let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
         let fileURL = temporaryAudioFileURL(named: "sample.wav")
 
-        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "timestampGranularities are only supported with whisper-1.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)) {
             _ = try client.makeRequest(
                 file: fileURL,
                 options: OpenAIFileTranscriptionOptions(timestampGranularities: [.word])
@@ -381,7 +381,7 @@ struct FileTranscriptionClientTests {
         let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
         let fileURL = temporaryAudioFileURL(named: "sample.wav")
 
-        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "knownSpeakers require gpt-4o-transcribe-diarize.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)) {
             _ = try client.makeRequest(
                 file: fileURL,
                 options: OpenAIFileTranscriptionOptions(
@@ -397,7 +397,7 @@ struct FileTranscriptionClientTests {
         let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
         let fileURL = temporaryAudioFileURL(named: "sample.wav")
 
-        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "prompt is not supported with gpt-4o-transcribe-diarize.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)) {
             _ = try client.makeRequest(
                 file: fileURL,
                 options: OpenAIFileTranscriptionOptions(
@@ -407,7 +407,7 @@ struct FileTranscriptionClientTests {
             )
         }
 
-        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "includeLogprobs is not supported with gpt-4o-transcribe-diarize.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)) {
             _ = try client.makeRequest(
                 file: fileURL,
                 options: OpenAIFileTranscriptionOptions(
@@ -424,7 +424,7 @@ struct FileTranscriptionClientTests {
         let client = OpenAIFileTranscriptionClient(apiKey: "openai-key")
         let fileURL = temporaryAudioFileURL(named: "sample.wav")
 
-        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "knownSpeakers supports at most 4 speakers.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)) {
             _ = try client.makeRequest(
                 file: fileURL,
                 options: OpenAIFileTranscriptionOptions(
@@ -436,7 +436,7 @@ struct FileTranscriptionClientTests {
             )
         }
 
-        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "diarization VAD threshold must be between 0 and 1.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)) {
             _ = try client.makeRequest(
                 file: fileURL,
                 options: OpenAIFileTranscriptionOptions(
@@ -446,7 +446,7 @@ struct FileTranscriptionClientTests {
             )
         }
 
-        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: "knownSpeakers referenceDataURL must be an audio data URL.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)) {
             _ = try client.makeRequest(
                 file: fileURL,
                 options: OpenAIFileTranscriptionOptions(
@@ -611,7 +611,7 @@ struct FileTranscriptionClientTests {
         let client = GrokFileTranscriptionClient(apiKey: "xai-key")
         let fileURL = temporaryAudioFileURL(named: "sample.webm")
 
-        #expect(throws: SpeechError.providerFailure(provider: .grok, reason: "Unsupported file extension: webm.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .grok, reason: .requestFailed)) {
             _ = try client.makeRequest(file: fileURL)
         }
     }
@@ -621,7 +621,7 @@ struct FileTranscriptionClientTests {
         let client = GrokFileTranscriptionClient(apiKey: "xai-key")
         let fileURL = try temporarySparseFileURL(named: "large.mp3", size: 500 * 1024 * 1024 + 1)
 
-        #expect(throws: SpeechError.uploadFailed(provider: .grok, reason: "Audio file exceeds 524288000 byte limit.")) {
+        #expect(throws: SpeechError.uploadFailed(provider: .grok, reason: .uploadFailed)) {
             _ = try client.makeRequest(file: fileURL)
         }
     }
@@ -631,7 +631,7 @@ struct FileTranscriptionClientTests {
         let client = GrokFileTranscriptionClient(apiKey: "xai-key")
         let fileURL = temporaryAudioFileURL(named: "sample.pcm")
 
-        #expect(throws: SpeechError.providerFailure(provider: .grok, reason: "Raw audio requires sample_rate.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .grok, reason: .requestFailed)) {
             _ = try client.makeRequest(
                 file: fileURL,
                 options: GrokFileTranscriptionOptions(audioFormat: .pcm)
@@ -644,7 +644,7 @@ struct FileTranscriptionClientTests {
         let client = GrokFileTranscriptionClient(apiKey: "xai-key")
         let fileURL = temporaryAudioFileURL(named: "sample.pcm")
 
-        #expect(throws: SpeechError.providerFailure(provider: .grok, reason: "Unsupported sample_rate: 12345.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .grok, reason: .requestFailed)) {
             _ = try client.makeRequest(
                 file: fileURL,
                 options: GrokFileTranscriptionOptions(audioFormat: .pcm, sampleRate: 12345)

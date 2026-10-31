@@ -3,17 +3,22 @@ import Foundation
 /// Configuration for ElevenLabs realtime and file transcription.
 public struct ElevenLabsConfiguration: Sendable, Equatable {
     /// The credential used for realtime and file transcription requests.
-    public var credential: SpeechCredential
-    /// The ElevenLabs API key used for realtime and file transcription requests.
-    ///
-    /// Reading this property returns the key for a ``SpeechCredential/apiKey(_:)``
-    /// credential and an empty string for a ``SpeechCredential/token(_:)``
-    /// credential. Writing it replaces ``credential`` with
-    /// ``SpeechCredential/apiKey(_:)``.
-    public var apiKey: String {
-        get { credential.staticAPIKey }
-        set { credential = .apiKey(newValue) }
+    var credential: SpeechCredential
+    private var fileCredential: SpeechCredential? = nil
+    private var realtimeCredential: SpeechCredential? = nil
+    func credential(for capability: SpeechCapability) -> SpeechCredential {
+        (capability == .fileTranscription ? fileCredential : realtimeCredential) ?? credential
     }
+    public mutating func setCredential(_ credential: SpeechCredential, for capability: SpeechCapability) {
+        if capability == .fileTranscription { fileCredential = credential } else { realtimeCredential = credential }
+    }
+    public func credentialKind(for capability: SpeechCapability) -> SpeechCredential.Kind { credential(for: capability).kind }
+    public func hasCredential(for capability: SpeechCapability) -> Bool { credential(for: capability).isConfigured }
+    /// The configured authorization mode, without exposing its value.
+    public var credentialKind: SpeechCredential.Kind { credential.kind }
+    public var hasCredential: Bool { credential.isConfigured }
+    public mutating func setCredential(_ credential: SpeechCredential) { self.credential = credential; fileCredential = nil; realtimeCredential = nil }
+
     /// The ElevenLabs model used by ``SpeechService/startListening()``.
     public var realtimeModelID: ElevenLabsModelID
     /// The ElevenLabs model used by file transcription APIs.
@@ -25,7 +30,7 @@ public struct ElevenLabsConfiguration: Sendable, Equatable {
 
     /// Creates an ElevenLabs configuration with a long-lived API key.
     public init(
-        apiKey: String,
+        apiKey: String = "",
         realtimeModelID: ElevenLabsModelID = .scribeV2Realtime,
         fileTranscriptionModelID: ElevenLabsModelID = .scribeV2,
         fileEndpoint: URL? = nil,
@@ -59,17 +64,22 @@ public struct ElevenLabsConfiguration: Sendable, Equatable {
 /// Configuration for Cohere file transcription.
 public struct CohereConfiguration: Sendable, Equatable {
     /// The credential used for file transcription requests.
-    public var credential: SpeechCredential
-    /// The Cohere API key used for file transcription requests.
-    ///
-    /// Reading this property returns the key for a ``SpeechCredential/apiKey(_:)``
-    /// credential and an empty string for a ``SpeechCredential/token(_:)``
-    /// credential. Writing it replaces ``credential`` with
-    /// ``SpeechCredential/apiKey(_:)``.
-    public var apiKey: String {
-        get { credential.staticAPIKey }
-        set { credential = .apiKey(newValue) }
+    var credential: SpeechCredential
+    private var fileCredential: SpeechCredential? = nil
+    private var realtimeCredential: SpeechCredential? = nil
+    func credential(for capability: SpeechCapability) -> SpeechCredential {
+        (capability == .fileTranscription ? fileCredential : realtimeCredential) ?? credential
     }
+    public mutating func setCredential(_ credential: SpeechCredential, for capability: SpeechCapability) {
+        if capability == .fileTranscription { fileCredential = credential } else { realtimeCredential = credential }
+    }
+    public func credentialKind(for capability: SpeechCapability) -> SpeechCredential.Kind { credential(for: capability).kind }
+    public func hasCredential(for capability: SpeechCapability) -> Bool { credential(for: capability).isConfigured }
+    /// The configured authorization mode, without exposing its value.
+    public var credentialKind: SpeechCredential.Kind { credential.kind }
+    public var hasCredential: Bool { credential.isConfigured }
+    public mutating func setCredential(_ credential: SpeechCredential) { self.credential = credential; fileCredential = nil; realtimeCredential = nil }
+
     /// The Cohere transcription model used for file uploads.
     public var modelID: CohereModelID
     /// The language hint sent with Cohere transcription requests.
@@ -81,7 +91,7 @@ public struct CohereConfiguration: Sendable, Equatable {
 
     /// Creates a Cohere configuration with a long-lived API key and a typed language value.
     public init(
-        apiKey: String,
+        apiKey: String = "",
         modelID: CohereModelID = .transcribe032026,
         language: CohereLanguage = .english,
         temperature: Double? = nil,
@@ -113,19 +123,18 @@ public struct CohereConfiguration: Sendable, Equatable {
 
     /// Creates a Cohere configuration from a raw language code.
     ///
-    /// This initializer takes an API key. Assign ``credential`` after init to
-    /// use a short-lived token instead.
+    /// This initializer takes an API key. Use ``setCredential(_:)`` to replace authorization.
     ///
     /// - Throws: ``SpeechError/providerFailure(provider:reason:)`` when `languageCode` is not supported.
     public init(
-        apiKey: String,
+        apiKey: String = "",
         modelID: CohereModelID = .transcribe032026,
         languageCode: String,
         temperature: Double? = nil,
         fileEndpoint: URL? = nil
     ) throws {
         guard let language = CohereLanguage(rawValue: languageCode) else {
-            throw SpeechError.providerFailure(provider: .cohere, reason: "Unsupported language: \(languageCode).")
+            throw SpeechError.providerFailure(provider: .cohere, reason: .requestFailed)
         }
         self.init(
             apiKey: apiKey,
@@ -140,17 +149,22 @@ public struct CohereConfiguration: Sendable, Equatable {
 /// Configuration for Grok file transcription.
 public struct GrokConfiguration: Sendable, Equatable {
     /// The credential used for Grok transcription requests.
-    public var credential: SpeechCredential
-    /// The xAI API key used for Grok transcription requests.
-    ///
-    /// Reading this property returns the key for a ``SpeechCredential/apiKey(_:)``
-    /// credential and an empty string for a ``SpeechCredential/token(_:)``
-    /// credential. Writing it replaces ``credential`` with
-    /// ``SpeechCredential/apiKey(_:)``.
-    public var apiKey: String {
-        get { credential.staticAPIKey }
-        set { credential = .apiKey(newValue) }
+    var credential: SpeechCredential
+    private var fileCredential: SpeechCredential? = nil
+    private var realtimeCredential: SpeechCredential? = nil
+    func credential(for capability: SpeechCapability) -> SpeechCredential {
+        (capability == .fileTranscription ? fileCredential : realtimeCredential) ?? credential
     }
+    public mutating func setCredential(_ credential: SpeechCredential, for capability: SpeechCapability) {
+        if capability == .fileTranscription { fileCredential = credential } else { realtimeCredential = credential }
+    }
+    public func credentialKind(for capability: SpeechCapability) -> SpeechCredential.Kind { credential(for: capability).kind }
+    public func hasCredential(for capability: SpeechCapability) -> Bool { credential(for: capability).isConfigured }
+    /// The configured authorization mode, without exposing its value.
+    public var credentialKind: SpeechCredential.Kind { credential.kind }
+    public var hasCredential: Bool { credential.isConfigured }
+    public mutating func setCredential(_ credential: SpeechCredential) { self.credential = credential; fileCredential = nil; realtimeCredential = nil }
+
     /// The Grok speech-to-text model used for file uploads.
     public var modelID: GrokModelID
     /// An optional language hint.
@@ -174,7 +188,7 @@ public struct GrokConfiguration: Sendable, Equatable {
 
     /// Creates a Grok configuration with a long-lived API key and a typed language value.
     public init(
-        apiKey: String,
+        apiKey: String = "",
         modelID: GrokModelID = .stt,
         language: GrokLanguage? = nil,
         format: Bool = false,
@@ -230,12 +244,11 @@ public struct GrokConfiguration: Sendable, Equatable {
 
     /// Creates a Grok configuration from an optional raw language code.
     ///
-    /// This initializer takes an API key. Assign ``credential`` after init to
-    /// use a short-lived token instead.
+    /// This initializer takes an API key. Use ``setCredential(_:)`` to replace authorization.
     ///
     /// - Throws: ``SpeechError/providerFailure(provider:reason:)`` when `languageCode` is not supported.
     public init(
-        apiKey: String,
+        apiKey: String = "",
         modelID: GrokModelID = .stt,
         languageCode: String?,
         format: Bool = false,
@@ -249,7 +262,7 @@ public struct GrokConfiguration: Sendable, Equatable {
     ) throws {
         let language = try languageCode.map { languageCode in
             guard let language = GrokLanguage(rawValue: languageCode) else {
-                throw SpeechError.providerFailure(provider: .grok, reason: "Unsupported language: \(languageCode).")
+                throw SpeechError.providerFailure(provider: .grok, reason: .requestFailed)
             }
             return language
         }
@@ -272,17 +285,22 @@ public struct GrokConfiguration: Sendable, Equatable {
 /// Configuration for Aqua file transcription.
 public struct AquaConfiguration: Sendable, Equatable {
     /// The credential used for file transcription requests.
-    public var credential: SpeechCredential
-    /// The Aqua API key used for file transcription requests.
-    ///
-    /// Reading this property returns the key for a ``SpeechCredential/apiKey(_:)``
-    /// credential and an empty string for a ``SpeechCredential/token(_:)``
-    /// credential. Writing it replaces ``credential`` with
-    /// ``SpeechCredential/apiKey(_:)``.
-    public var apiKey: String {
-        get { credential.staticAPIKey }
-        set { credential = .apiKey(newValue) }
+    var credential: SpeechCredential
+    private var fileCredential: SpeechCredential? = nil
+    private var realtimeCredential: SpeechCredential? = nil
+    func credential(for capability: SpeechCapability) -> SpeechCredential {
+        (capability == .fileTranscription ? fileCredential : realtimeCredential) ?? credential
     }
+    public mutating func setCredential(_ credential: SpeechCredential, for capability: SpeechCapability) {
+        if capability == .fileTranscription { fileCredential = credential } else { realtimeCredential = credential }
+    }
+    public func credentialKind(for capability: SpeechCapability) -> SpeechCredential.Kind { credential(for: capability).kind }
+    public func hasCredential(for capability: SpeechCapability) -> Bool { credential(for: capability).isConfigured }
+    /// The configured authorization mode, without exposing its value.
+    public var credentialKind: SpeechCredential.Kind { credential.kind }
+    public var hasCredential: Bool { credential.isConfigured }
+    public mutating func setCredential(_ credential: SpeechCredential) { self.credential = credential; fileCredential = nil; realtimeCredential = nil }
+
     /// The Aqua transcription model used for file uploads.
     public var modelID: AquaModelID
     /// An optional language hint.
@@ -292,7 +310,7 @@ public struct AquaConfiguration: Sendable, Equatable {
 
     /// Creates an Aqua configuration with a long-lived API key and a typed language value.
     public init(
-        apiKey: String,
+        apiKey: String = "",
         modelID: AquaModelID = .avalonV15,
         language: AquaLanguage? = nil,
         fileEndpoint: URL? = nil
@@ -320,19 +338,18 @@ public struct AquaConfiguration: Sendable, Equatable {
 
     /// Creates an Aqua configuration from an optional raw language code.
     ///
-    /// This initializer takes an API key. Assign ``credential`` after init to
-    /// use a short-lived token instead.
+    /// This initializer takes an API key. Use ``setCredential(_:)`` to replace authorization.
     ///
     /// - Throws: ``SpeechError/providerFailure(provider:reason:)`` when `languageCode` is not supported.
     public init(
-        apiKey: String,
+        apiKey: String = "",
         modelID: AquaModelID = .avalonV15,
         languageCode: String?,
         fileEndpoint: URL? = nil
     ) throws {
         let language = try languageCode.map { languageCode in
             guard let language = AquaLanguage(rawValue: languageCode) else {
-                throw SpeechError.providerFailure(provider: .aqua, reason: "Unsupported language: \(languageCode).")
+                throw SpeechError.providerFailure(provider: .aqua, reason: .requestFailed)
             }
             return language
         }
@@ -419,17 +436,22 @@ public struct AppleSpeechFileTranscriptionOptions: Sendable, Equatable {
 /// Configuration for OpenAI realtime and file transcription.
 public struct OpenAIConfiguration: Sendable, Equatable {
     /// The credential used for realtime and file transcription requests.
-    public var credential: SpeechCredential
-    /// The OpenAI API key used for realtime and file transcription requests.
-    ///
-    /// Reading this property returns the key for a ``SpeechCredential/apiKey(_:)``
-    /// credential and an empty string for a ``SpeechCredential/token(_:)``
-    /// credential. Writing it replaces ``credential`` with
-    /// ``SpeechCredential/apiKey(_:)``.
-    public var apiKey: String {
-        get { credential.staticAPIKey }
-        set { credential = .apiKey(newValue) }
+    var credential: SpeechCredential
+    private var fileCredential: SpeechCredential? = nil
+    private var realtimeCredential: SpeechCredential? = nil
+    func credential(for capability: SpeechCapability) -> SpeechCredential {
+        (capability == .fileTranscription ? fileCredential : realtimeCredential) ?? credential
     }
+    public mutating func setCredential(_ credential: SpeechCredential, for capability: SpeechCapability) {
+        if capability == .fileTranscription { fileCredential = credential } else { realtimeCredential = credential }
+    }
+    public func credentialKind(for capability: SpeechCapability) -> SpeechCredential.Kind { credential(for: capability).kind }
+    public func hasCredential(for capability: SpeechCapability) -> Bool { credential(for: capability).isConfigured }
+    /// The configured authorization mode, without exposing its value.
+    public var credentialKind: SpeechCredential.Kind { credential.kind }
+    public var hasCredential: Bool { credential.isConfigured }
+    public mutating func setCredential(_ credential: SpeechCredential) { self.credential = credential; fileCredential = nil; realtimeCredential = nil }
+
     /// The OpenAI file transcription model used for uploads.
     public var fileTranscriptionModelID: OpenAIFileTranscriptionModelID
     /// The OpenAI realtime session model used for WebSocket transcription sessions.
@@ -463,7 +485,7 @@ public struct OpenAIConfiguration: Sendable, Equatable {
 
     /// Creates an OpenAI configuration with a long-lived API key.
     public init(
-        apiKey: String,
+        apiKey: String = "",
         fileTranscriptionModelID: OpenAIFileTranscriptionModelID = .gptTranscribe,
         realtimeSessionModelID: OpenAIRealtimeSessionModelID = .gptRealtime,
         realtimeTranscriptionModelID: OpenAIRealtimeTranscriptionModelID = .gptLiveTranscribe,
@@ -541,17 +563,22 @@ public struct OpenAIConfiguration: Sendable, Equatable {
 /// Configuration for Meta realtime and file transcription.
 public struct MetaConfiguration: Sendable, Equatable {
     /// The credential used for realtime and file transcription requests.
-    public var credential: SpeechCredential
-    /// The Meta API key used for realtime and file transcription requests.
-    ///
-    /// Reading this property returns the key for a ``SpeechCredential/apiKey(_:)``
-    /// credential and an empty string for a ``SpeechCredential/token(_:)``
-    /// credential. Writing it replaces ``credential`` with
-    /// ``SpeechCredential/apiKey(_:)``.
-    public var apiKey: String {
-        get { credential.staticAPIKey }
-        set { credential = .apiKey(newValue) }
+    var credential: SpeechCredential
+    private var fileCredential: SpeechCredential? = nil
+    private var realtimeCredential: SpeechCredential? = nil
+    func credential(for capability: SpeechCapability) -> SpeechCredential {
+        (capability == .fileTranscription ? fileCredential : realtimeCredential) ?? credential
     }
+    public mutating func setCredential(_ credential: SpeechCredential, for capability: SpeechCapability) {
+        if capability == .fileTranscription { fileCredential = credential } else { realtimeCredential = credential }
+    }
+    public func credentialKind(for capability: SpeechCapability) -> SpeechCredential.Kind { credential(for: capability).kind }
+    public func hasCredential(for capability: SpeechCapability) -> Bool { credential(for: capability).isConfigured }
+    /// The configured authorization mode, without exposing its value.
+    public var credentialKind: SpeechCredential.Kind { credential.kind }
+    public var hasCredential: Bool { credential.isConfigured }
+    public mutating func setCredential(_ credential: SpeechCredential) { self.credential = credential; fileCredential = nil; realtimeCredential = nil }
+
     /// The Meta transcription model used for file uploads and realtime sessions.
     public var modelID: MetaModelID
     /// The transcription mode used for file uploads.
@@ -571,7 +598,7 @@ public struct MetaConfiguration: Sendable, Equatable {
 
     /// Creates a Meta configuration with a long-lived API key and typed language values.
     public init(
-        apiKey: String,
+        apiKey: String = "",
         modelID: MetaModelID = .museVoiceTranscribe1,
         mode: MetaTranscriptionMode = .endpointing,
         languageBias: [MetaLanguage] = [],
@@ -622,12 +649,11 @@ public struct MetaConfiguration: Sendable, Equatable {
     /// Meta biases transcription with language names such as `"English"` or
     /// `"Mandarin Chinese"` instead of BCP-47 codes.
     ///
-    /// This initializer takes an API key. Assign ``credential`` after init to
-    /// use a short-lived token instead.
+    /// This initializer takes an API key. Use ``setCredential(_:)`` to replace authorization.
     ///
     /// - Throws: ``SpeechError/providerFailure(provider:reason:)`` when a name in `languageNames` is not supported.
     public init(
-        apiKey: String,
+        apiKey: String = "",
         modelID: MetaModelID = .museVoiceTranscribe1,
         mode: MetaTranscriptionMode = .endpointing,
         languageNames: [String],
@@ -639,7 +665,7 @@ public struct MetaConfiguration: Sendable, Equatable {
     ) throws {
         let languageBias = try languageNames.map { languageName in
             guard let language = MetaLanguage(rawValue: languageName) else {
-                throw SpeechError.providerFailure(provider: .meta, reason: "Unsupported language: \(languageName).")
+                throw SpeechError.providerFailure(provider: .meta, reason: .requestFailed)
             }
             return language
         }
@@ -659,23 +685,29 @@ public struct MetaConfiguration: Sendable, Equatable {
 
 /// Configuration for Gemini realtime and file transcription.
 public struct GeminiConfiguration: Sendable, Equatable {
+    var routeOriginPolicy: GeminiRoute.OriginPolicy = .sameOrigin
     /// The credential used for realtime and file transcription requests.
     ///
     /// Google ephemeral tokens only authorize Gemini Live sessions. A
-    /// ``SpeechCredential/token(_:)`` credential used for Gemini REST
+    /// ``SpeechCredential/vendorToken(_:)`` credential used for Gemini REST
     /// transcription must be an OAuth access token or a credential accepted by
     /// your own proxy, because SpeechKit sends it as `Authorization: Bearer`.
-    public var credential: SpeechCredential
-    /// The Google AI API key used for realtime and file transcription requests.
-    ///
-    /// Reading this property returns the key for a ``SpeechCredential/apiKey(_:)``
-    /// credential and an empty string for a ``SpeechCredential/token(_:)``
-    /// credential. Writing it replaces ``credential`` with
-    /// ``SpeechCredential/apiKey(_:)``.
-    public var apiKey: String {
-        get { credential.staticAPIKey }
-        set { credential = .apiKey(newValue) }
+    var credential: SpeechCredential
+    private var fileCredential: SpeechCredential? = nil
+    private var realtimeCredential: SpeechCredential? = nil
+    func credential(for capability: SpeechCapability) -> SpeechCredential {
+        (capability == .fileTranscription ? fileCredential : realtimeCredential) ?? credential
     }
+    public mutating func setCredential(_ credential: SpeechCredential, for capability: SpeechCapability) {
+        if capability == .fileTranscription { fileCredential = credential } else { realtimeCredential = credential }
+    }
+    public func credentialKind(for capability: SpeechCapability) -> SpeechCredential.Kind { credential(for: capability).kind }
+    public func hasCredential(for capability: SpeechCapability) -> Bool { credential(for: capability).isConfigured }
+    /// The configured authorization mode, without exposing its value.
+    public var credentialKind: SpeechCredential.Kind { credential.kind }
+    public var hasCredential: Bool { credential.isConfigured }
+    public mutating func setCredential(_ credential: SpeechCredential) { self.credential = credential; fileCredential = nil; realtimeCredential = nil }
+
     /// The Gemini transcription model used for file uploads.
     public var fileTranscriptionModelID: GeminiFileTranscriptionModelID
     /// The Gemini Live model used for realtime transcription.
@@ -716,7 +748,7 @@ public struct GeminiConfiguration: Sendable, Equatable {
 
     /// Creates a Gemini configuration with a long-lived API key.
     public init(
-        apiKey: String,
+        apiKey: String = "",
         fileTranscriptionModelID: GeminiFileTranscriptionModelID = .transcribe35,
         realtimeModelID: GeminiRealtimeModelID = .transcribeLive35,
         languageCodes: [String] = [],
@@ -790,17 +822,22 @@ public struct GeminiConfiguration: Sendable, Equatable {
 /// Configuration for Mistral Voxtral realtime and file transcription.
 public struct MistralConfiguration: Sendable, Equatable {
     /// The credential used for realtime and file transcription requests.
-    public var credential: SpeechCredential
-    /// The Mistral API key used for realtime and file transcription requests.
-    ///
-    /// Reading this property returns the key for a ``SpeechCredential/apiKey(_:)``
-    /// credential and an empty string for a ``SpeechCredential/token(_:)``
-    /// credential. Writing it replaces ``credential`` with
-    /// ``SpeechCredential/apiKey(_:)``.
-    public var apiKey: String {
-        get { credential.staticAPIKey }
-        set { credential = .apiKey(newValue) }
+    var credential: SpeechCredential
+    private var fileCredential: SpeechCredential? = nil
+    private var realtimeCredential: SpeechCredential? = nil
+    func credential(for capability: SpeechCapability) -> SpeechCredential {
+        (capability == .fileTranscription ? fileCredential : realtimeCredential) ?? credential
     }
+    public mutating func setCredential(_ credential: SpeechCredential, for capability: SpeechCapability) {
+        if capability == .fileTranscription { fileCredential = credential } else { realtimeCredential = credential }
+    }
+    public func credentialKind(for capability: SpeechCapability) -> SpeechCredential.Kind { credential(for: capability).kind }
+    public func hasCredential(for capability: SpeechCapability) -> Bool { credential(for: capability).isConfigured }
+    /// The configured authorization mode, without exposing its value.
+    public var credentialKind: SpeechCredential.Kind { credential.kind }
+    public var hasCredential: Bool { credential.isConfigured }
+    public mutating func setCredential(_ credential: SpeechCredential) { self.credential = credential; fileCredential = nil; realtimeCredential = nil }
+
     /// The Voxtral model used for file transcription.
     public var fileTranscriptionModelID: MistralFileTranscriptionModelID
     /// A two-letter ISO 639-1 language code used for file transcription, or `nil` to let Mistral detect the language.
@@ -824,7 +861,7 @@ public struct MistralConfiguration: Sendable, Equatable {
 
     /// Creates a Mistral configuration with a long-lived API key.
     public init(
-        apiKey: String,
+        apiKey: String = "",
         fileTranscriptionModelID: MistralFileTranscriptionModelID = .voxtralMiniTranscribe3,
         language: String? = nil,
         contextBias: [String] = [],
@@ -881,23 +918,26 @@ public struct MistralConfiguration: Sendable, Equatable {
 
 /// Configuration for Fish Audio file and realtime transcription.
 ///
-/// Fish Audio has no short-lived tokens. A ``SpeechCredential/token(_:)``
-/// credential works, but its value is sent as the same bearer secret as an
-/// API key, so fetch it from your own backend rather than shipping a key in
-/// the app.
+/// Native Fish Audio vendor tokens are unsupported. Use a relay or a custom
+/// proxy with ``SpeechCredential/bearer(_:)`` for server-owned authorization.
 public struct FishAudioConfiguration: Sendable, Equatable {
     /// The credential used for Fish Audio requests.
-    public var credential: SpeechCredential
-    /// The Fish Audio API key used for Fish Audio requests.
-    ///
-    /// Reading this property returns the key for a ``SpeechCredential/apiKey(_:)``
-    /// credential and an empty string for a ``SpeechCredential/token(_:)``
-    /// credential. Writing it replaces ``credential`` with
-    /// ``SpeechCredential/apiKey(_:)``.
-    public var apiKey: String {
-        get { credential.staticAPIKey }
-        set { credential = .apiKey(newValue) }
+    var credential: SpeechCredential
+    private var fileCredential: SpeechCredential? = nil
+    private var realtimeCredential: SpeechCredential? = nil
+    func credential(for capability: SpeechCapability) -> SpeechCredential {
+        (capability == .fileTranscription ? fileCredential : realtimeCredential) ?? credential
     }
+    public mutating func setCredential(_ credential: SpeechCredential, for capability: SpeechCapability) {
+        if capability == .fileTranscription { fileCredential = credential } else { realtimeCredential = credential }
+    }
+    public func credentialKind(for capability: SpeechCapability) -> SpeechCredential.Kind { credential(for: capability).kind }
+    public func hasCredential(for capability: SpeechCapability) -> Bool { credential(for: capability).isConfigured }
+    /// The configured authorization mode, without exposing its value.
+    public var credentialKind: SpeechCredential.Kind { credential.kind }
+    public var hasCredential: Bool { credential.isConfigured }
+    public mutating func setCredential(_ credential: SpeechCredential) { self.credential = credential; fileCredential = nil; realtimeCredential = nil }
+
     /// The Fish Audio model used for file transcription.
     public var fileTranscriptionModelID: FishAudioFileTranscriptionModelID
     /// A lowercase two-letter ISO 639-1 language hint used for file transcription, or `nil` to let Fish Audio detect the language.
@@ -921,7 +961,7 @@ public struct FishAudioConfiguration: Sendable, Equatable {
 
     /// Creates a Fish Audio configuration with a long-lived API key.
     public init(
-        apiKey: String,
+        apiKey: String = "",
         fileTranscriptionModelID: FishAudioFileTranscriptionModelID = .transcribe1Pro,
         language: String? = nil,
         timestamps: Bool = true,

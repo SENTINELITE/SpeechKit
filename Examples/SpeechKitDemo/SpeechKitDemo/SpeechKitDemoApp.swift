@@ -21,8 +21,16 @@ struct SpeechKitDemoApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .background(DemoPrivacyCover().frame(width: 0, height: 0))
                 .environment(\.speechService, speech)
                 .task {
+                    // Remove only the old app-generated output, never a caller-imported file.
+                    if let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                        try? FileManager.default.removeItem(at: documents.appendingPathComponent("voz-smoke-result.json"))
+                    }
+                    if let directory = try? DemoProtectedStorage.directory(named: "SmokeTests") {
+                        try? DemoProtectedStorage.removeExpiredFiles(in: directory, olderThan: 15 * 60)
+                    }
                     await prepareCachedVozModel()
                 }
 #if DEBUG
@@ -60,12 +68,24 @@ private enum VozSmokeTestRunner {
 
     @MainActor
     static func run(using speech: SpeechService) async {
-        let documentsDirectory = FileManager.default.urls(
-            for: .documentDirectory,
-            in: .userDomainMask
-        )[0]
-        let inputURL = documentsDirectory.appendingPathComponent(inputFileName)
-        let resultURL = documentsDirectory.appendingPathComponent(resultFileName)
+        let directory: URL
+        do {
+            directory = try DemoProtectedStorage.directory(named: "SmokeTests")
+            try DemoProtectedStorage.removeExpiredFiles(in: directory, olderThan: 15 * 60)
+        } catch {
+            print("VOZ smoke could not prepare protected storage.")
+            return
+        }
+        let inputURL = directory.appendingPathComponent(inputFileName)
+        let resultURL = directory.appendingPathComponent(resultFileName)
+        defer {
+            // The input is a dedicated smoke fixture, never a user-imported file.
+            try? FileManager.default.removeItem(at: inputURL)
+            Task {
+                do { try await Task.sleep(for: .seconds(15 * 60)) } catch { return }
+                try? FileManager.default.removeItem(at: resultURL)
+            }
+        }
 
         guard FileManager.default.fileExists(atPath: inputURL.path) else {
             write(
@@ -92,6 +112,7 @@ private enum VozSmokeTestRunner {
         let preparationStarted = Date()
 
         do {
+            try DemoProtectedStorage.protectFile(at: inputURL)
             try await speech.prepareVozModel()
             let preparationTime = Date().timeIntervalSince(preparationStarted)
             let response = try await speech.transcribeVozAudioFile(file: inputURL)
@@ -136,7 +157,7 @@ private enum VozSmokeTestRunner {
             }
         } catch {
             let preparationTime = Date().timeIntervalSince(preparationStarted)
-            let errorDescription = describe(error)
+            let errorDescription = "VOZ smoke transcription failed."
             write(
                 VozSmokeTestResult(
                     success: false,
@@ -153,18 +174,12 @@ private enum VozSmokeTestRunner {
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(result).write(to: url, options: .atomic)
+            try encoder.encode(result).write(to: url, options: [.atomic, .completeFileProtection])
+            try DemoProtectedStorage.protectFile(at: url)
         } catch {
-            print("VOZ smoke could not write result: \(describe(error))")
+            try? FileManager.default.removeItem(at: url)
+            print("VOZ smoke could not write result.")
         }
-    }
-
-    private static func describe(_ error: Error) -> String {
-        if let localizedError = error as? LocalizedError,
-           let errorDescription = localizedError.errorDescription {
-            return errorDescription
-        }
-        return String(describing: error)
     }
 }
 

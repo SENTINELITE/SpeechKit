@@ -1,51 +1,66 @@
-# Error Handling
+# Error handling
 
-Handle provider setup, validation, upload, and decoding failures.
+Handle configuration, authorization, transport, and provider failures without recording sensitive content.
 
 ## Overview
 
-Provider-neutral file transcription APIs throw ``SpeechError``. Realtime state exposes missing configuration and provider failures through ``SpeechService/lastError``.
+Provider-neutral file APIs return ``SpeechError`` for provider-attributed failures and can also throw ``SpeechFailure`` for authorization/transport boundaries. Realtime failures are observable through ``SpeechService/lastError`` and ``SpeechService/realtimeConnectionState``. Do not assume every error is a `SpeechError` or parse localized strings.
 
 ```swift
 do {
-    let text = try await speech.transcribeAudioFile(
-        provider: .grok,
-        file: audioFileURL
-    )
-    print(text)
+    let text = try await speech.transcribeAudioFile(provider: .grok, file: audioFileURL)
+    _ = text.isEmpty
+} catch is CancellationError {
+    return
+} catch let failure as SpeechFailure {
+    switch failure.category {
+    case .cancelled:
+        return
+    case .attestationUnsupported:
+        break
+    case .staticKeysDisallowed, .unsupportedAuthentication:
+        break
+    default:
+        break
+    }
 } catch let error as SpeechError {
-    print(error.localizedDescription)
+    if case .httpFailure(_, let statusCode) = error {
+        _ = statusCode
+    }
 } catch {
-    print(error.localizedDescription)
+    _ = "Transcription could not be completed."
 }
 ```
 
-## Common Failures
+Route those branches to your application's status UI. The example deliberately logs neither the transcript nor raw errors. Avoid transcript text, file paths, request URLs, bodies, credential values, and arbitrary errors in production telemetry. Even bounded metadata needs a retention/access policy. Caller-created errors and application logging remain your responsibility.
 
-- ``SpeechError/providerNotConfigured(_:)`` means the selected file transcription provider has no configuration on ``SpeechService``.
-- ``SpeechError/realtimeProviderNotConfigured(_:)`` means the selected realtime provider has no configuration on ``SpeechService``.
-- ``SpeechError/invalidOptionsForProvider(expected:received:)`` means the request used options for a different provider.
-- ``SpeechError/uploadFailed(provider:reason:)`` means the upload was rejected or failed.
-- ``SpeechError/decodingFailed(provider:reason:)`` means the provider response could not be decoded.
-- ``SpeechError/providerFailure(provider:reason:)`` covers validation failures, timeouts, and provider-specific failures without a narrower case.
-- ``SpeechError/appleSpeechUnavailable`` means Apple local Speech was requested on an OS version before iOS 26, macOS 26, or visionOS 26.
-- ``SpeechError/appleSpeechNotSupportedOnWatch`` records the watchOS boundary for Apple local Speech.
-- ``SpeechError/appleSpeechUnsupportedLocale(localeIdentifier:)`` means Apple cannot provide local transcription for the selected locale.
-- ``SpeechError/appleSpeechAssetsUnavailable(localeIdentifier:)`` means the selected locale needs local Apple speech assets and automatic preparation is disabled.
+## Changed error payloads
 
-Realtime failures are observable through ``SpeechService/realtimeConnectionState`` and ``SpeechService/lastError``.
+``SpeechError/uploadFailed(provider:reason:)``, ``SpeechError/decodingFailed(provider:reason:)``, and ``SpeechError/providerFailure(provider:reason:)`` carry ``SpeechFailureReason`` instead of arbitrary strings. ``SpeechError/httpFailure(provider:statusCode:)`` exposes numeric status without a response body. ``SpeechFailure`` has a bounded `category`, optional `statusCode`, and fixed descriptions; resolver exceptions become `credentialResolution`, not their original callback text.
+
+Provider-specific realtime errors also use bounded reasons. Fish Audio exposes only numeric codes in `serverError(code:)` and `sessionClosed(code:)`. See <doc:MigratingTo3> for all changed cases. A normal async file cancellation can throw `CancellationError`; safe observable boundaries can represent it as `SpeechFailure.Category.cancelled`. Treat both as cancellation, not a reason to retry audio.
+
+Missing configurations, mismatched options, invalid responses, and Apple's availability/locale/assets cases remain explicit. Credential-free relay configurations do not need per-provider keys. HTTP 401 or a dropped socket is not permission to blindly resend uploaded or committed audio; unknown outcomes require reconciliation in your application.
 
 ## Topics
 
-### Provider-Neutral Errors
+### Provider-neutral errors
 
 - ``SpeechError``
+- ``SpeechError/httpFailure(provider:statusCode:)``
+- ``SpeechFailure``
+- ``SpeechFailure/Category``
+- ``SpeechFailureReason``
+- ``SpeechError/providerNotConfigured(_:)``
+- ``SpeechError/realtimeProviderNotConfigured(_:)``
 - ``SpeechError/appleSpeechUnavailable``
+- ``SpeechError/appleSpeechNotSupportedOnWatch``
 - ``SpeechError/appleSpeechUnsupportedLocale(localeIdentifier:)``
 - ``SpeechError/appleSpeechAssetsUnavailable(localeIdentifier:)``
 
-### ElevenLabs Realtime Errors
+### Realtime errors
 
 - ``ElevenLabsError``
+- ``SpeechAudioCaptureError``
 - ``SpeechService/lastError``
 - ``ElevenLabsService/lastError``

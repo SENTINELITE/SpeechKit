@@ -62,16 +62,15 @@ public struct MetaRealtimeOptions: Sendable, Equatable {
         if audioEncoding == .wav {
             throw SpeechError.providerFailure(
                 provider: .meta,
-                reason: "Realtime transcription requires a raw PCM audio encoding."
-            )
+                reason: .requestFailed)
         }
 
-        if let keyword = keywords.first(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-            throw SpeechError.providerFailure(provider: .meta, reason: "keywords cannot be empty: \"\(keyword)\".")
+        if keywords.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            throw SpeechError.providerFailure(provider: .meta, reason: .requestFailed)
         }
 
         if keywords.contains(where: { $0.contains(where: \.isNewline) }) {
-            throw SpeechError.providerFailure(provider: .meta, reason: "keywords cannot contain newlines.")
+            throw SpeechError.providerFailure(provider: .meta, reason: .requestFailed)
         }
     }
 
@@ -189,7 +188,7 @@ public enum MetaRealtimeError: Error, LocalizedError, Sendable, Equatable {
     /// SpeechKit could not construct a valid Meta realtime URL.
     case invalidURL
     /// The realtime connection failed.
-    case connectionFailed(String)
+    case connectionFailed(SpeechFailureReason)
     /// SpeechKit could not encode an outgoing realtime message.
     case encodingFailed
     /// The realtime WebSocket disconnected.

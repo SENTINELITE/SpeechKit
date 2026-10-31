@@ -361,8 +361,8 @@ struct FishAudioRealtimeMessageTests {
             (FishAudioRealtimeOptions(history: [FishAudioContextItem(role: .user, text: String(repeating: "x", count: 2001))]), "history items cannot be longer than 2000 Unicode code points."),
             (FishAudioRealtimeOptions(sampleRate: 44000), "Unsupported realtime sampleRate: 44000. Use 8000, 12000, 16000, 22050, 24000, 32000, 44100, or 48000.")
         ]
-        for (options, reason) in invalid {
-            #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: reason)) {
+        for (options, _) in invalid {
+            #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)) {
                 try options.validate()
             }
         }
@@ -386,12 +386,12 @@ struct FishAudioRealtimeMessageTests {
 
         try FishAudioRealtimeOptions(terms: [String(repeating: decomposedE, count: 16)]).validate()
         let longTerm = String(repeating: decomposedE, count: 17)
-        #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: "terms cannot be longer than 32 Unicode code points: \"\(longTerm)\".")) {
+        #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)) {
             try FishAudioRealtimeOptions(terms: [longTerm]).validate()
         }
 
         try FishAudioRealtimeOptions(history: [FishAudioContextItem(role: .user, text: String(repeating: decomposedE, count: 1000))]).validate()
-        #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: "history items cannot be longer than 2000 Unicode code points.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)) {
             try FishAudioRealtimeOptions(history: [FishAudioContextItem(role: .user, text: String(repeating: decomposedE, count: 1001))]).validate()
         }
     }
@@ -404,11 +404,11 @@ struct FishAudioRealtimeMessageTests {
         #expect(request.value(forHTTPHeaderField: "model") == "transcribe-stream-1")
 
         let endpoint = try #require(URL(string: "wss://proxy.example.com/fish/realtime"))
-        let proxied = try FishAudioRealtimeWebSocket.makeConnectRequest(credential: .token("fish-token"), options: FishAudioRealtimeOptions(), endpoint: endpoint)
+        let proxied = try FishAudioRealtimeWebSocket.makeConnectRequest(credential: .bearer("fish-token"), options: FishAudioRealtimeOptions(), endpoint: endpoint)
         #expect(proxied.url == endpoint)
         #expect(proxied.value(forHTTPHeaderField: "Authorization") == "Bearer fish-token")
 
-        #expect(throws: FishAudioRealtimeError.apiKeyMissing) {
+        #expect(throws: SpeechFailure(.invalidCredential)) {
             try FishAudioRealtimeWebSocket.makeConnectRequest(credential: .apiKey(""), options: FishAudioRealtimeOptions())
         }
     }
@@ -420,12 +420,12 @@ struct FishAudioRealtimeMessageTests {
         #expect(FishAudioRealtimeError.connectionRefused(statusCode: 429).isRetryable)
         #expect(FishAudioRealtimeError.connectionRefused(statusCode: 503).isRetryable)
         #expect(!FishAudioRealtimeError.connectionRefused(statusCode: 401).isRetryable)
-        #expect(FishAudioRealtimeError.sessionClosed(code: 4400, errorType: "invalid_config", message: "unknown field foo").errorDescription
-            == "Fish Audio rejected the session configuration or audio (close 4400, invalid_config): unknown field foo")
-        #expect(FishAudioRealtimeError.sessionClosed(code: 4408, errorType: nil, message: nil).errorDescription == "Fish Audio closed the idle session (close 4408)")
-        #expect(FishAudioRealtimeError.sessionClosed(code: 4413, errorType: nil, message: nil).errorDescription == "The session reached Fish Audio's 60-minute limit (close 4413)")
-        #expect(FishAudioRealtimeError.sessionClosed(code: 4500, errorType: nil, message: nil).isRetryable)
-        #expect(FishAudioRealtimeError.sessionClosed(code: 1009, errorType: nil, message: nil).errorDescription == "An audio message exceeded Fish Audio's 1 MiB frame limit (close 1009)")
+        #expect(FishAudioRealtimeError.sessionClosed(code: 4400).errorDescription
+            == "Fish Audio rejected the session configuration or audio (close 4400)")
+        #expect(FishAudioRealtimeError.sessionClosed(code: 4408).errorDescription == "Fish Audio closed the idle session (close 4408)")
+        #expect(FishAudioRealtimeError.sessionClosed(code: 4413).errorDescription == "The session reached Fish Audio's 60-minute limit (close 4413)")
+        #expect(FishAudioRealtimeError.sessionClosed(code: 4500).isRetryable)
+        #expect(FishAudioRealtimeError.sessionClosed(code: 1009).errorDescription == "An audio message exceeded Fish Audio's 1 MiB frame limit (close 1009)")
         #expect(FishAudioRealtimeError.serverRestarting.isRetryable)
     }
 }
@@ -633,7 +633,7 @@ struct FishAudioRealtimeMappingTests {
         #expect(entry.duration == 1)
         #expect(service.turn(for: entry)?.isDegraded == true)
         // A recoverable engine error is reported but does not end the session.
-        #expect(service.lastError as? FishAudioRealtimeError == .serverError(errorType: "engine_error", code: 500, message: "final pass failed"))
+        #expect(service.lastError as? FishAudioRealtimeError == .serverError(code: 500))
         #expect(service.connectionState == .disconnected)
     }
 
@@ -706,7 +706,7 @@ struct FishAudioRealtimeMappingTests {
 
         let invalid = FishAudioRealtimeService(apiKey: "fish-key", options: FishAudioRealtimeOptions(mode: .auto, silenceTimeout: 1))
         await invalid.startListening()
-        #expect(invalid.lastError as? SpeechError == .providerFailure(provider: .fishAudio, reason: "silenceTimeout must be between 3.0 and 60.0 seconds in auto mode."))
+        #expect(invalid.lastError as? SpeechError == .providerFailure(provider: .fishAudio, reason: .requestFailed))
         #expect(invalid.connectionState.isLifecycleActive == false)
     }
 
@@ -720,7 +720,7 @@ struct FishAudioRealtimeMappingTests {
         await #expect(throws: FishAudioRealtimeError.disconnected) {
             try await service.finalizeTurn()
         }
-        await #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: "context items cannot contain more than 32 items.")) {
+        await #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)) {
             try await service.addContext(Array(repeating: FishAudioContextItem(role: .assistant, text: "x"), count: 33))
         }
     }
@@ -830,7 +830,7 @@ struct FishAudioRealtimeSessionTests {
         harness.socket.push(.closed(code: 4400, reason: nil))
 
         try await harness.waitUntil { !harness.service.connectionState.isLifecycleActive }
-        #expect(harness.service.lastError as? FishAudioRealtimeError == .sessionClosed(code: 4400, errorType: "invalid_config", message: "unknown field: foo"))
+        #expect(harness.service.lastError as? FishAudioRealtimeError == .sessionClosed(code: 4400))
     }
 
     @Test("Fish Audio reports a refused upgrade and an idle close")
@@ -845,7 +845,7 @@ struct FishAudioRealtimeSessionTests {
         try await idle.start()
         idle.socket.push(.closed(code: 4408, reason: "idle"))
         try await idle.waitUntil { !idle.service.connectionState.isLifecycleActive }
-        #expect(idle.service.lastError as? FishAudioRealtimeError == .sessionClosed(code: 4408, errorType: nil, message: "idle"))
+        #expect(idle.service.lastError as? FishAudioRealtimeError == .sessionClosed(code: 4408))
     }
 
     @Test("Fish Audio fails the session when session_started never arrives")
@@ -860,7 +860,7 @@ struct FishAudioRealtimeSessionTests {
     @Test("Fish Audio stop during the credential fetch cancels the pending start")
     func stopDuringCredentialFetch() async throws {
         let gate = FishAudioGate()
-        let harness = FishAudioHarness(credential: .token(SpeechTokenProvider {
+        let harness = FishAudioHarness(credential: .bearer(SpeechTokenResolver { _ in
             await gate.wait()
             return "fetched-token"
         }))
@@ -890,7 +890,7 @@ struct FishAudioRealtimeSessionTests {
 
         try await harness.waitUntil { harness.socket.isClosed }
         #expect(harness.service.connectionState == .error("Failed to start audio capture"))
-        #expect(harness.service.lastError as? SpeechAudioCaptureError == .audioEngineError("No input device"))
+        #expect(harness.service.lastError as? SpeechAudioCaptureError == .audioEngineError(.requestFailed))
         // No keepalive keeps the billed session open afterwards.
         try await Task.sleep(for: .milliseconds(200))
         #expect(harness.socket.sentTypes == ["config"])
@@ -931,7 +931,7 @@ struct FishAudioRealtimeSessionTests {
         await stop.value
 
         #expect(harness.service.transcriptText == "Last words.")
-        #expect(harness.service.lastError as? FishAudioRealtimeError == .sessionClosed(code: 4413, errorType: "max_duration_exceeded", message: "limit"))
+        #expect(harness.service.lastError as? FishAudioRealtimeError == .sessionClosed(code: 4413))
         #expect(harness.service.connectionState == .disconnected)
     }
 
@@ -996,6 +996,30 @@ struct FishAudioRealtimeSessionTests {
 
 @Suite("Fish Audio Realtime WebSocket")
 struct FishAudioRealtimeWebSocketTests {
+    @Test(arguments: [false, true])
+    func suspendedConfigCannotCloseReplacement(fails: Bool) async throws {
+        let first = GatedFishAudioSocket(fails: fails)
+        let second = FakeFishAudioSocket()
+        let counter = FishAudioCounter()
+        let socket = FishAudioRealtimeWebSocket(socketFactory: { _ in
+            counter.increment()
+            if counter.value == 1 { return first }
+            return second
+        }, keepaliveInterval: .seconds(60), handshakeTimeout: .seconds(60))
+        let pending = Task { try await socket.connect(credential: .apiKey("synthetic-key"), options: FishAudioRealtimeOptions()) }
+        while !(await first.gate.entered) { await Task.yield() }
+        let replacement = try await socket.connect(credential: .apiKey("synthetic-key"), options: FishAudioRealtimeOptions())
+        await first.gate.open()
+        do {
+            _ = try await pending.value
+            Issue.record("Replaced config send returned a live stream")
+        } catch {}
+        #expect(!second.isClosed)
+        #expect(await socket.isConnected)
+        await socket.disconnect()
+        withExtendedLifetime(replacement) {}
+    }
+
     @Test("Fish Audio reconnect is not closed by the replaced stream's termination")
     func reconnectSurvivesOldStreamTermination() async throws {
         let sockets = FishAudioSocketList()
@@ -1025,20 +1049,35 @@ struct FishAudioRealtimeWebSocketTests {
 @Suite("Fish Audio Realtime Wiring")
 @MainActor
 struct FishAudioRealtimeWiringTests {
+    @Test(arguments: [SpeechRecordingRetention.retainUntilDiscarded, .discardOnStop])
+    func recordingRetentionAndCallerFileOwnership(retention: SpeechRecordingRetention) async throws {
+        let harness = FishAudioHarness()
+        let file = try securityAudioFile()
+        defer { try? FileManager.default.removeItem(at: file) }
+        let bytes = try Data(contentsOf: file)
+        harness.audio.recordedWAVData = bytes
+        harness.service.recordingRetention = retention
+        await harness.service.stopListening()
+        #expect(harness.audio.recordedWAVData == (retention == .discardOnStop ? nil : bytes))
+        harness.service.discardRecording()
+        #expect(harness.audio.recordedWAVData == nil)
+        #expect(try Data(contentsOf: file) == bytes)
+    }
+
     @Test("Fish Audio configuration applies realtime options to the realtime service")
     func configurationAppliesRealtimeOptions() {
         let realtimeOptions = FishAudioRealtimeOptions(mode: .vad, silenceTimeout: 0.5, terms: ["SpeechKit"])
         let endpoint = URL(string: "wss://proxy.example.com/fish")
         let service = SpeechService(fishAudio: FishAudioConfiguration(apiKey: "fish", realtimeOptions: realtimeOptions, realtimeEndpoint: endpoint))
 
-        #expect(service.fishAudioRealtimeService.apiKey == "fish")
+        #expect(service.fishAudioRealtimeService.credentialKind == .apiKey)
         #expect(service.fishAudioRealtimeService.options == realtimeOptions)
         #expect(service.fishAudioRealtimeService.realtimeEndpoint == endpoint)
         #expect(SpeechRealtimeProvider.allCases.contains(.fishAudio))
         #expect(FishAudioConfiguration(apiKey: "fish").realtimeOptions == FishAudioRealtimeOptions())
 
         service.fishAudio = nil
-        #expect(service.fishAudioRealtimeService.apiKey == "")
+        #expect(service.fishAudioRealtimeService.credentialKind == .apiKey)
     }
 
     @Test("startListening surfaces missing Fish Audio configuration")
@@ -1126,7 +1165,7 @@ private final class FishAudioHarness {
         service = FishAudioRealtimeService(
             credential: credential,
             options: FishAudioRealtimeOptions(),
-            realtimeEndpoint: nil,
+            realtimeEndpoint: URL(string: "wss://proxy.example.com/fish"),
             audioSource: audio,
             webSocket: webSocket,
             gracefulStopTimeout: gracefulStopTimeout
@@ -1303,7 +1342,12 @@ private final class FakeFishAudioSource: FishAudioRealtimeAudioSource, @unchecke
 
     var isCapturing: Bool { lock.withLock { capturing } }
     let currentLevel = 0.0
-    let recordedWAVData: Data? = nil
+    private var recording: Data?
+    var recordedWAVData: Data? {
+        get { lock.withLock { recording } }
+        set { lock.withLock { recording = newValue } }
+    }
+    func discardRecording() { lock.withLock { recording = nil } }
 
     func setTargetSampleRate(_ targetSampleRate: Double) {}
 
@@ -1311,7 +1355,7 @@ private final class FakeFishAudioSource: FishAudioRealtimeAudioSource, @unchecke
 
     func startCapture() throws -> AsyncStream<Data> {
         if failsOnStart {
-            throw SpeechAudioCaptureError.audioEngineError("No input device")
+            throw SpeechAudioCaptureError.audioEngineError(.requestFailed)
         }
         let (stream, continuation) = AsyncStream<Data>.makeStream()
         lock.withLock {
@@ -1378,4 +1422,16 @@ private final class FishAudioSocketList: @unchecked Sendable {
         lock.withLock { sockets.append(socket) }
         return socket
     }
+}
+
+private final class GatedFishAudioSocket: FishAudioRealtimeSocket, Sendable {
+    let gate = SecurityGate()
+    let fails: Bool
+    init(fails: Bool) { self.fails = fails }
+    func send(_ data: Data) async throws {
+        await gate.wait()
+        if fails { throw FishAudioRealtimeError.disconnected }
+    }
+    func receive() async throws -> FishAudioRealtimeSocketEvent { throw CancellationError() }
+    func close() {}
 }

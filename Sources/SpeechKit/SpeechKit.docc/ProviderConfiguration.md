@@ -4,18 +4,18 @@ Configure only the transcription providers your app uses.
 
 ## Overview
 
-``SpeechService`` accepts optional provider configuration values. Realtime transcription requires a configuration for the selected provider. File transcription requires configuration for the selected provider.
+``SpeechService`` accepts optional provider configuration values. A relay supplies credentials for its configured providers; without a relay, supply a credential for the selected capability. See <doc:ShippingInProduction> before choosing app-owned credentials.
 
 ```swift
 let speech = SpeechService(
-    aqua: AquaConfiguration(apiKey: "<AQUA_API_KEY>"),
-    cohere: CohereConfiguration(apiKey: "<COHERE_API_KEY>"),
-    grok: GrokConfiguration(apiKey: "<XAI_API_KEY>"),
-    openAI: OpenAIConfiguration(apiKey: "<OPENAI_API_KEY>"),
-    meta: MetaConfiguration(apiKey: "<META_API_KEY>"),
-    gemini: GeminiConfiguration(apiKey: "<GOOGLE_API_KEY>"),
-    mistral: MistralConfiguration(apiKey: "<MISTRAL_API_KEY>"),
-    fishAudio: FishAudioConfiguration(apiKey: "<FISH_AUDIO_API_KEY>")
+    cohere: CohereConfiguration(credential: .apiKey("<COHERE_API_KEY>")),
+    grok: GrokConfiguration(credential: .apiKey("<XAI_API_KEY>")),
+    aqua: AquaConfiguration(credential: .apiKey("<AQUA_API_KEY>")),
+    openAI: OpenAIConfiguration(credential: .apiKey("<OPENAI_API_KEY>")),
+    meta: MetaConfiguration(credential: .apiKey("<META_API_KEY>")),
+    gemini: GeminiConfiguration(credential: .apiKey("<GOOGLE_API_KEY>")),
+    mistral: MistralConfiguration(credential: .apiKey("<MISTRAL_API_KEY>")),
+    fishAudio: FishAudioConfiguration(credential: .apiKey("<FISH_AUDIO_API_KEY>"))
 )
 ```
 
@@ -38,40 +38,40 @@ Each configuration type supplies provider defaults. Request-level options overri
 ```swift
 let speech = SpeechService(
     elevenLabs: ElevenLabsConfiguration(
-        apiKey: "<ELEVENLABS_API_KEY>",
+        credential: .apiKey("<ELEVENLABS_API_KEY>"),
         realtimeModelID: .scribeV2Realtime,
         fileTranscriptionModelID: .scribeV2
     ),
+    grok: GrokConfiguration(
+        credential: .apiKey("<XAI_API_KEY>"),
+        realtimeOptions: GrokRealtimeOptions(
+            language: .english,
+            keyTerms: ["SpeechKit"]
+        )
+    ),
     openAI: OpenAIConfiguration(
-        apiKey: "<OPENAI_API_KEY>",
+        credential: .apiKey("<OPENAI_API_KEY>"),
         realtimeTranscriptionModelID: .gptLiveTranscribe,
         languages: ["en", "fr"],
         keywords: ["SpeechKit", "AC-42"],
         realtimeDelay: .low,
         realtimeCommitInterval: 1
     ),
-    grok: GrokConfiguration(
-        apiKey: "<XAI_API_KEY>",
-        realtimeOptions: GrokRealtimeOptions(
-            language: .english,
-            keyTerms: ["SpeechKit"]
-        )
-    ),
     meta: MetaConfiguration(
-        apiKey: "<META_API_KEY>",
+        credential: .apiKey("<META_API_KEY>"),
         mode: .diarization,
         languageBias: [.english],
         keywords: ["SpeechKit"]
     ),
     gemini: GeminiConfiguration(
-        apiKey: "<GOOGLE_API_KEY>",
+        credential: .apiKey("<GOOGLE_API_KEY>"),
         languageCodes: ["en-US"],
         mode: .verbatim,
         diarize: true,
         timestampGranularities: [.word]
     ),
     mistral: MistralConfiguration(
-        apiKey: "<MISTRAL_API_KEY>",
+        credential: .apiKey("<MISTRAL_API_KEY>"),
         fileTranscriptionModelID: .voxtralSmallTranscribe3,
         contextBias: ["SpeechKit"],
         diarize: true,
@@ -81,7 +81,7 @@ let speech = SpeechService(
         )
     ),
     fishAudio: FishAudioConfiguration(
-        apiKey: "<FISH_AUDIO_API_KEY>",
+        credential: .apiKey("<FISH_AUDIO_API_KEY>"),
         language: "en",
         diarize: .on,
         speakerCount: .range(min: 2, max: 4),
@@ -95,51 +95,88 @@ let speech = SpeechService(
 
 ## Raw Language Codes
 
-Provider configurations also include throwing initializers that accept raw language codes when your app stores codes as strings.
+When your app stores language codes as strings, validate them before constructing a credential-backed configuration. The legacy throwing `languageCode:` initializers accept only `apiKey:`, not `credential:`.
 
 ```swift
-let cohere = try CohereConfiguration(apiKey: "<COHERE_API_KEY>", languageCode: "de")
-let grok = try GrokConfiguration(apiKey: "<XAI_API_KEY>", languageCode: "fil")
-let aqua = try AquaConfiguration(apiKey: "<AQUA_API_KEY>", languageCode: "ja")
+guard let cohereLanguage = CohereLanguage(rawValue: "de") else {
+    throw SpeechError.providerFailure(provider: .cohere, reason: .invalidOptions)
+}
+guard let grokLanguage = GrokLanguage(rawValue: "fil") else {
+    throw SpeechError.providerFailure(provider: .grok, reason: .invalidOptions)
+}
+guard let aquaLanguage = AquaLanguage(rawValue: "ja") else {
+    throw SpeechError.providerFailure(provider: .aqua, reason: .invalidOptions)
+}
+let cohere = CohereConfiguration(credential: .apiKey("<COHERE_API_KEY>"), language: cohereLanguage)
+let grok = GrokConfiguration(credential: .apiKey("<XAI_API_KEY>"), language: grokLanguage)
+let aqua = AquaConfiguration(credential: .apiKey("<AQUA_API_KEY>"), language: aquaLanguage)
 ```
 
-Meta biases transcription with language names instead of codes, so ``MetaConfiguration/init(apiKey:modelID:mode:languageNames:keywords:realtimeOptions:timeoutInterval:fileEndpoint:realtimeEndpoint:)`` takes names such as `"English"` or `"Mandarin Chinese"` and throws when a name is not supported. Gemini takes free-form BCP-47 codes in ``GeminiConfiguration/languageCodes``, so it needs no typed language enum; an empty array lets Gemini detect the language. Mistral takes a two-letter ISO 639-1 code such as `"en"` in ``MistralConfiguration/language``, or `nil` to detect the language. Fish Audio takes a lowercase two-letter code in ``FishAudioConfiguration/language`` and throws at request time for anything else. The code is a hint for file transcription only; it does not force the language.
+Meta biases transcription with language names instead of codes. Use typed ``MetaLanguage`` values with the credential initializer. Its legacy throwing `languageNames:` initializer also accepts only `apiKey:`. Gemini takes free-form BCP-47 codes in ``GeminiConfiguration/languageCodes``, so it needs no typed language enum; an empty array lets Gemini detect the language. Mistral takes a two-letter ISO 639-1 code such as `"en"` in ``MistralConfiguration/language``, or `nil` to detect the language. Fish Audio takes a lowercase two-letter code in ``FishAudioConfiguration/language`` and throws at request time for anything else. The code is a hint for file transcription only; it does not force the language.
 
 ```swift
-let meta = try MetaConfiguration(apiKey: "<META_API_KEY>", languageNames: ["English", "Spanish"])
-let gemini = GeminiConfiguration(apiKey: "<GOOGLE_API_KEY>", languageCodes: ["en-US", "es-US"])
+let meta = MetaConfiguration(credential: .apiKey("<META_API_KEY>"), languageBias: [.english, .spanish])
+let gemini = GeminiConfiguration(credential: .apiKey("<GOOGLE_API_KEY>"), languageCodes: ["en-US", "es-US"])
 ```
 
-## Credentials and Endpoints
+## Credentials and endpoints
 
-Every keyed configuration stores a ``SpeechCredential``. Use ``SpeechCredential/apiKey(_:)`` for a long-lived vendor key, or ``SpeechCredential/token(_:)`` with a ``SpeechTokenProvider`` that fetches a short-lived token from your own backend. SpeechKit resolves a token provider once per file transcription request and once per realtime session.
+``SpeechCredential`` is opaque. `.apiKey` is for a user's own key or local testing, `.vendorToken` for documented native tokens, and `.bearer` for a custom proxy or separately authorized Gemini REST OAuth. SpeechKit creates relay credentials internally. Never fetch a permanent app-owned vendor key as a substitute for a relay.
 
 ```swift
-let openAI = OpenAIConfiguration(
-    credential: .token(SpeechTokenProvider { try await backend.fetchClientSecret() })
+@MainActor
+func nativeOpenAIConfiguration(
+    fetchToken: @escaping @Sendable (SpeechTokenContext) async throws -> SpeechAccessToken
+) -> OpenAIConfiguration {
+    var configuration = OpenAIConfiguration()
+    configuration.setCredential(
+        .vendorToken(SpeechTokenResolver { context in try await fetchToken(context) }),
+        for: .realtime
+    )
+    return configuration
+}
+```
+
+This leaves file authorization empty because OpenAI Realtime secrets do not authorize files. Configurations expose `credentialKind`, `hasCredential`, and capability-specific variants, not `apiKey` or `credential` properties. `setCredential(_:)` replaces the base credential and clears capability overrides; `setCredential(_:for:)` changes one capability. Assign the updated configuration back to the service to invalidate pending work. Direct realtime services also provide `reconfigure(credential:realtimeEndpoint:)` for an awaited paired replacement.
+
+```swift
+var configuration = ElevenLabsConfiguration(credential: .apiKey("<USER_SUPPLIED_KEY>"))
+configuration.setCredential(.apiKey("<REPLACEMENT_USER_KEY>"))
+let mode = configuration.credentialKind
+let isConfigured = configuration.hasCredential(for: .realtime)
+speech.elevenLabs = configuration
+```
+
+Resolver closures accept ``SpeechTokenContext`` and return a string or ``SpeechAccessToken``. They can run again for a new operation or bounded pre-send renewal; do not rely on a process-wide "called exactly once" promise or share a single-use token across operations. A resolver's UUID defines equality. Capture your login/backend client deliberately, and release application-owned references separately at sign-out.
+
+Use ``SpeechRelay`` for app-owned authority. It supplies complete routes without per-provider credentials:
+
+```swift
+let speech = SpeechService(
+    relay: SpeechRelay(url: URL(string: "https://speech.example.workers.dev")!),
+    fishAudio: FishAudioConfiguration(language: "en"),
+    credentialPolicy: .relayOnly
 )
 ```
 
-The `apiKey` property remains available on every configuration and realtime service. Reading it returns the key for an API-key credential and an empty string for a token credential; writing it replaces the credential with ``SpeechCredential/apiKey(_:)``.
+A configuration with no credential inherits the relay; one with a credential uses its explicit endpoint for that capability instead. Missing direct endpoints fail closed. `.relayOnly` rejects such direct overrides and forces proxy traffic; `.disallowStaticKeys` rejects static keys but permits native tokens and custom proxy bearer tokens. Defaults remain `.allowStaticKeys` and relay `.proxyAll`.
 
-ElevenLabs issues single-use tokens for realtime Scribe, OpenAI issues ephemeral client secrets for Realtime, and Google issues ephemeral tokens for Gemini Live. Aqua, Cohere, Grok, Meta, Mistral, and Fish Audio have no first-party short-lived token, so route those through your own proxy. A Fish Audio ``SpeechCredential/token(_:)`` value is sent as the same bearer secret as an API key. A Google ephemeral token only authorizes Gemini Live; a token used for Gemini file transcription must be an OAuth access token or a credential your proxy accepts.
+For a custom proxy, use `.bearer`, supply both file and realtime endpoints as needed, and implement all provider-specific routes. Gemini requires a complete ``GeminiRoute`` with Interactions, Files upload, and Live endpoints; file and interaction polling and returned upload-session URLs must remain on approved origins. Meta requires first-frame auth replacement. `nil` endpoints mean vendor defaults in direct mode, not automatic protection. Endpoints require HTTPS/WSS except loopback development; redirects are refused.
 
-Each configuration also takes endpoint overrides so your app can route provider traffic through a proxy that injects the vendor key. `fileEndpoint` replaces the file transcription URL, `realtimeEndpoint` replaces the realtime WebSocket URL for ElevenLabs, OpenAI, Grok, Meta, Gemini, Mistral, and Fish Audio, and ``GeminiConfiguration/filesEndpoint`` replaces the Gemini Files API upload URL. A `nil` value keeps the vendor default, and SpeechKit still appends the query items each provider needs.
-
-```swift
-let grok = GrokConfiguration(
-    credential: .token(SpeechTokenProvider { try await backend.fetchProxyToken() }),
-    fileEndpoint: URL(string: "https://api.example.com/grok/stt"),
-    realtimeEndpoint: URL(string: "wss://api.example.com/grok/stt")
-)
-```
+See <doc:ShippingInProduction> for the dated provider/capability/auth-placement matrix, complete Gemini route and login examples, and limits of server and client controls. See <doc:MigratingTo3> for removed APIs.
 
 ## Topics
 
 ### Credentials
 
 - ``SpeechCredential``
-- ``SpeechTokenProvider``
+- ``SpeechTokenResolver``
+- ``SpeechTokenContext``
+- ``SpeechAccessToken``
+- ``SpeechCapability``
+- ``SpeechCredentialPolicy``
+- ``SpeechRelay``
+- ``GeminiRoute``
 
 ### Configurations
 

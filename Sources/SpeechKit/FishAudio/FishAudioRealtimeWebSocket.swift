@@ -34,9 +34,14 @@ final class FishAudioURLSessionRealtimeSocket: FishAudioRealtimeSocket, @uncheck
     private let task: URLSessionWebSocketTask
 
     init(request: URLRequest) {
-        session = URLSession(configuration: .default)
+        session = SpeechTransport.session()
         task = session.webSocketTask(with: request)
         task.resume()
+    }
+
+    init(opened: SpeechSocketConnection) {
+        session = opened.session
+        task = opened.task
     }
 
     static let factory: FishAudioRealtimeSocketFactory = { request in
@@ -98,10 +103,11 @@ actor FishAudioRealtimeWebSocket {
     /// The realtime model, sent as the `model` header.
     static let modelID = "transcribe-stream-1"
 
-    private let socketFactory: FishAudioRealtimeSocketFactory
+    private let socketFactory: FishAudioRealtimeSocketFactory?
     private let keepaliveInterval: Duration
     private let handshakeTimeout: Duration
     private var socket: (any FishAudioRealtimeSocket)?
+    private var connectionGeneration = UUID()
     private var connectionID: UUID?
     private var continuation: AsyncThrowingStream<FishAudioRealtimeServerMessage, Error>.Continuation?
     private var receiveTask: Task<Void, Never>?
@@ -112,7 +118,7 @@ actor FishAudioRealtimeWebSocket {
     private var lastServerError: FishAudioRealtimeServerError?
 
     init(
-        socketFactory: @escaping FishAudioRealtimeSocketFactory = FishAudioURLSessionRealtimeSocket.factory,
+        socketFactory: FishAudioRealtimeSocketFactory? = nil,
         keepaliveInterval: Duration = .seconds(15),
         handshakeTimeout: Duration = .seconds(10)
     ) {
@@ -127,14 +133,16 @@ actor FishAudioRealtimeWebSocket {
 
     /// Builds the WebSocket handshake request for a realtime session.
     ///
-    /// Fish Audio has no short-lived tokens, so an API key and a fetched token
-    /// are both sent as the bearer secret.
+    /// Fish Audio API keys and custom proxy credentials use Bearer authorization.
+    /// Native vendor-token mode is rejected before opening a connection.
     nonisolated static func makeConnectRequest(
         credential: SpeechResolvedCredential,
         options: FishAudioRealtimeOptions,
         endpoint: URL? = nil
     ) throws -> URLRequest {
         try options.validate()
+        try SpeechEndpointPolicy.validate(endpoint ?? defaultURL, websocket: true)
+        try SpeechResolvedCredential.validateSecret(credential.secret)
         guard !credential.isEmpty else {
             throw FishAudioRealtimeError.apiKeyMissing
         }
@@ -145,7 +153,7 @@ actor FishAudioRealtimeWebSocket {
         }
 
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(credential.secret)", forHTTPHeaderField: "Authorization")
+        try credential.authorize(&request, provider: .fishAudio, capability: .realtime)
         request.setValue(modelID, forHTTPHeaderField: "model")
         return request
     }
@@ -164,7 +172,14 @@ actor FishAudioRealtimeWebSocket {
         let request = try Self.makeConnectRequest(credential: credential, options: options, endpoint: endpoint)
 
         disconnect()
-        let socket = socketFactory(request)
+        let generation = connectionGeneration
+        let socket: any FishAudioRealtimeSocket
+        if let socketFactory { socket = socketFactory(request) }
+        else { socket = FishAudioURLSessionRealtimeSocket(opened: try await SpeechSocketConnection.open(request: request, credential: credential)) }
+        guard generation == connectionGeneration, !Task.isCancelled else {
+            socket.close()
+            throw CancellationError()
+        }
         let connectionID = UUID()
         self.socket = socket
         self.connectionID = connectionID
@@ -182,8 +197,13 @@ actor FishAudioRealtimeWebSocket {
         do {
             try await sendFrame(options.configMessage().encoded())
         } catch {
-            disconnect()
+            disconnect(connectionID: connectionID)
+            if error is CancellationError { throw CancellationError() }
             throw SpeechRealtimeErrorRedaction.redacted(error)
+        }
+        guard self.connectionID == connectionID, !Task.isCancelled else {
+            disconnect(connectionID: connectionID)
+            throw CancellationError()
         }
 
         receiveTask = Task { [weak self] in
@@ -191,10 +211,10 @@ actor FishAudioRealtimeWebSocket {
         }
         handshakeTimeoutTask = Task { [weak self, handshakeTimeout] in
             guard (try? await Task.sleep(for: handshakeTimeout)) != nil else { return }
-            await self?.failHandshakeIfNotStarted()
+            await self?.failHandshakeIfNotStarted(connectionID: connectionID)
         }
         keepaliveTask = Task { [weak self] in
-            await self?.runKeepalive()
+            await self?.runKeepalive(connectionID: connectionID)
         }
 
         return stream
@@ -212,6 +232,7 @@ actor FishAudioRealtimeWebSocket {
     }
 
     func disconnect() {
+        connectionGeneration = UUID()
         connectionID = nil
         receiveTask?.cancel()
         receiveTask = nil
@@ -288,11 +309,7 @@ actor FishAudioRealtimeWebSocket {
         case 1012:
             return FishAudioRealtimeError.serverRestarting
         default:
-            return FishAudioRealtimeError.sessionClosed(
-                code: code,
-                errorType: lastServerError?.errorType,
-                message: lastServerError?.message ?? reason
-            )
+            return FishAudioRealtimeError.sessionClosed(code: code)
         }
     }
 
@@ -308,18 +325,18 @@ actor FishAudioRealtimeWebSocket {
         disconnect()
     }
 
-    private func failHandshakeIfNotStarted() {
-        guard !didStartSession, let socket else { return }
+    private func failHandshakeIfNotStarted(connectionID: UUID) {
+        guard self.connectionID == connectionID, !didStartSession, let socket else { return }
         handshakeTimeoutTask = nil
         finish(throwing: FishAudioRealtimeError.handshakeTimedOut, from: socket)
     }
 
     /// Sends `keepalive` whenever nothing has been sent for ``keepaliveInterval``.
-    private func runKeepalive() async {
-        while !Task.isCancelled, socket != nil {
+    private func runKeepalive(connectionID: UUID) async {
+        while !Task.isCancelled, self.connectionID == connectionID, socket != nil {
             let deadline = lastSendInstant.advanced(by: keepaliveInterval)
             guard (try? await Task.sleep(until: deadline, clock: .continuous)) != nil else { return }
-            guard socket != nil else { return }
+            guard self.connectionID == connectionID, socket != nil else { return }
             if ContinuousClock.now - lastSendInstant >= keepaliveInterval {
                 try? await sendFrame(FishAudioRealtimeClientMessage.keepalive.encoded())
             }

@@ -255,24 +255,27 @@ struct GeminiFileTranscriptionClient {
     private let urlSession: URLSession
     private let filesClient: GeminiFilesClient
     private let interactionsURL: URL?
+    private let routeOriginPolicy: GeminiRoute.OriginPolicy
     private static let pendingStatuses: Set<String> = ["queued", "in_progress"]
     private let maxInlineRequestBytes: Int64 = 100 * 1024 * 1024
     private let maxUploadDuration: TimeInterval = 3600
     private let maxAnnotatedUploadDuration: TimeInterval = 1800
     private let allowedExtensions: Set<String> = [
-        "wav", "mp3", "mpeg", "mpga", "aiff", "aif", "aac", "ogg", "opus", "flac", "m4a", "webm"
+        "wav", "mp3", "mpeg", "mpga", "aiff", "aif", "aac", "ogg", "opus", "flac", "m4a", "mp4", "webm"
     ]
 
     init(
         apiKey: String,
         endpoint: URL? = nil,
         filesEndpoint: URL? = nil,
-        urlSession: URLSession = .shared
+        routeOriginPolicy: GeminiRoute.OriginPolicy = .sameOrigin,
+        urlSession: URLSession = SpeechTransport.session()
     ) {
         self.init(
             credential: .apiKey(apiKey),
             endpoint: endpoint,
             filesEndpoint: filesEndpoint,
+            routeOriginPolicy: routeOriginPolicy,
             urlSession: urlSession
         )
     }
@@ -281,16 +284,30 @@ struct GeminiFileTranscriptionClient {
         credential: SpeechCredential,
         endpoint: URL? = nil,
         filesEndpoint: URL? = nil,
-        urlSession: URLSession = .shared
+        routeOriginPolicy: GeminiRoute.OriginPolicy = .sameOrigin,
+        urlSession: URLSession = SpeechTransport.session()
     ) {
         self.credential = credential
-        self.urlSession = urlSession
+        self.routeOriginPolicy = routeOriginPolicy
+        self.urlSession = SpeechTransport.session(copying: urlSession, pinnedPublicKeyHashes: credential.pinnedPublicKeyHashes)
         self.interactionsURL = endpoint ?? Self.defaultInteractionsURL
         self.filesClient = GeminiFilesClient(
             credential: credential,
             endpoint: filesEndpoint,
             urlSession: urlSession
         )
+    }
+
+    private func uploadMIMEType(for file: URL) -> String {
+        if credential.kind == .relay, ["m4a", "mp4"].contains(file.pathExtension.lowercased()) {
+            return "audio/m4a"
+        }
+        return SpeechFileUploadSupport.mimeType(for: file)
+    }
+
+    private func validateRoute() throws {
+        guard credential.kind != .relay || routeOriginPolicy == .sameOrigin else { throw SpeechFailure(.invalidEndpoint) }
+        try GeminiRoute.validate(interactions: interactionsURL, files: filesClient.uploadURL, originPolicy: routeOriginPolicy)
     }
 
     func transcribeAudioFile(
@@ -308,10 +325,19 @@ struct GeminiFileTranscriptionClient {
         guard credential.isConfigured else {
             throw SpeechError.providerNotConfigured(.gemini)
         }
-        let resolved = try await credential.resolved(for: .gemini)
+        try validateRoute()
+        try validate(options)
+        let prepared = try await SpeechRelayAudioImport.prepare(file: file, provider: .gemini,
+            optimizeUploads: credential.optimizeUploads, maxDuration: maxDuration(for: options))
+        defer { prepared.remove() }
+        let file = prepared.file
+        try validateFileExtension(file)
+        let strategy = try resolvedUploadStrategy(for: file, options: options)
+        let resolved = try await credential.resolved(for: .gemini, model: options.modelID.rawValue, endpoint: interactionsURL,
+                                                      destinations: [interactionsURL, filesClient.uploadURL].compactMap { $0 })
 
         let request: URLRequest
-        switch try resolvedUploadStrategy(for: file, options: options) {
+        switch strategy {
         case .automatic, .inline:
             request = try await makeRequest(file: file, options: options, credential: resolved)
         case .filesAPI:
@@ -329,7 +355,11 @@ struct GeminiFileTranscriptionClient {
         guard credential.isConfigured else {
             throw SpeechError.providerNotConfigured(.gemini)
         }
-        let resolved = try await credential.resolved(for: .gemini)
+        try validateRoute()
+        try validate(options)
+        try validateFileExtension(file)
+        let resolved = try await credential.resolved(for: .gemini, model: options.modelID.rawValue, endpoint: interactionsURL,
+                                                      destinations: [interactionsURL, filesClient.uploadURL].compactMap { $0 })
         return try await makeRequest(file: file, options: options, credential: resolved)
     }
 
@@ -356,8 +386,7 @@ struct GeminiFileTranscriptionClient {
         guard Int64(base64Audio.count) < maxInlineRequestBytes else {
             throw SpeechError.uploadFailed(
                 provider: .gemini,
-                reason: "Inline audio exceeds the \(maxInlineRequestBytes) byte request limit."
-            )
+                reason: .uploadFailed)
         }
 
         return try makeRequest(
@@ -365,7 +394,7 @@ struct GeminiFileTranscriptionClient {
                 type: "audio",
                 data: base64Audio,
                 uri: nil,
-                mimeType: SpeechFileUploadSupport.mimeType(for: file)
+                mimeType: uploadMIMEType(for: file)
             ),
             options: options,
             credential: credential
@@ -408,8 +437,16 @@ struct GeminiFileTranscriptionClient {
         guard credential.isConfigured else {
             throw SpeechError.providerNotConfigured(.gemini)
         }
-        let resolved = try await credential.resolved(for: .gemini)
+        try validateRoute()
+        try validate(options)
+        try validateFileExtension(file)
+        let resolved = try await credential.resolved(for: .gemini, model: options.modelID.rawValue, endpoint: interactionsURL,
+                                                      destinations: [interactionsURL, filesClient.uploadURL].compactMap { $0 })
         return try await makeFilesAPIRequest(file: file, options: options, credential: resolved)
+    }
+
+    private func validateFileExtension(_ file: URL) throws {
+        try SpeechFileUploadSupport.validateFileExtension(file, allowedExtensions: allowedExtensions, provider: .gemini)
     }
 
     /// Uploads a file through the Gemini Files API and builds the interactions request for it.
@@ -432,8 +469,9 @@ struct GeminiFileTranscriptionClient {
 
         let uploaded = try await filesClient.upload(
             file: file,
-            mimeType: SpeechFileUploadSupport.mimeType(for: file),
-            timeoutInterval: options.timeoutInterval
+            mimeType: uploadMIMEType(for: file),
+            timeoutInterval: options.timeoutInterval,
+            credential: credential
         )
 
         return try makeRequest(
@@ -465,16 +503,17 @@ struct GeminiFileTranscriptionClient {
         options: GeminiFileTranscriptionOptions = GeminiFileTranscriptionOptions(),
         credential: SpeechResolvedCredential
     ) throws -> URLRequest {
+        try validateRoute()
+        guard credential.kind != .vendorToken else { throw SpeechFailure(.unsupportedAuthentication) }
         guard !credential.isEmpty else {
             throw SpeechError.providerNotConfigured(.gemini)
         }
 
-        let trimmed = interactionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = try GeminiRoute.identifier(interactionID, prefix: "interactions")
         guard !trimmed.isEmpty else {
             throw SpeechError.providerFailure(
                 provider: .gemini,
-                reason: "The Gemini response did not include an interaction identifier."
-            )
+                reason: .requestFailed)
         }
 
         let path = trimmed.hasPrefix("interactions/") ? trimmed : "interactions/\(trimmed)"
@@ -528,6 +567,8 @@ struct GeminiFileTranscriptionClient {
         options: GeminiFileTranscriptionOptions,
         credential: SpeechResolvedCredential
     ) throws -> URLRequest {
+        try validateRoute()
+        guard credential.kind != .vendorToken else { throw SpeechFailure(.unsupportedAuthentication) }
         guard !credential.isEmpty else {
             throw SpeechError.providerNotConfigured(.gemini)
         }
@@ -563,24 +604,24 @@ struct GeminiFileTranscriptionClient {
         do {
             request.httpBody = try JSONEncoder().encode(payload)
         } catch {
-            throw SpeechError.providerFailure(provider: .gemini, reason: error.localizedDescription)
+            throw SpeechError.providerFailure(provider: .gemini, reason: .requestFailed)
         }
         return request
     }
 
     private func send(_ request: URLRequest) async throws -> GeminiFileTranscriptionResponse {
-        let (data, response) = try await urlSession.data(for: request)
+        let (data, response) = try await SpeechTransport.data(for: request, session: urlSession, prepare: self.credential.relayRequestPreparation)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SpeechError.invalidResponse(provider: .gemini)
         }
         guard (200...299).contains(httpResponse.statusCode) else {
-            throw SpeechError.uploadFailed(provider: .gemini, reason: errorMessage(from: data, statusCode: httpResponse.statusCode))
+            throw SpeechFailure(.server, statusCode: httpResponse.statusCode)
         }
 
         do {
             return try JSONDecoder().decode(GeminiFileTranscriptionResponse.self, from: data)
         } catch {
-            throw SpeechError.decodingFailed(provider: .gemini, reason: error.localizedDescription)
+            throw SpeechError.decodingFailed(provider: .gemini, reason: .decodingFailed)
         }
     }
 
@@ -601,8 +642,7 @@ struct GeminiFileTranscriptionClient {
             guard Date() < deadline else {
                 throw SpeechError.providerFailure(
                     provider: .gemini,
-                    reason: "Interaction \(identifier(for: latest)) did not finish within \(Int(options.timeoutInterval)) seconds."
-                )
+                    reason: .requestFailed)
             }
 
             do {
@@ -613,8 +653,7 @@ struct GeminiFileTranscriptionClient {
             } catch {
                 throw SpeechError.providerFailure(
                     provider: .gemini,
-                    reason: "Polling interaction \(identifier(for: latest)) was cancelled."
-                )
+                    reason: .requestFailed)
             }
 
             latest = try await send(
@@ -631,8 +670,7 @@ struct GeminiFileTranscriptionClient {
         guard response.status == "completed" else {
             throw SpeechError.providerFailure(
                 provider: .gemini,
-                reason: "Interaction \(identifier(for: response)) finished with status \(response.status)."
-            )
+                reason: .requestFailed)
         }
         return response
     }
@@ -647,30 +685,27 @@ struct GeminiFileTranscriptionClient {
         if !options.customVocabulary.isEmpty, options.diarize || wantsWordTimestamps {
             throw SpeechError.providerFailure(
                 provider: .gemini,
-                reason: "customVocabulary cannot be combined with diarization or word timestamps."
-            )
+                reason: .requestFailed)
         }
 
         if options.mode == .smart, options.diarize || wantsWordTimestamps {
             throw SpeechError.providerFailure(
                 provider: .gemini,
-                reason: "smart mode cannot be combined with diarization or word timestamps."
-            )
+                reason: .requestFailed)
         }
 
         if options.customVocabulary.count > 1000 {
             throw SpeechError.providerFailure(
                 provider: .gemini,
-                reason: "customVocabulary cannot contain more than 1000 terms."
-            )
+                reason: .requestFailed)
         }
 
         if case .background(let pollInterval) = options.processingMode, pollInterval <= 0 {
-            throw SpeechError.providerFailure(provider: .gemini, reason: "pollInterval must be greater than 0.")
+            throw SpeechError.providerFailure(provider: .gemini, reason: .requestFailed)
         }
 
         if options.timeoutInterval <= 0 {
-            throw SpeechError.providerFailure(provider: .gemini, reason: "timeoutInterval must be greater than 0.")
+            throw SpeechError.providerFailure(provider: .gemini, reason: .requestFailed)
         }
     }
 
@@ -679,19 +714,11 @@ struct GeminiFileTranscriptionClient {
         return wantsAnnotations ? maxAnnotatedUploadDuration : maxUploadDuration
     }
 
-    private func errorMessage(from data: Data, statusCode: Int) -> String {
-        if let failure = try? JSONDecoder().decode(GeminiErrorResponse.self, from: data),
-           let message = failure.error?.message {
-            return message
-        }
-        return String(data: data, encoding: .utf8) ?? "HTTP \(statusCode)"
-    }
-
     private func readFileData(from fileURL: URL) throws -> Data {
         do {
             return try Data(contentsOf: fileURL)
         } catch {
-            throw SpeechError.providerFailure(provider: .gemini, reason: error.localizedDescription)
+            throw SpeechError.providerFailure(provider: .gemini, reason: .requestFailed)
         }
     }
 }

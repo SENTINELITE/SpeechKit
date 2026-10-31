@@ -72,7 +72,7 @@ struct MetaProviderTests {
         let client = MetaFileTranscriptionClient(apiKey: "meta-key")
         let fileURL = metaTemporaryAudioFileURL(named: "sample.m4a")
 
-        await #expect(throws: SpeechError.providerFailure(provider: .meta, reason: "Unsupported file extension: m4a.")) {
+        await #expect(throws: SpeechError.providerFailure(provider: .meta, reason: .requestFailed)) {
             _ = try await client.makeRequest(file: fileURL)
         }
     }
@@ -97,7 +97,7 @@ struct MetaProviderTests {
         let client = MetaFileTranscriptionClient(apiKey: "meta-key")
         let fileURL = metaTemporaryAudioFileURL(named: "sample.wav")
 
-        await #expect(throws: SpeechError.providerFailure(provider: .meta, reason: "Unsupported file extension: wav.")) {
+        await #expect(throws: SpeechError.providerFailure(provider: .meta, reason: .requestFailed)) {
             _ = try await client.makeRequest(
                 file: fileURL,
                 options: MetaFileTranscriptionOptions(audioEncoding: .pcm16kHz)
@@ -110,7 +110,7 @@ struct MetaProviderTests {
         let client = MetaFileTranscriptionClient(apiKey: "meta-key")
         let fileURL = try metaTemporarySparseFileURL(named: "large.wav", size: 32 * 1024 * 1024 + 1)
 
-        await #expect(throws: SpeechError.uploadFailed(provider: .meta, reason: "Audio file exceeds 33554432 byte limit.")) {
+        await #expect(throws: SpeechError.uploadFailed(provider: .meta, reason: .uploadFailed)) {
             _ = try await client.makeRequest(file: fileURL)
         }
     }
@@ -120,15 +120,15 @@ struct MetaProviderTests {
         let client = MetaFileTranscriptionClient(apiKey: "meta-key")
         let fileURL = metaTemporaryAudioFileURL(named: "sample.wav")
 
-        await #expect(throws: SpeechError.providerFailure(provider: .meta, reason: "keywords cannot be empty: \"\".")) {
+        await #expect(throws: SpeechError.providerFailure(provider: .meta, reason: .requestFailed)) {
             _ = try await client.makeRequest(file: fileURL, options: MetaFileTranscriptionOptions(keywords: [""]))
         }
 
-        await #expect(throws: SpeechError.providerFailure(provider: .meta, reason: "keywords cannot contain newlines.")) {
+        await #expect(throws: SpeechError.providerFailure(provider: .meta, reason: .requestFailed)) {
             _ = try await client.makeRequest(file: fileURL, options: MetaFileTranscriptionOptions(keywords: ["a\nb"]))
         }
 
-        await #expect(throws: SpeechError.providerFailure(provider: .meta, reason: "timeoutInterval must be greater than 0.")) {
+        await #expect(throws: SpeechError.providerFailure(provider: .meta, reason: .requestFailed)) {
             _ = try await client.makeRequest(file: fileURL, options: MetaFileTranscriptionOptions(timeoutInterval: 0))
         }
     }
@@ -197,11 +197,11 @@ struct MetaProviderTests {
 
     @Test("Meta realtime options reject invalid keywords")
     func metaRealtimeOptionsRejectInvalidKeywords() {
-        #expect(throws: SpeechError.providerFailure(provider: .meta, reason: "keywords cannot be empty: \" \".")) {
+        #expect(throws: SpeechError.providerFailure(provider: .meta, reason: .requestFailed)) {
             try MetaRealtimeOptions(keywords: [" "]).validate()
         }
 
-        #expect(throws: SpeechError.providerFailure(provider: .meta, reason: "keywords cannot contain newlines.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .meta, reason: .requestFailed)) {
             try MetaRealtimeOptions(keywords: ["a\r\nb"]).validate()
         }
     }
@@ -391,8 +391,8 @@ struct MetaProviderTests {
 
         service.handleMessageForTesting(.error("Bad audio"))
 
-        #expect(service.connectionState == .error("Bad audio"))
-        #expect(service.lastError as? MetaRealtimeError == .connectionFailed("Bad audio"))
+        #expect(service.connectionState == .error("The realtime session failed."))
+        #expect(service.lastError as? SpeechFailure == SpeechFailure(.server))
     }
 
     @MainActor
@@ -459,8 +459,7 @@ struct MetaProviderTests {
 
         #expect(service.lastError as? SpeechError == .providerFailure(
             provider: .meta,
-            reason: "Realtime transcription requires a raw PCM audio encoding."
-        ))
+            reason: .requestFailed))
         #expect(service.connectionState.isLifecycleActive == false)
     }
 }

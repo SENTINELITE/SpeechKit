@@ -48,12 +48,11 @@ public struct GeminiRealtimeOptions: Sendable, Equatable {
         if customVocabulary.count > 1000 {
             throw SpeechError.providerFailure(
                 provider: .gemini,
-                reason: "customVocabulary cannot contain more than 1000 terms."
-            )
+                reason: .requestFailed)
         }
 
-        if let term = customVocabulary.first(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-            throw SpeechError.providerFailure(provider: .gemini, reason: "customVocabulary cannot be empty: \"\(term)\".")
+        if customVocabulary.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            throw SpeechError.providerFailure(provider: .gemini, reason: .requestFailed)
         }
     }
 
@@ -278,7 +277,7 @@ public enum GeminiRealtimeError: Error, LocalizedError, Sendable, Equatable {
     /// SpeechKit could not construct a valid Gemini Live URL.
     case invalidURL
     /// The realtime connection failed.
-    case connectionFailed(String)
+    case connectionFailed(SpeechFailureReason)
     /// SpeechKit could not encode an outgoing realtime message.
     case encodingFailed
     /// The realtime WebSocket disconnected.
@@ -286,7 +285,7 @@ public enum GeminiRealtimeError: Error, LocalizedError, Sendable, Equatable {
     /// The Gemini API key is empty.
     case apiKeyMissing
     /// Gemini announced that it is ending the session.
-    case sessionEnding(String)
+    case sessionEnding(SpeechFailureReason)
 
     /// A localized description of the error.
     public var errorDescription: String? {

@@ -9,10 +9,17 @@ protocol FishAudioRealtimeAudioSource: AnyObject, Sendable {
     var isCapturing: Bool { get }
     var currentLevel: Double { get }
     var recordedWAVData: Data? { get }
+    var recordingRetention: SpeechRecordingRetention { get set }
+    func discardRecording()
     func setTargetSampleRate(_ targetSampleRate: Double)
     func requestPermission() async -> Bool
     func startCapture() throws -> AsyncStream<Data>
     func stopCapture()
+}
+
+extension FishAudioRealtimeAudioSource {
+    var recordingRetention: SpeechRecordingRetention { get { .retainUntilDiscarded } set {} }
+    func discardRecording() {}
 }
 
 extension AudioCaptureManager: FishAudioRealtimeAudioSource {}
@@ -56,21 +63,18 @@ public final class FishAudioRealtimeService {
 
     /// The credential used for realtime transcription.
     ///
-    /// Fish Audio has no short-lived tokens: a ``SpeechCredential/token(_:)``
-    /// value is sent as the same bearer secret as an API key.
-    public var credential: SpeechCredential
-    /// The Fish Audio API key used for realtime transcription.
-    ///
-    /// Reading this property returns the key for a ``SpeechCredential/apiKey(_:)``
-    /// credential and an empty string for a ``SpeechCredential/token(_:)``
-    /// credential. Writing it replaces ``credential`` with
-    /// ``SpeechCredential/apiKey(_:)``.
-    public var apiKey: String {
-        get { credential.staticAPIKey }
-        set { credential = .apiKey(newValue) }
+    /// Fish Audio vendor tokens are unsupported. Custom proxies accept ``SpeechCredential/bearer(_:)``.
+    var credential: SpeechCredential { didSet { if oldValue != credential { configurationDidChange() } } }
+    /// The configured authorization mode, without exposing its value.
+    public var credentialKind: SpeechCredential.Kind { credential.kind }
+    public var hasCredential: Bool { credential.isConfigured }
+    public func setCredential(_ credential: SpeechCredential) {
+        configurationDidChange()
+        self.credential = credential
     }
+
     /// An override for the Fish Audio realtime WebSocket endpoint, or `nil` to use the vendor default.
-    public var realtimeEndpoint: URL?
+    public var realtimeEndpoint: URL? { didSet { if oldValue != realtimeEndpoint { configurationDidChange() } } }
     /// Options for the Fish Audio realtime transcription session.
     ///
     /// Changes apply to the next session.
@@ -84,6 +88,11 @@ public final class FishAudioRealtimeService {
     private let webSocket: FishAudioRealtimeWebSocket
     private var listeningTask: Task<Void, Never>?
     private var audioSendTask: Task<Void, Never>?
+    private var authorizationTask: Task<SpeechResolvedCredential, Error>?
+    private var reconfigurationTask: Task<Void, Never>?
+    public var credentialPolicy: SpeechCredentialPolicy = .allowStaticKeys {
+        didSet { if oldValue != credentialPolicy { configurationDidChange() } }
+    }
     private var lifecycleRunID = UUID()
     private var isGracefulStopPending = false
     private var gracefulStopWaiter: CheckedContinuation<Void, Never>?
@@ -103,6 +112,11 @@ public final class FishAudioRealtimeService {
         audioSource.currentLevel
     }
 
+    /// Recording retention after a session stops. The default preserves export after stop.
+    public var recordingRetention: SpeechRecordingRetention = .retainUntilDiscarded {
+        didSet { audioSource.recordingRetention = recordingRetention }
+    }
+
     /// The latest realtime microphone recording as WAV data, if capture has produced audio.
     public var realtimeRecordingData: Data? {
         audioSource.recordedWAVData
@@ -112,23 +126,26 @@ public final class FishAudioRealtimeService {
     public convenience init(
         apiKey: String = "",
         options: FishAudioRealtimeOptions = FishAudioRealtimeOptions(),
-        realtimeEndpoint: URL? = nil
+        realtimeEndpoint: URL? = nil,
+        credentialPolicy: SpeechCredentialPolicy = .allowStaticKeys
     ) {
-        self.init(credential: .apiKey(apiKey), options: options, realtimeEndpoint: realtimeEndpoint)
+        self.init(credential: .apiKey(apiKey), options: options, realtimeEndpoint: realtimeEndpoint, credentialPolicy: credentialPolicy)
     }
 
     /// Creates a Fish Audio realtime transcription service with any credential.
     public convenience init(
         credential: SpeechCredential,
         options: FishAudioRealtimeOptions = FishAudioRealtimeOptions(),
-        realtimeEndpoint: URL? = nil
+        realtimeEndpoint: URL? = nil,
+        credentialPolicy: SpeechCredentialPolicy = .allowStaticKeys
     ) {
         self.init(
             credential: credential,
             options: options,
             realtimeEndpoint: realtimeEndpoint,
             audioSource: AudioCaptureManager(targetSampleRate: Double(options.sampleRate)),
-            webSocket: FishAudioRealtimeWebSocket()
+            webSocket: FishAudioRealtimeWebSocket(),
+            credentialPolicy: credentialPolicy
         )
     }
 
@@ -139,9 +156,11 @@ public final class FishAudioRealtimeService {
         realtimeEndpoint: URL?,
         audioSource: any FishAudioRealtimeAudioSource,
         webSocket: FishAudioRealtimeWebSocket,
-        gracefulStopTimeout: Duration = .seconds(5)
+        gracefulStopTimeout: Duration = .seconds(5),
+        credentialPolicy: SpeechCredentialPolicy = .allowStaticKeys
     ) {
         self.credential = credential
+        self.credentialPolicy = credentialPolicy
         self.options = options
         self.realtimeEndpoint = realtimeEndpoint
         self.audioSource = audioSource
@@ -158,6 +177,22 @@ public final class FishAudioRealtimeService {
     public func startListening() async {
         guard !connectionState.isLifecycleActive else { return }
 
+        let runID = beginLifecycleRun()
+        defer {
+            if isCurrentLifecycleRun(runID) {
+                authorizationTask = nil
+                if Task.isCancelled { configurationDidChange() }
+            }
+        }
+        let credentialPolicy = credentialPolicy
+        let credential = credential
+        let options = options
+        let realtimeEndpoint = realtimeEndpoint
+        connectionState = .connecting
+        let teardown = reconfigurationTask
+        await teardown?.value
+        guard isCurrentLifecycleRun(runID), !Task.isCancelled else { return }
+
         guard credential.isConfigured else {
             connectionState = .error("Fish Audio is not configured")
             lastError = FishAudioRealtimeError.apiKeyMissing
@@ -167,39 +202,44 @@ public final class FishAudioRealtimeService {
         do {
             try options.validate()
         } catch {
-            connectionState = .error(error.localizedDescription)
-            lastError = error
+            guard isCurrentLifecycleRun(runID), !Task.isCancelled, !(error is CancellationError) else { return }
+            connectionState = .error(SpeechErrorBoundary.safe(error).localizedDescription)
+            lastError = SpeechErrorBoundary.safe(error)
             return
         }
 
         // Claim the lifecycle before the first suspension, so a stop during the
         // credential fetch or the permission prompt cancels this start.
-        let runID = beginLifecycleRun()
         connectionState = .connecting
         lastError = nil
         resetTurnState()
 
         let resolvedCredential: SpeechResolvedCredential
         do {
-            resolvedCredential = try await credential.resolved()
+            try credential.validate(provider: .fishAudio, capability: .realtime, endpoint: realtimeEndpoint ?? FishAudioRealtimeWebSocket.defaultURL, policy: credentialPolicy)
+            try options.validate()
+            let task = Task { try await credential.resolved(for: .fishAudio, capability: .realtime, model: FishAudioRealtimeWebSocket.modelID, endpoint: realtimeEndpoint ?? FishAudioRealtimeWebSocket.defaultURL, policy: credentialPolicy) }
+            authorizationTask = task
+            resolvedCredential = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            guard isCurrentLifecycleRun(runID), !Task.isCancelled else { return }
+            authorizationTask = nil
         } catch {
+            guard isCurrentLifecycleRun(runID), !Task.isCancelled, !(error is CancellationError) else { return }
             if isCurrentLifecycleRun(runID) {
                 reportFailure(error)
             }
             return
         }
-        guard isCurrentLifecycleRun(runID) else { return }
+        guard isCurrentLifecycleRun(runID), !Task.isCancelled else { return }
 
         let hasPermission = await audioSource.requestPermission()
-        guard isCurrentLifecycleRun(runID) else { return }
+        guard isCurrentLifecycleRun(runID), !Task.isCancelled else { return }
         guard hasPermission else {
             connectionState = .error("Microphone permission denied")
             lastError = SpeechAudioCaptureError.permissionDenied
             return
         }
 
-        let options = options
-        let realtimeEndpoint = realtimeEndpoint
 
         listeningTask = Task {
             do {
@@ -208,14 +248,14 @@ public final class FishAudioRealtimeService {
                     options: options,
                     endpoint: realtimeEndpoint
                 )
-                guard isCurrentLifecycleRun(runID) else {
+                guard isCurrentLifecycleRun(runID), !Task.isCancelled else {
                     await webSocket.disconnect()
                     return
                 }
 
                 for try await message in messageStream {
                     if Task.isCancelled { break }
-                    guard isCurrentLifecycleRun(runID) else { break }
+                    guard isCurrentLifecycleRun(runID), !Task.isCancelled else { break }
 
                     if let startedSendTask = handleMessage(message, runID: runID, startsCapture: true) {
                         audioSendTask = startedSendTask
@@ -242,6 +282,11 @@ public final class FishAudioRealtimeService {
     /// `audio_done`, and the wait for `session_done`; when it passes, SpeechKit
     /// closes the connection anyway. Concurrent calls share one shutdown.
     public func stopListening() async {
+        defer { if recordingRetention == .discardOnStop { discardRecording() } }
+        authorizationTask?.cancel()
+        authorizationTask = nil
+        if listeningTask == nil { invalidateLifecycleRun() }
+
         if let stopTask {
             await stopTask.value
             return
@@ -417,15 +462,13 @@ public final class FishAudioRealtimeService {
                 }
             } else {
                 let error = FishAudioRealtimeError.serverError(
-                    errorType: serverError.errorType,
-                    code: serverError.code,
-                    message: serverError.message
+                    code: serverError.code
                 )
-                lastError = error
+                lastError = SpeechErrorBoundary.safe(error)
                 // During a stop, keep draining: Fish Audio can still commit the
                 // open turn (as with `max_duration_exceeded`) before it closes.
                 if !serverError.recoverable, connectionState != .stopping {
-                    connectionState = .error(error.localizedDescription)
+                    connectionState = .error(SpeechErrorBoundary.safe(error).localizedDescription)
                 }
             }
 
@@ -548,7 +591,7 @@ public final class FishAudioRealtimeService {
 
     /// Ends the session at once, keeping the error: an open socket keeps billing.
     private func abortSession(error: Error, state: SpeechRealtimeConnectionState) {
-        lastError = error
+        lastError = SpeechErrorBoundary.safe(error)
         connectionState = state
         invalidateLifecycleRun()
         listeningTask?.cancel()
@@ -600,6 +643,46 @@ public final class FishAudioRealtimeService {
     private func isCurrentLifecycleRun(_ runID: UUID) -> Bool {
         lifecycleRunID == runID
     }
+    private func configurationDidChange() {
+        invalidateLifecycleRun()
+        authorizationTask?.cancel()
+        authorizationTask = nil
+        listeningTask?.cancel()
+        listeningTask = nil
+        audioSource.stopCapture()
+        connectionState = .disconnected
+        lastError = nil
+        let previous = reconfigurationTask
+        reconfigurationTask = Task { [webSocket] in
+            await previous?.value
+            await webSocket.disconnect()
+        }
+    }
+
+    /// Replaces authorization and its destination together, cancelling the previous session.
+    public func reconfigure(credential: SpeechCredential, realtimeEndpoint: URL? = nil) async {
+        configurationDidChange()
+        self.credential = credential
+        self.realtimeEndpoint = realtimeEndpoint
+        await reconfigurationTask?.value
+    }
+
+    /// Cancels local work. Ordinary stop retains configured authorization and recordings.
+    public func resetSession(discardTranscript: Bool = true, discardRecording: Bool = true) async {
+        configurationDidChange()
+        await reconfigurationTask?.value
+        lastError = nil
+        if discardTranscript { clearTranscript() }
+        if discardRecording { self.discardRecording() }
+    }
+
+    public func clearCredentials() async {
+        credential = .apiKey("")
+        await resetSession()
+    }
+
+    public func discardRecording() { audioSource.discardRecording() }
+
 }
 
 // MARK: - Mapping
@@ -778,4 +861,5 @@ enum FishAudioRealtimeMapping {
     private static func normalizedWhitespace(_ text: String) -> String {
         text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
+
 }

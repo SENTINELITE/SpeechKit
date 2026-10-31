@@ -144,8 +144,7 @@ public struct FishAudioRealtimeOptions: Sendable, Equatable {
         guard Self.supportedSampleRates.contains(sampleRate) else {
             throw SpeechError.providerFailure(
                 provider: .fishAudio,
-                reason: "Unsupported realtime sampleRate: \(sampleRate). Use 8000, 12000, 16000, 22050, 24000, 32000, 44100, or 48000."
-            )
+                reason: .requestFailed)
         }
 
         if silenceTimeout != nil {
@@ -153,8 +152,7 @@ public struct FishAudioRealtimeOptions: Sendable, Equatable {
             guard let milliseconds = silenceTimeoutMilliseconds, range.contains(milliseconds) else {
                 throw SpeechError.providerFailure(
                     provider: .fishAudio,
-                    reason: "silenceTimeout must be between \(Double(range.lowerBound) / 1000) and \(Double(range.upperBound) / 1000) seconds in \(mode.rawValue) mode."
-                )
+                    reason: .requestFailed)
             }
         }
 
@@ -172,24 +170,24 @@ extension FishAudioValidation {
     /// Rejects more than 100 terms, an empty term, or a term over 32 characters.
     static func validateTerms(_ terms: [String]) throws {
         if terms.count > FishAudioRealtimeOptions.maximumTermCount {
-            throw SpeechError.providerFailure(provider: .fishAudio, reason: "terms cannot contain more than 100 entries.")
+            throw SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)
         }
         if terms.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-            throw SpeechError.providerFailure(provider: .fishAudio, reason: "terms cannot contain empty entries.")
+            throw SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)
         }
         // Fish Audio's limits count Unicode code points, not grapheme clusters.
-        if let term = terms.first(where: { $0.unicodeScalars.count > FishAudioRealtimeOptions.maximumTermLength }) {
-            throw SpeechError.providerFailure(provider: .fishAudio, reason: "terms cannot be longer than 32 Unicode code points: \"\(term)\".")
+        if terms.contains(where: { $0.unicodeScalars.count > FishAudioRealtimeOptions.maximumTermLength }) {
+            throw SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)
         }
     }
 
     /// Rejects more than 32 context items or an item over 2,000 characters.
     static func validateContextItems(_ items: [FishAudioContextItem], name: String) throws {
         if items.count > FishAudioRealtimeOptions.maximumHistoryCount {
-            throw SpeechError.providerFailure(provider: .fishAudio, reason: "\(name) cannot contain more than 32 items.")
+            throw SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)
         }
         if items.contains(where: { $0.text.unicodeScalars.count > FishAudioRealtimeOptions.maximumHistoryTextLength }) {
-            throw SpeechError.providerFailure(provider: .fishAudio, reason: "\(name) items cannot be longer than 2000 Unicode code points.")
+            throw SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)
         }
     }
 }
@@ -259,11 +257,11 @@ public enum FishAudioRealtimeError: Error, LocalizedError, Sendable, Equatable {
     /// Fish Audio reported an error during the session.
     ///
     /// `code` is Fish Audio's HTTP-style status and `errorType` its machine-readable type, such as `invalid_request` or `engine_error`.
-    case serverError(errorType: String, code: Int?, message: String?)
+    case serverError(code: Int?)
     /// Fish Audio closed the session with an error close code: 4400, 4408, 4413, 4500, or 1009.
     ///
     /// `errorType` and `message` come from the `error` message Fish Audio sent before closing, when there was one.
-    case sessionClosed(code: Int, errorType: String?, message: String?)
+    case sessionClosed(code: Int)
     /// Fish Audio is restarting and closed the session with code 1012.
     ///
     /// The open turn was committed first. A new session can start at once.
@@ -274,9 +272,9 @@ public enum FishAudioRealtimeError: Error, LocalizedError, Sendable, Equatable {
         switch self {
         case .connectionRefused(let statusCode):
             return statusCode == 429 || statusCode == 503
-        case .serverError(_, let code, _):
+        case .serverError(let code):
             return code.map { $0 >= 500 } ?? false
-        case .sessionClosed(let code, _, _):
+        case .sessionClosed(let code):
             return code == 4500
         case .serverRestarting, .handshakeTimedOut, .disconnected:
             return true
@@ -309,32 +307,16 @@ public enum FishAudioRealtimeError: Error, LocalizedError, Sendable, Equatable {
             default:
                 return "Fish Audio refused the realtime connection (HTTP \(statusCode))"
             }
-        case .serverError(let errorType, let code, let message):
-            let detail = message.map { ": \($0)" } ?? ""
-            let status = code.map { ", \($0)" } ?? ""
-            return "Fish Audio error (\(errorType)\(status))\(detail)"
-        case .sessionClosed(let code, let errorType, let message):
-            let summary: String
+        case .serverError(let code):
+            return "Fish Audio session failed (status \(code ?? 0))"
+        case .sessionClosed(let code):
             switch code {
-            case 4400:
-                summary = "Fish Audio rejected the session configuration or audio"
-            case 4408:
-                summary = "Fish Audio closed the idle session"
-            case 4413:
-                summary = "The session reached Fish Audio's 60-minute limit"
-            case 4500:
-                summary = "Fish Audio had an internal error"
-            case 1009:
-                summary = "An audio message exceeded Fish Audio's 1 MiB frame limit"
-            default:
-                summary = "Fish Audio closed the session"
+            case 4400: return "Fish Audio rejected the session configuration or audio (close 4400)"
+            case 4408: return "Fish Audio closed the idle session (close 4408)"
+            case 4413: return "The session reached Fish Audio's 60-minute limit (close 4413)"
+            case 1009: return "An audio message exceeded Fish Audio's 1 MiB frame limit (close 1009)"
+            default: return "Fish Audio closed the session (close \(code))"
             }
-            var details = ["close \(code)"]
-            if let errorType {
-                details.append(errorType)
-            }
-            let detail = message.map { ": \($0)" } ?? ""
-            return "\(summary) (\(details.joined(separator: ", ")))\(detail)"
         case .serverRestarting:
             return "Fish Audio is restarting; start a new session"
         }

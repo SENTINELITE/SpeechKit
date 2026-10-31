@@ -10,13 +10,13 @@ public final class SpeechService {
         didSet { applyRealtimeConfig() }
     }
     /// The Cohere configuration used for Cohere file transcription.
-    public var cohere: CohereConfiguration?
+    public var cohere: CohereConfiguration? { didSet { invalidatePendingOperations() } }
     /// The Grok configuration used for Grok file transcription.
     public var grok: GrokConfiguration? {
         didSet { applyGrokRealtimeConfig() }
     }
     /// The Aqua configuration used for Aqua file transcription.
-    public var aqua: AquaConfiguration?
+    public var aqua: AquaConfiguration? { didSet { invalidatePendingOperations() } }
     /// The OpenAI configuration used for OpenAI realtime and file transcription.
     public var openAI: OpenAIConfiguration? {
         didSet { applyOpenAIRealtimeConfig() }
@@ -42,7 +42,13 @@ public final class SpeechService {
     @available(watchOS, unavailable)
     public var apple: AppleSpeechConfiguration? {
         get { appleConfigurationStorage as? AppleSpeechConfiguration }
-        set { appleConfigurationStorage = newValue }
+        set {
+            invalidatePendingOperations()
+            appleConfigurationStorage = newValue
+            #if !os(watchOS)
+            (appleRealtimeServiceStorage as? AppleSpeechService)?.invalidateConfiguration()
+            #endif
+        }
     }
 
     let elevenLabsRealtimeService: ElevenLabsService
@@ -52,6 +58,31 @@ public final class SpeechService {
     let geminiRealtimeService: GeminiRealtimeService
     let mistralRealtimeService: MistralRealtimeService
     let fishAudioRealtimeService: FishAudioRealtimeService
+    /// Recording retention shared by all realtime providers.
+    public var recordingRetention: SpeechRecordingRetention = .retainUntilDiscarded {
+        didSet {
+            elevenLabsRealtimeService.recordingRetention = recordingRetention
+            openAIRealtimeService.recordingRetention = recordingRetention
+            grokRealtimeService.recordingRetention = recordingRetention
+            metaRealtimeService.recordingRetention = recordingRetention
+            geminiRealtimeService.recordingRetention = recordingRetention
+            mistralRealtimeService.recordingRetention = recordingRetention
+            fishAudioRealtimeService.recordingRetention = recordingRetention
+            #if !os(watchOS)
+            if #available(iOS 26, macOS 26, visionOS 26, *), let service = appleRealtimeServiceStorage as? AppleSpeechService {
+                service.recordingRetention = recordingRetention
+            }
+            #endif
+        }
+    }
+    public internal(set) var relay: SpeechRelay?
+    public private(set) var credentialPolicy: SpeechCredentialPolicy = .allowStaticKeys
+    var relaySession: SpeechRelaySession?
+    var realtimeStartGeneration = UUID()
+    var realtimeStartTask: Task<Void, Never>?
+    var pendingRealtimeProvider: SpeechRealtimeProvider?
+    var fileOperationCancellations: [UUID: @Sendable () -> Void] = [:]
+    var fileGeneration = UUID()
     let urlSession: URLSession
     var appleConfigurationStorage: Any?
     var appleRealtimeServiceStorage: Any?
@@ -76,8 +107,10 @@ public final class SpeechService {
         meta: MetaConfiguration? = nil,
         gemini: GeminiConfiguration? = nil,
         mistral: MistralConfiguration? = nil,
-        fishAudio: FishAudioConfiguration? = nil
+        fishAudio: FishAudioConfiguration? = nil,
+        credentialPolicy: SpeechCredentialPolicy = .allowStaticKeys
     ) {
+        self.credentialPolicy = credentialPolicy
         self.elevenLabs = elevenLabs
         self.cohere = cohere
         self.grok = grok
@@ -94,7 +127,7 @@ public final class SpeechService {
         self.geminiRealtimeService = GeminiRealtimeService()
         self.mistralRealtimeService = MistralRealtimeService()
         self.fishAudioRealtimeService = FishAudioRealtimeService()
-        self.urlSession = .shared
+        self.urlSession = SpeechTransport.session()
         applyRealtimeConfig()
         applyOpenAIRealtimeConfig()
         applyGrokRealtimeConfig()
@@ -111,6 +144,7 @@ public final class SpeechService {
     /// initializer remains available for the package's lower deployment targets.
     @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
     @available(watchOS, unavailable)
+    @_disfavoredOverload
     public convenience init(
         elevenLabs: ElevenLabsConfiguration? = nil,
         cohere: CohereConfiguration? = nil,
@@ -121,7 +155,8 @@ public final class SpeechService {
         gemini: GeminiConfiguration? = nil,
         mistral: MistralConfiguration? = nil,
         fishAudio: FishAudioConfiguration? = nil,
-        apple: AppleSpeechConfiguration? = nil
+        apple: AppleSpeechConfiguration? = nil,
+        credentialPolicy: SpeechCredentialPolicy = .allowStaticKeys
     ) {
         self.init(
             elevenLabs: elevenLabs,
@@ -132,7 +167,8 @@ public final class SpeechService {
             meta: meta,
             gemini: gemini,
             mistral: mistral,
-            fishAudio: fishAudio
+            fishAudio: fishAudio,
+            credentialPolicy: credentialPolicy
         )
         self.apple = apple
     }
@@ -165,7 +201,7 @@ public final class SpeechService {
         self.gemini = gemini
         self.mistral = mistral
         self.fishAudio = fishAudio
-        self.urlSession = urlSession
+        self.urlSession = SpeechTransport.session(copying: urlSession)
         self.elevenLabsRealtimeService = elevenLabsRealtimeService
         self.openAIRealtimeService = openAIRealtimeService
         self.grokRealtimeService = grokRealtimeService
@@ -183,13 +219,17 @@ public final class SpeechService {
     }
 
     private func applyRealtimeConfig() {
-        elevenLabsRealtimeService.credential = elevenLabs?.credential ?? .apiKey("")
+        invalidatePendingOperations()
+        elevenLabsRealtimeService.credentialPolicy = credentialPolicy
+        elevenLabsRealtimeService.setCredential(elevenLabs?.credential(for: .realtime) ?? .apiKey(""))
         elevenLabsRealtimeService.realtimeEndpoint = elevenLabs?.realtimeEndpoint
         elevenLabsRealtimeService.realtimeModelID = elevenLabs?.realtimeModelID ?? .scribeV2Realtime
     }
 
     private func applyOpenAIRealtimeConfig() {
-        openAIRealtimeService.credential = openAI?.credential ?? .apiKey("")
+        invalidatePendingOperations()
+        openAIRealtimeService.credentialPolicy = credentialPolicy
+        openAIRealtimeService.setCredential(openAI?.credential(for: .realtime) ?? .apiKey(""))
         openAIRealtimeService.realtimeEndpoint = openAI?.realtimeEndpoint
         if let openAI {
             openAIRealtimeService.options = resolvedOpenAIRealtimeOptions(from: openAI)
@@ -197,7 +237,9 @@ public final class SpeechService {
     }
 
     private func applyGrokRealtimeConfig() {
-        grokRealtimeService.credential = grok?.credential ?? .apiKey("")
+        invalidatePendingOperations()
+        grokRealtimeService.credentialPolicy = credentialPolicy
+        grokRealtimeService.setCredential(grok?.credential(for: .realtime) ?? .apiKey(""))
         grokRealtimeService.realtimeEndpoint = grok?.realtimeEndpoint
         if let grok {
             grokRealtimeService.options = grok.realtimeOptions
@@ -205,7 +247,9 @@ public final class SpeechService {
     }
 
     private func applyMetaRealtimeConfig() {
-        metaRealtimeService.credential = meta?.credential ?? .apiKey("")
+        invalidatePendingOperations()
+        metaRealtimeService.credentialPolicy = credentialPolicy
+        metaRealtimeService.setCredential(meta?.credential(for: .realtime) ?? .apiKey(""))
         metaRealtimeService.realtimeEndpoint = meta?.realtimeEndpoint
         if let meta {
             metaRealtimeService.options = meta.realtimeOptions
@@ -213,7 +257,9 @@ public final class SpeechService {
     }
 
     private func applyGeminiRealtimeConfig() {
-        geminiRealtimeService.credential = gemini?.credential ?? .apiKey("")
+        invalidatePendingOperations()
+        geminiRealtimeService.credentialPolicy = credentialPolicy
+        geminiRealtimeService.setCredential(gemini?.credential(for: .realtime) ?? .apiKey(""))
         geminiRealtimeService.realtimeEndpoint = gemini?.realtimeEndpoint
         if let gemini {
             geminiRealtimeService.options = resolvedGeminiRealtimeOptions(from: gemini)
@@ -221,7 +267,9 @@ public final class SpeechService {
     }
 
     private func applyMistralRealtimeConfig() {
-        mistralRealtimeService.credential = mistral?.credential ?? .apiKey("")
+        invalidatePendingOperations()
+        mistralRealtimeService.credentialPolicy = credentialPolicy
+        mistralRealtimeService.setCredential(mistral?.credential(for: .realtime) ?? .apiKey(""))
         mistralRealtimeService.realtimeEndpoint = mistral?.realtimeEndpoint
         if let mistral {
             mistralRealtimeService.options = mistral.realtimeOptions
@@ -229,7 +277,9 @@ public final class SpeechService {
     }
 
     private func applyFishAudioRealtimeConfig() {
-        fishAudioRealtimeService.credential = fishAudio?.credential ?? .apiKey("")
+        invalidatePendingOperations()
+        fishAudioRealtimeService.credentialPolicy = credentialPolicy
+        fishAudioRealtimeService.setCredential(fishAudio?.credential(for: .realtime) ?? .apiKey(""))
         fishAudioRealtimeService.realtimeEndpoint = fishAudio?.realtimeEndpoint
         if let fishAudio {
             fishAudioRealtimeService.options = fishAudio.realtimeOptions

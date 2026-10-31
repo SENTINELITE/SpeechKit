@@ -91,13 +91,14 @@ struct AppleSpeechSettingsView: View {
 
     private func prepareAssets() {
         assetState = .preparing
-        configuration.apply(to: speech)
         Task {
             do {
+                try configuration.prepare(speech, for: nil)
+                defer { configuration.releaseAuthorization(from: speech) }
                 try await speech.prepareAppleSpeechAssets()
                 assetState = .ready
             } catch {
-                assetState = .failed(error.localizedDescription)
+                assetState = .failed(DemoFailure.message(for: error))
             }
         }
     }

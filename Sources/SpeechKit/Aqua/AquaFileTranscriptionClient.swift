@@ -66,7 +66,7 @@ public struct AquaFileTranscriptionResponse: Decodable, Sendable, Equatable {
 }
 
 struct AquaFileTranscriptionClient {
-    static let defaultUploadURL = URL(string: "https://api.aquavoice.com/api/v1/audio/transcriptions")
+    static let defaultUploadURL = URL(string: "https://api.aquavoice.com/v1/audio/transcriptions")
 
     private let credential: SpeechCredential
     private let urlSession: URLSession
@@ -74,13 +74,13 @@ struct AquaFileTranscriptionClient {
     private let maxUploadBytes: Int64 = 25 * 1024 * 1024
     private let allowedExtensions: Set<String> = ["flac", "mp3", "mp4", "mpeg", "mpga", "m4a", "ogg", "wav", "webm"]
 
-    init(apiKey: String, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+    init(apiKey: String, endpoint: URL? = nil, urlSession: URLSession = SpeechTransport.session()) {
         self.init(credential: .apiKey(apiKey), endpoint: endpoint, urlSession: urlSession)
     }
 
-    init(credential: SpeechCredential, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+    init(credential: SpeechCredential, endpoint: URL? = nil, urlSession: URLSession = SpeechTransport.session()) {
         self.credential = credential
-        self.urlSession = urlSession
+        self.urlSession = SpeechTransport.session(copying: urlSession, pinnedPublicKeyHashes: credential.pinnedPublicKeyHashes)
         self.uploadURL = endpoint ?? Self.defaultUploadURL
     }
 
@@ -96,20 +96,23 @@ struct AquaFileTranscriptionClient {
         file: URL,
         options: AquaFileTranscriptionOptions = AquaFileTranscriptionOptions()
     ) async throws -> AquaFileTranscriptionResponse {
+        let prepared = try await SpeechRelayAudioImport.prepare(file: file, provider: .aqua,
+            optimizeUploads: credential.optimizeUploads, maxUploadBytes: maxUploadBytes)
+        defer { prepared.remove() }
+        let file = prepared.file
         let request = try await makeAuthorizedRequest(file: file, options: options)
-        let (data, response) = try await urlSession.data(for: request)
+        let (data, response) = try await SpeechTransport.data(for: request, session: urlSession, prepare: self.credential.relayRequestPreparation)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SpeechError.invalidResponse(provider: .aqua)
         }
         guard (200...299).contains(httpResponse.statusCode) else {
-            let message = String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)"
-            throw SpeechError.uploadFailed(provider: .aqua, reason: message)
+            throw SpeechFailure(.server, statusCode: httpResponse.statusCode)
         }
 
         do {
             return try JSONDecoder().decode(AquaFileTranscriptionResponse.self, from: data)
         } catch {
-            throw SpeechError.decodingFailed(provider: .aqua, reason: error.localizedDescription)
+            throw SpeechError.decodingFailed(provider: .aqua, reason: .decodingFailed)
         }
     }
 
@@ -121,7 +124,7 @@ struct AquaFileTranscriptionClient {
         guard credential.isConfigured else {
             throw SpeechError.providerNotConfigured(.aqua)
         }
-        let resolved = try await credential.resolved(for: .aqua)
+        let resolved = try await credential.resolved(for: .aqua, model: options.modelID.rawValue, endpoint: uploadURL)
         return try makeRequest(file: file, options: options, secret: resolved.secret)
     }
 
@@ -135,14 +138,14 @@ struct AquaFileTranscriptionClient {
 
     /// Builds an upload request from an already-resolved secret.
     ///
-    /// Aqua accepts both a long-lived API key and a short-lived token as a
-    /// bearer token.
+    /// Aqua API keys and custom proxy credentials use Bearer authorization.
+    /// Native vendor-token mode is unsupported for this capability.
     func makeRequest(
         file: URL,
         options: AquaFileTranscriptionOptions = AquaFileTranscriptionOptions(),
         secret: String
     ) throws -> URLRequest {
-        guard !secret.isEmpty else {
+        guard !secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw SpeechError.providerNotConfigured(.aqua)
         }
         guard let uploadURL else {
@@ -156,9 +159,9 @@ struct AquaFileTranscriptionClient {
         var parts: [SpeechMultipartFormPart] = [
             .file(
                 name: "file",
-                fileURL: file,
+                fileURL: credential.uploadFileURL(file),
                 fileData: audioData,
-                contentType: SpeechFileUploadSupport.mimeType(for: file)
+                contentType: SpeechFileUploadSupport.mimeType(for: credential.uploadFileURL(file))
             ),
             .text(name: "model", value: options.modelID.rawValue)
         ]
@@ -179,7 +182,7 @@ struct AquaFileTranscriptionClient {
         do {
             return try Data(contentsOf: fileURL)
         } catch {
-            throw SpeechError.providerFailure(provider: .aqua, reason: error.localizedDescription)
+            throw SpeechError.providerFailure(provider: .aqua, reason: .requestFailed)
         }
     }
 }

@@ -5,7 +5,11 @@ import SwiftUI
 struct ProviderSettingsView: View {
     @Bindable var configuration: DemoConfiguration
     let provider: DemoAPIKeyProvider
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.speechService) private var speech
     @State private var keyDraft = ""
+    @State private var persistenceError: String?
+    @State private var persistenceMessage: String?
 
     var body: some View {
         Form {
@@ -30,47 +34,73 @@ struct ProviderSettingsView: View {
             }
         }
         .navigationTitle(provider.title)
-        .onAppear {
-            keyDraft = configuration.apiKey(for: provider)
+        .onAppear { configuration.refreshKeyStatus() }
+        .onDisappear { keyDraft = "" }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { keyDraft = "" }
         }
     }
 
     /// Edits the provider's keychain-backed API key.
     private var apiKeySection: some View {
         Section {
-            SecureField("\(provider.title) API Key", text: $keyDraft)
+            if configuration.isRelayEnabled {
+                Text("Relay handles this provider. Saved vendor keys are not loaded while Relay mode is enabled.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            SecureField(hasKey ? "Replacement API key" : "\(provider.title) API Key", text: $keyDraft)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
 
             HStack {
-                Text(hasKey ? "Saved" : "Not configured")
+                Text(hasKey ? "Key stored" : "Not configured")
                     .font(.caption)
                     .foregroundStyle(hasKey ? .green : .secondary)
 
                 Spacer()
 
                 Button("Save") {
-                    configuration.setAPIKey(keyDraft, for: provider)
+                    persistKey(keyDraft)
                 }
                 .buttonStyle(.bordered)
-                .disabled(keyDraft == configuration.apiKey(for: provider))
+                .disabled(keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || configuration.isResettingAuthorization)
+            }
+
+            if let message = persistenceError ?? configuration.keychainError {
+                Text(message).font(.caption).foregroundStyle(.red)
+            } else if let persistenceMessage {
+                Text(persistenceMessage).font(.caption).foregroundStyle(.green)
             }
 
             if hasKey {
                 Button("Remove Key", role: .destructive) {
-                    keyDraft = ""
-                    configuration.setAPIKey("", for: provider)
+                    persistKey("")
                 }
+                .disabled(configuration.isResettingAuthorization)
             }
         } header: {
             Text("API Key")
         } footer: {
-            Text("Stored in this device's keychain.")
+            Text("Stored only on this device and available while unlocked. Saved keys are never shown. Use your own vendor key; requests use its permissions and billing. Remove Key stops local use; revoke the key with the vendor to invalidate it elsewhere.")
+        }
+    }
+
+    private func persistKey(_ value: String) {
+        defer { keyDraft = "" }
+        persistenceMessage = nil
+        persistenceError = nil
+        do {
+            try configuration.setAPIKey(value, for: provider)
+            persistenceMessage = value.isEmpty ? "Key removed." : "Key saved."
+            Task { await configuration.clearAuthorization(in: speech) }
+        } catch {
+            persistenceError = "The key was not changed. \(DemoFailure.message(for: error))"
         }
     }
 
     private var hasKey: Bool {
-        configuration.hasAPIKey(for: provider)
+        configuration.savedKeyProviders.contains(provider)
     }
 }
 

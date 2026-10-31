@@ -71,7 +71,7 @@ final class AudioCaptureManager: @unchecked Sendable {
         
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
             self.audioEngine = nil
-            throw SpeechAudioCaptureError.audioEngineError("Invalid input format: \(inputFormat)")
+            throw SpeechAudioCaptureError.audioEngineError(.requestFailed)
         }
         
         guard let targetFormat = AVAudioFormat(
@@ -81,12 +81,12 @@ final class AudioCaptureManager: @unchecked Sendable {
             interleaved: true
         ) else {
             self.audioEngine = nil
-            throw SpeechAudioCaptureError.audioEngineError("Failed to create target audio format")
+            throw SpeechAudioCaptureError.audioEngineError(.requestFailed)
         }
         
         guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
             self.audioEngine = nil
-            throw SpeechAudioCaptureError.audioEngineError("Failed to create audio converter from \(inputFormat) to \(targetFormat)")
+            throw SpeechAudioCaptureError.audioEngineError(.requestFailed)
         }
         
         let stream = AsyncStream<Data> { continuation in
@@ -148,7 +148,10 @@ final class AudioCaptureManager: @unchecked Sendable {
         return stream
     }
     
+    var recordingRetention: SpeechRecordingRetention = .retainUntilDiscarded
+
     func stopCapture() {
+        defer { if recordingRetention == .discardOnStop { discardRecording() } }
         guard audioEngine != nil || continuation != nil || isCapturing else {
             isCapturing = false
             currentStream = nil
@@ -163,6 +166,12 @@ final class AudioCaptureManager: @unchecked Sendable {
         currentStream = nil
         isCapturing = false
         currentLevel = 0
+    }
+
+    func discardRecording() {
+        recordedAudioLock.lock()
+        recordedPCMData = Data()
+        recordedAudioLock.unlock()
     }
 
     private func resetRecordedAudio() {

@@ -1,6 +1,7 @@
 import Foundation
 
 actor ElevenLabsWebSocket {
+    private var connectionGeneration = UUID()
     private var webSocketTask: URLSessionWebSocketTask?
     private var session: URLSession?
     private var continuation: AsyncThrowingStream<ElevenLabsMessage, Error>.Continuation?
@@ -23,6 +24,8 @@ actor ElevenLabsWebSocket {
         modelID: ElevenLabsModelID,
         endpoint: URL? = nil
     ) throws -> URLRequest {
+        try SpeechEndpointPolicy.validate(endpoint ?? defaultURL, websocket: true)
+        try SpeechResolvedCredential.validateSecret(credential.secret)
         guard let baseURL = endpoint ?? defaultURL,
               var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw ElevenLabsError.invalidURL
@@ -30,9 +33,7 @@ actor ElevenLabsWebSocket {
 
         var queryItems = components.queryItems ?? []
         queryItems.append(URLQueryItem(name: "model_id", value: modelID.rawValue))
-        if case .token(let token) = credential {
-            queryItems.append(URLQueryItem(name: "token", value: token))
-        }
+
         components.queryItems = queryItems
 
         guard let url = components.url else {
@@ -40,9 +41,7 @@ actor ElevenLabsWebSocket {
         }
 
         var request = URLRequest(url: url)
-        if case .apiKey(let key) = credential {
-            request.setValue(key, forHTTPHeaderField: "xi-api-key")
-        }
+        try credential.authorize(&request, provider: .elevenLabs, capability: .realtime)
         return request
     }
 
@@ -53,28 +52,40 @@ actor ElevenLabsWebSocket {
     ) async throws -> AsyncThrowingStream<ElevenLabsMessage, Error> {
         let request = try Self.makeConnectRequest(credential: credential, modelID: modelID, endpoint: endpoint)
 
-        let session = URLSession(configuration: .default)
+        disconnect()
+        let generation = connectionGeneration
+        let opened = try await SpeechSocketConnection.open(request: request, credential: credential)
+        guard generation == connectionGeneration, !Task.isCancelled else {
+            opened.task.cancel(with: .goingAway, reason: nil)
+            opened.session.invalidateAndCancel()
+            throw CancellationError()
+        }
+        let session = opened.session
+        let task = opened.task
         self.session = session
-        
-        let task = session.webSocketTask(with: request)
         self.webSocketTask = task
+
         
-        task.resume()
-        
+        guard webSocketTask === task, !Task.isCancelled else {
+            disconnect(ifCurrent: task)
+            throw CancellationError()
+        }
+
         return AsyncThrowingStream { continuation in
             self.continuation = continuation
             
             continuation.onTermination = { @Sendable _ in
-                Task { await self.disconnect() }
+                Task { await self.disconnect(ifCurrent: task) }
             }
             
             Task {
-                await self.receiveMessages()
+                await self.receiveMessages(from: task)
             }
         }
     }
     
     func send(_ chunk: InputAudioChunk) async throws {
+        try Task.checkCancellation()
         guard let task = webSocketTask, task.state == .running else {
             throw ElevenLabsError.disconnected
         }
@@ -88,6 +99,7 @@ actor ElevenLabsWebSocket {
     }
     
     func sendEndOfStream() async throws {
+        try Task.checkCancellation()
         guard let task = webSocketTask, task.state == .running else {
             throw ElevenLabsError.disconnected
         }
@@ -102,6 +114,7 @@ actor ElevenLabsWebSocket {
     }
     
     func disconnect() {
+        connectionGeneration = UUID()
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
         continuation?.finish()
@@ -110,13 +123,19 @@ actor ElevenLabsWebSocket {
         session = nil
     }
     
-    private func receiveMessages() async {
-        guard let task = webSocketTask else { return }
+    private func disconnect(ifCurrent task: URLSessionWebSocketTask) {
+        guard webSocketTask === task else { return }
+        disconnect()
+    }
+
+    private func receiveMessages(from task: URLSessionWebSocketTask) async {
+        guard webSocketTask === task else { return }
         
-        while task.state == .running {
+        while task.state == .running && webSocketTask === task {
             do {
                 let message = try await task.receive()
                 
+                guard webSocketTask === task else { return }
                 switch message {
                 case .string(let text):
                     guard let data = text.data(using: .utf8) else { continue }
@@ -142,7 +161,8 @@ actor ElevenLabsWebSocket {
                 if task.state != .running {
                     break
                 }
-                continuation?.finish(throwing: error)
+                guard webSocketTask === task else { return }
+                continuation?.finish(throwing: SpeechErrorBoundary.safe(error))
                 return
             }
         }

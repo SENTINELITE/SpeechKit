@@ -16,14 +16,14 @@ struct GeminiFilesClient {
 
     private let credential: SpeechCredential
     private let urlSession: URLSession
-    private let uploadURL: URL?
+    let uploadURL: URL?
     private let statePollInterval: TimeInterval
     private let maxStatePollAttempts: Int
 
     init(
         apiKey: String,
         endpoint: URL? = nil,
-        urlSession: URLSession = .shared,
+        urlSession: URLSession = SpeechTransport.session(),
         statePollInterval: TimeInterval = 1,
         maxStatePollAttempts: Int = 60
     ) {
@@ -39,12 +39,12 @@ struct GeminiFilesClient {
     init(
         credential: SpeechCredential,
         endpoint: URL? = nil,
-        urlSession: URLSession = .shared,
+        urlSession: URLSession = SpeechTransport.session(),
         statePollInterval: TimeInterval = 1,
         maxStatePollAttempts: Int = 60
     ) {
         self.credential = credential
-        self.urlSession = urlSession
+        self.urlSession = SpeechTransport.session(copying: urlSession, pinnedPublicKeyHashes: credential.pinnedPublicKeyHashes)
         self.uploadURL = endpoint ?? Self.defaultUploadURL
         self.statePollInterval = statePollInterval
         self.maxStatePollAttempts = maxStatePollAttempts
@@ -56,12 +56,15 @@ struct GeminiFilesClient {
         mimeType: String,
         timeoutInterval: TimeInterval
     ) async throws -> UploadedFile {
-        let audioData = try readFileData(from: file)
-        guard credential.isConfigured else {
-            throw SpeechError.providerNotConfigured(.gemini)
-        }
-        let resolved = try await credential.resolved(for: .gemini)
+        let resolved = try await credential.resolved(for: .gemini, endpoint: uploadURL)
+        return try await upload(file: file, mimeType: mimeType, timeoutInterval: timeoutInterval, credential: resolved)
+    }
 
+    func upload(file: URL, mimeType: String, timeoutInterval: TimeInterval,
+                credential resolved: SpeechResolvedCredential) async throws -> UploadedFile {
+        try SpeechEndpointPolicy.validate(uploadURL)
+        try SpeechResolvedCredential.validateSecret(resolved.secret)
+        let audioData = try readFileData(from: file)
         let startRequest = try makeStartRequest(
             file: file,
             mimeType: mimeType,
@@ -69,7 +72,7 @@ struct GeminiFilesClient {
             timeoutInterval: timeoutInterval,
             credential: resolved
         )
-        let (startData, startResponse) = try await urlSession.data(for: startRequest)
+        let (startData, startResponse) = try await SpeechTransport.data(for: startRequest, session: urlSession, prepare: self.credential.relayRequestPreparation)
         let startHTTPResponse = try httpResponse(from: startResponse)
         try validateStatusCode(startHTTPResponse, data: startData)
 
@@ -77,23 +80,39 @@ struct GeminiFilesClient {
               let sessionURL = URL(string: sessionURLString) else {
             throw SpeechError.uploadFailed(
                 provider: .gemini,
-                reason: "The Gemini Files API did not return a resumable upload URL."
-            )
+                reason: .uploadFailed)
         }
 
+        try validateUploadSession(sessionURL, credential: resolved)
         var uploadRequest = makeUploadRequest(
             sessionURL: sessionURL,
             byteCount: audioData.count,
             timeoutInterval: timeoutInterval
         )
+        if resolved.kind == .relay {
+            try resolved.authorize(&uploadRequest, provider: .gemini, capability: .fileTranscription)
+        }
         uploadRequest.httpBody = audioData
 
-        let (uploadData, uploadResponse) = try await urlSession.data(for: uploadRequest)
+        let (uploadData, uploadResponse) = try await SpeechTransport.data(for: uploadRequest, session: urlSession, prepare: self.credential.relayRequestPreparation)
         let uploadHTTPResponse = try httpResponse(from: uploadResponse)
         try validateStatusCode(uploadHTTPResponse, data: uploadData)
 
         let resource = try decodeFileResource(from: uploadData)
         return try await activeFile(from: resource, timeoutInterval: timeoutInterval, credential: resolved)
+    }
+
+    func validateUploadSession(_ url: URL, credential: SpeechResolvedCredential) throws {
+        try SpeechEndpointPolicy.validate(url)
+        guard let uploadURL, SpeechEndpointPolicy.sameOrigin(url, uploadURL) else {
+            throw SpeechFailure(.invalidEndpoint)
+        }
+        if credential.kind == .relay {
+            let prefix = uploadURL.path.replacingOccurrences(of: "/upload/v1beta/files", with: "/upload-sessions/")
+            guard url.path.hasPrefix(prefix), url.query == nil else { throw SpeechFailure(.invalidEndpoint) }
+            do { _ = try GeminiRoute.identifier(String(url.path.dropFirst(prefix.count)), prefix: "") }
+            catch { throw SpeechFailure(.invalidEndpoint) }
+        }
     }
 
     /// Builds a resumable upload start request from the configured long-lived API key.
@@ -120,6 +139,8 @@ struct GeminiFilesClient {
         timeoutInterval: TimeInterval,
         credential: SpeechResolvedCredential
     ) throws -> URLRequest {
+        try SpeechEndpointPolicy.validate(uploadURL)
+        guard credential.kind != .vendorToken else { throw SpeechFailure(.unsupportedAuthentication) }
         guard !credential.isEmpty else {
             throw SpeechError.providerNotConfigured(.gemini)
         }
@@ -141,7 +162,7 @@ struct GeminiFilesClient {
         do {
             request.httpBody = try JSONEncoder().encode(GeminiFileUploadMetadata(displayName: displayName))
         } catch {
-            throw SpeechError.providerFailure(provider: .gemini, reason: error.localizedDescription)
+            throw SpeechError.providerFailure(provider: .gemini, reason: .requestFailed)
         }
         return request
     }
@@ -155,6 +176,7 @@ struct GeminiFilesClient {
         request.httpMethod = "POST"
         request.timeoutInterval = timeoutInterval
         request.setValue("\(byteCount)", forHTTPHeaderField: "Content-Length")
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         request.setValue("0", forHTTPHeaderField: "X-Goog-Upload-Offset")
         request.setValue("upload, finalize", forHTTPHeaderField: "X-Goog-Upload-Command")
         return request
@@ -178,16 +200,17 @@ struct GeminiFilesClient {
         timeoutInterval: TimeInterval,
         credential: SpeechResolvedCredential
     ) throws -> URLRequest {
+        try SpeechEndpointPolicy.validate(uploadURL)
+        guard credential.kind != .vendorToken else { throw SpeechFailure(.unsupportedAuthentication) }
         guard !credential.isEmpty else {
             throw SpeechError.providerNotConfigured(.gemini)
         }
 
-        let trimmed = fileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = "files/" + (try GeminiRoute.identifier(fileName, prefix: "files"))
         guard !trimmed.isEmpty, let url = try stateURL(forFileName: trimmed) else {
             throw SpeechError.uploadFailed(
                 provider: .gemini,
-                reason: "The Gemini Files API did not return a file name."
-            )
+                reason: .uploadFailed)
         }
 
         var request = URLRequest(url: url)
@@ -228,7 +251,7 @@ struct GeminiFilesClient {
         do {
             return try decoder.decode(GeminiFileResource.self, from: data)
         } catch {
-            throw SpeechError.decodingFailed(provider: .gemini, reason: error.localizedDescription)
+            throw SpeechError.decodingFailed(provider: .gemini, reason: .decodingFailed)
         }
     }
 
@@ -247,8 +270,7 @@ struct GeminiFilesClient {
             case "FAILED":
                 throw SpeechError.uploadFailed(
                     provider: .gemini,
-                    reason: latest.error?.message ?? "The Gemini Files API failed to process the upload."
-                )
+                    reason: .uploadFailed)
             default:
                 break
             }
@@ -256,14 +278,12 @@ struct GeminiFilesClient {
             guard let name = latest.name, !name.isEmpty else {
                 throw SpeechError.uploadFailed(
                     provider: .gemini,
-                    reason: "The Gemini Files API did not return a file name."
-                )
+                    reason: .uploadFailed)
             }
             guard attempt < maxStatePollAttempts else {
                 throw SpeechError.uploadFailed(
                     provider: .gemini,
-                    reason: "The uploaded file \(name) did not become active in time."
-                )
+                    reason: .uploadFailed)
             }
             attempt += 1
 
@@ -273,7 +293,7 @@ struct GeminiFilesClient {
                 // The caller cancelled the upload task; keep that distinguishable.
                 throw cancellation
             } catch {
-                throw SpeechError.uploadFailed(provider: .gemini, reason: "Waiting for \(name) was cancelled.")
+                throw SpeechError.uploadFailed(provider: .gemini, reason: .uploadFailed)
             }
 
             let request = try makeStateRequest(
@@ -281,7 +301,7 @@ struct GeminiFilesClient {
                 timeoutInterval: timeoutInterval,
                 credential: credential
             )
-            let (data, response) = try await urlSession.data(for: request)
+            let (data, response) = try await SpeechTransport.data(for: request, session: urlSession, prepare: self.credential.relayRequestPreparation)
             try validateStatusCode(try httpResponse(from: response), data: data)
             latest = try decodeFileResource(from: data)
         }
@@ -291,8 +311,7 @@ struct GeminiFilesClient {
         guard let uri = resource.uri, !uri.isEmpty else {
             throw SpeechError.uploadFailed(
                 provider: .gemini,
-                reason: "The Gemini Files API did not return a file URI."
-            )
+                reason: .uploadFailed)
         }
         return UploadedFile(
             name: resource.name ?? "",
@@ -310,7 +329,7 @@ struct GeminiFilesClient {
 
     private func validateStatusCode(_ response: HTTPURLResponse, data: Data) throws {
         guard (200...299).contains(response.statusCode) else {
-            throw SpeechError.uploadFailed(provider: .gemini, reason: errorMessage(from: data, statusCode: response.statusCode))
+            throw SpeechFailure(.server, statusCode: response.statusCode)
         }
     }
 
@@ -326,7 +345,7 @@ struct GeminiFilesClient {
         do {
             return try Data(contentsOf: fileURL)
         } catch {
-            throw SpeechError.providerFailure(provider: .gemini, reason: error.localizedDescription)
+            throw SpeechError.providerFailure(provider: .gemini, reason: .requestFailed)
         }
     }
 }
@@ -365,16 +384,15 @@ struct GeminiFileResource: Decodable, Sendable, Equatable {
 
 /// Applies a resolved credential to a Gemini REST request.
 ///
-/// Google accepts a long-lived API key in `x-goog-api-key`. A short-lived
-/// token is sent as an OAuth-style bearer token, because Google's ephemeral
-/// Live tokens do not authorize REST transcription.
+/// API keys use `x-goog-api-key`. Explicit OAuth and relay credentials use
+/// Bearer authorization. Native Live tokens do not authorize REST transcription.
 enum GeminiRESTAuthorization {
     static func apply(_ credential: SpeechResolvedCredential, to request: inout URLRequest) {
-        switch credential {
-        case .apiKey(let key):
-            request.setValue(key, forHTTPHeaderField: "x-goog-api-key")
-        case .token(let token):
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        // Callers validate mode and destination before this nonthrowing serializer.
+        if credential.kind == .apiKey {
+            request.setValue(credential.secret, forHTTPHeaderField: "x-goog-api-key")
+        } else {
+            request.setValue("Bearer \(credential.secret)", forHTTPHeaderField: "Authorization")
         }
     }
 }

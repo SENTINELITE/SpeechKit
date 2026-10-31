@@ -266,13 +266,13 @@ struct FishAudioFileTranscriptionClient {
     private let urlSession: URLSession
     private let uploadURL: URL?
 
-    init(apiKey: String, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+    init(apiKey: String, endpoint: URL? = nil, urlSession: URLSession = SpeechTransport.session()) {
         self.init(credential: .apiKey(apiKey), endpoint: endpoint, urlSession: urlSession)
     }
 
-    init(credential: SpeechCredential, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+    init(credential: SpeechCredential, endpoint: URL? = nil, urlSession: URLSession = SpeechTransport.session()) {
         self.credential = credential
-        self.urlSession = urlSession
+        self.urlSession = SpeechTransport.session(copying: urlSession, pinnedPublicKeyHashes: credential.pinnedPublicKeyHashes)
         self.uploadURL = endpoint ?? Self.defaultUploadURL
     }
 
@@ -288,8 +288,12 @@ struct FishAudioFileTranscriptionClient {
         file: URL,
         options: FishAudioFileTranscriptionOptions = FishAudioFileTranscriptionOptions()
     ) async throws -> FishAudioFileTranscriptionResponse {
+        let prepared = try await SpeechRelayAudioImport.prepare(file: file, provider: .fishAudio,
+            optimizeUploads: credential.optimizeUploads, maxDuration: Self.maxUploadDuration)
+        defer { prepared.remove() }
+        let file = prepared.file
         let request = try await makeRequest(file: file, options: options)
-        let (data, response) = try await urlSession.data(for: request)
+        let (data, response) = try await SpeechTransport.data(for: request, session: urlSession, prepare: self.credential.relayRequestPreparation)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SpeechError.invalidResponse(provider: .fishAudio)
         }
@@ -305,7 +309,7 @@ struct FishAudioFileTranscriptionClient {
         do {
             return try JSONDecoder().decode(FishAudioFileTranscriptionResponse.self, from: data)
         } catch {
-            throw SpeechError.decodingFailed(provider: .fishAudio, reason: error.localizedDescription)
+            throw SpeechError.decodingFailed(provider: .fishAudio, reason: .decodingFailed)
         }
     }
 
@@ -323,21 +327,21 @@ struct FishAudioFileTranscriptionClient {
             maxDuration: Self.maxUploadDuration,
             provider: .fishAudio
         )
-        let resolved = try await credential.resolved(for: .fishAudio)
+        try validate(options)
+        let resolved = try await credential.resolved(for: .fishAudio, model: options.modelID.rawValue, endpoint: uploadURL)
         return try makeRequest(file: file, options: options, secret: resolved.secret)
     }
 
     /// Builds an upload request from an already-resolved secret.
     ///
-    /// Fish Audio has no short-lived tokens. Whether the secret came from an
-    /// API key or a token provider, it is sent as the bearer token. This
+    /// API keys and custom proxy credentials use Bearer authorization. This
     /// overload does not check the audio duration; the async overload does.
     func makeRequest(
         file: URL,
         options: FishAudioFileTranscriptionOptions = FishAudioFileTranscriptionOptions(),
         secret: String
     ) throws -> URLRequest {
-        guard !secret.isEmpty else {
+        guard !secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw SpeechError.providerNotConfigured(.fishAudio)
         }
         guard let uploadURL else {
@@ -374,9 +378,9 @@ struct FishAudioFileTranscriptionClient {
         parts.append(
             .file(
                 name: "audio",
-                fileURL: file,
+                fileURL: credential.uploadFileURL(file),
                 fileData: audioData,
-                contentType: SpeechFileUploadSupport.mimeType(for: file)
+                contentType: SpeechFileUploadSupport.mimeType(for: credential.uploadFileURL(file))
             )
         )
 
@@ -397,7 +401,7 @@ struct FishAudioFileTranscriptionClient {
         try FishAudioValidation.validateSpeakerCount(options.speakerCount, diarize: options.diarize)
 
         if options.timeoutInterval <= 0 {
-            throw SpeechError.providerFailure(provider: .fishAudio, reason: "timeoutInterval must be greater than 0.")
+            throw SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)
         }
     }
 
@@ -406,8 +410,7 @@ struct FishAudioFileTranscriptionClient {
         guard !rejectedExtensions.contains(fileExtension) else {
             throw SpeechError.providerFailure(
                 provider: .fishAudio,
-                reason: "Unsupported file extension: \(fileExtension). Fish Audio does not accept AIFF or CAF audio; convert the file to WAV, M4A, MP3, or FLAC."
-            )
+                reason: .requestFailed)
         }
     }
 
@@ -415,7 +418,7 @@ struct FishAudioFileTranscriptionClient {
         do {
             return try Data(contentsOf: fileURL)
         } catch {
-            throw SpeechError.providerFailure(provider: .fishAudio, reason: error.localizedDescription)
+            throw SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)
         }
     }
 }
@@ -430,8 +433,7 @@ enum FishAudioValidation {
         guard isLowercaseTwoLetterCode else {
             throw SpeechError.providerFailure(
                 provider: .fishAudio,
-                reason: "language must be a lowercase two-letter ISO 639-1 code: \"\(language)\"."
-            )
+                reason: .requestFailed)
         }
     }
 
@@ -441,33 +443,30 @@ enum FishAudioValidation {
         if diarize == .off {
             throw SpeechError.providerFailure(
                 provider: .fishAudio,
-                reason: "speakerCount cannot be combined with diarize off."
-            )
+                reason: .requestFailed)
         }
 
         switch speakerCount {
         case .exact(let count):
             if count < 1 {
-                throw SpeechError.providerFailure(provider: .fishAudio, reason: "speakerCount must be at least 1.")
+                throw SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)
             }
         case .range(let minimum, let maximum):
             if minimum == nil, maximum == nil {
                 throw SpeechError.providerFailure(
                     provider: .fishAudio,
-                    reason: "speakerCount range needs a minimum, a maximum, or both."
-                )
+                    reason: .requestFailed)
             }
             if let minimum, minimum < 1 {
-                throw SpeechError.providerFailure(provider: .fishAudio, reason: "speakerCount minimum must be at least 1.")
+                throw SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)
             }
             if let maximum, maximum < 1 {
-                throw SpeechError.providerFailure(provider: .fishAudio, reason: "speakerCount maximum must be at least 1.")
+                throw SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)
             }
             if let minimum, let maximum, minimum > maximum {
                 throw SpeechError.providerFailure(
                     provider: .fishAudio,
-                    reason: "speakerCount minimum cannot be greater than its maximum."
-                )
+                    reason: .requestFailed)
             }
         }
     }
@@ -581,7 +580,7 @@ struct FishAudioAPIFailure: Sendable, Equatable {
             details.append("request \(requestID)")
         }
         reason += " (\(details.joined(separator: ", ")))."
-        return .uploadFailed(provider: .fishAudio, reason: reason)
+        return .httpFailure(provider: .fishAudio, statusCode: statusCode)
     }
 }
 

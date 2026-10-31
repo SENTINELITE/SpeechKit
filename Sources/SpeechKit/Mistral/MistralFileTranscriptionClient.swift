@@ -148,18 +148,20 @@ public struct MistralFileTranscriptionResponse: Decodable, Sendable, Equatable {
 
 struct MistralFileTranscriptionClient {
     static let defaultUploadURL = URL(string: "https://api.mistral.ai/v1/audio/transcriptions")
+    static let maxUploadBytes: Int64 = 500_000_000
+    static let maxUploadDuration: TimeInterval = 60 * 60
 
     private let credential: SpeechCredential
     private let urlSession: URLSession
     private let uploadURL: URL?
 
-    init(apiKey: String, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+    init(apiKey: String, endpoint: URL? = nil, urlSession: URLSession = SpeechTransport.session()) {
         self.init(credential: .apiKey(apiKey), endpoint: endpoint, urlSession: urlSession)
     }
 
-    init(credential: SpeechCredential, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+    init(credential: SpeechCredential, endpoint: URL? = nil, urlSession: URLSession = SpeechTransport.session()) {
         self.credential = credential
-        self.urlSession = urlSession
+        self.urlSession = SpeechTransport.session(copying: urlSession, pinnedPublicKeyHashes: credential.pinnedPublicKeyHashes)
         self.uploadURL = endpoint ?? Self.defaultUploadURL
     }
 
@@ -175,20 +177,24 @@ struct MistralFileTranscriptionClient {
         file: URL,
         options: MistralFileTranscriptionOptions = MistralFileTranscriptionOptions()
     ) async throws -> MistralFileTranscriptionResponse {
+        let prepared = try await SpeechRelayAudioImport.prepare(file: file, provider: .mistral,
+            optimizeUploads: credential.optimizeUploads, maxUploadBytes: Self.maxUploadBytes,
+            maxDuration: Self.maxUploadDuration)
+        defer { prepared.remove() }
+        let file = prepared.file
         let request = try await makeRequest(file: file, options: options)
-        let (data, response) = try await urlSession.data(for: request)
+        let (data, response) = try await SpeechTransport.data(for: request, session: urlSession, prepare: self.credential.relayRequestPreparation)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SpeechError.invalidResponse(provider: .mistral)
         }
         guard (200...299).contains(httpResponse.statusCode) else {
-            let message = String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)"
-            throw SpeechError.uploadFailed(provider: .mistral, reason: message)
+            throw SpeechFailure(.server, statusCode: httpResponse.statusCode)
         }
 
         do {
             return try JSONDecoder().decode(MistralFileTranscriptionResponse.self, from: data)
         } catch {
-            throw SpeechError.decodingFailed(provider: .mistral, reason: error.localizedDescription)
+            throw SpeechError.decodingFailed(provider: .mistral, reason: .decodingFailed)
         }
     }
 
@@ -199,20 +205,23 @@ struct MistralFileTranscriptionClient {
         guard credential.isConfigured else {
             throw SpeechError.providerNotConfigured(.mistral)
         }
-        let resolved = try await credential.resolved(for: .mistral)
+        try validate(options)
+        try SpeechFileUploadSupport.validateFileSize(file, maxUploadBytes: Self.maxUploadBytes, provider: .mistral)
+        try await SpeechFileUploadSupport.validateFileDuration(file, maxDuration: Self.maxUploadDuration, provider: .mistral)
+        let resolved = try await credential.resolved(for: .mistral, model: options.modelID.rawValue, endpoint: uploadURL)
         return try makeRequest(file: file, options: options, secret: resolved.secret)
     }
 
     /// Builds an upload request from an already-resolved secret.
     ///
-    /// Mistral accepts both a long-lived API key and a short-lived token as a
-    /// bearer token.
+    /// Mistral API keys and custom proxy credentials use Bearer authorization.
+    /// Native vendor-token mode is unsupported for this capability.
     func makeRequest(
         file: URL,
         options: MistralFileTranscriptionOptions = MistralFileTranscriptionOptions(),
         secret: String
     ) throws -> URLRequest {
-        guard !secret.isEmpty else {
+        guard !secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw SpeechError.providerNotConfigured(.mistral)
         }
         guard let uploadURL else {
@@ -244,9 +253,9 @@ struct MistralFileTranscriptionClient {
         parts.append(
             .file(
                 name: "file",
-                fileURL: file,
+                fileURL: credential.uploadFileURL(file),
                 fileData: audioData,
-                contentType: SpeechFileUploadSupport.mimeType(for: file)
+                contentType: SpeechFileUploadSupport.mimeType(for: credential.uploadFileURL(file))
             )
         )
 
@@ -264,15 +273,16 @@ struct MistralFileTranscriptionClient {
         try MistralValidation.validateContextBias(options.contextBias)
 
         if options.timeoutInterval <= 0 {
-            throw SpeechError.providerFailure(provider: .mistral, reason: "timeoutInterval must be greater than 0.")
+            throw SpeechError.providerFailure(provider: .mistral, reason: .requestFailed)
         }
     }
 
     private func readFileData(from fileURL: URL) throws -> Data {
+        try SpeechFileUploadSupport.validateFileSize(fileURL, maxUploadBytes: Self.maxUploadBytes, provider: .mistral)
         do {
             return try Data(contentsOf: fileURL)
         } catch {
-            throw SpeechError.providerFailure(provider: .mistral, reason: error.localizedDescription)
+            throw SpeechError.providerFailure(provider: .mistral, reason: .requestFailed)
         }
     }
 }
@@ -286,15 +296,14 @@ enum MistralValidation {
         guard isTwoLetterCode else {
             throw SpeechError.providerFailure(
                 provider: .mistral,
-                reason: "language must be a two-letter ISO 639-1 code: \"\(language)\"."
-            )
+                reason: .requestFailed)
         }
     }
 
     /// Rejects blank context bias entries.
     static func validateContextBias(_ contextBias: [String]) throws {
-        if let entry = contextBias.first(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-            throw SpeechError.providerFailure(provider: .mistral, reason: "contextBias entries cannot be empty: \"\(entry)\".")
+        if contextBias.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            throw SpeechError.providerFailure(provider: .mistral, reason: .requestFailed)
         }
     }
 }

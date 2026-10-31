@@ -3,6 +3,7 @@ import Foundation
 /// Mistral Voxtral realtime transcription model identifiers supported by SpeechKit.
 public enum MistralRealtimeModelID: String, Sendable, CaseIterable {
     /// Voxtral Mini Transcribe Realtime 3.
+    case voxtralMiniTranscribeRealtime2602 = "voxtral-mini-transcribe-realtime-2602"
     case voxtralMiniTranscribeRealtime3 = "voxtral-mini-transcribe-realtime-3"
 }
 
@@ -118,33 +119,32 @@ public struct MistralRealtimeOptions: Sendable, Equatable {
 
     func validate() throws {
         if !(8000...48000).contains(sampleRate) {
-            throw SpeechError.providerFailure(provider: .mistral, reason: "Unsupported realtime sampleRate: \(sampleRate).")
+            throw SpeechError.providerFailure(provider: .mistral, reason: .requestFailed)
         }
 
         if let delay = targetStreamingDelayMilliseconds, !((80...1200).contains(delay) || delay == 2400) {
             throw SpeechError.providerFailure(
                 provider: .mistral,
-                reason: "targetStreamingDelayMilliseconds must be between 80 and 1200, or 2400."
-            )
+                reason: .requestFailed)
         }
 
         try MistralValidation.validateLanguage(language)
         try MistralValidation.validateContextBias(contextBias)
 
         if !speakerReferences.isEmpty, !diarize {
-            throw SpeechError.providerFailure(provider: .mistral, reason: "speakerReferences require diarize.")
+            throw SpeechError.providerFailure(provider: .mistral, reason: .requestFailed)
         }
         if speakerReferences.count > 8 {
-            throw SpeechError.providerFailure(provider: .mistral, reason: "speakerReferences cannot contain more than 8 clips.")
+            throw SpeechError.providerFailure(provider: .mistral, reason: .requestFailed)
         }
         if speakerReferences.contains(where: { $0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-            throw SpeechError.providerFailure(provider: .mistral, reason: "speakerReferences names cannot be empty.")
+            throw SpeechError.providerFailure(provider: .mistral, reason: .requestFailed)
         }
         if Set(speakerReferences.map(\.name)).count != speakerReferences.count {
-            throw SpeechError.providerFailure(provider: .mistral, reason: "speakerReferences names must be unique.")
+            throw SpeechError.providerFailure(provider: .mistral, reason: .requestFailed)
         }
         if speakerReferences.contains(where: { $0.audio.isEmpty }) {
-            throw SpeechError.providerFailure(provider: .mistral, reason: "speakerReferences audio cannot be empty.")
+            throw SpeechError.providerFailure(provider: .mistral, reason: .requestFailed)
         }
     }
 
@@ -333,7 +333,7 @@ public enum MistralRealtimeError: Error, LocalizedError, Sendable, Equatable {
     /// SpeechKit could not construct a valid Mistral realtime URL.
     case invalidURL
     /// The realtime connection failed.
-    case connectionFailed(String)
+    case connectionFailed(SpeechFailureReason)
     /// SpeechKit could not encode an outgoing realtime message.
     case encodingFailed
     /// The realtime WebSocket disconnected.

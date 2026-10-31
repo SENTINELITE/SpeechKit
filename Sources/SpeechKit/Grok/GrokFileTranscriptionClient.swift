@@ -169,13 +169,13 @@ struct GrokFileTranscriptionClient {
     private let uploadURL: URL?
     private let maxUploadBytes: Int64 = 500 * 1024 * 1024
 
-    init(apiKey: String, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+    init(apiKey: String, endpoint: URL? = nil, urlSession: URLSession = SpeechTransport.session()) {
         self.init(credential: .apiKey(apiKey), endpoint: endpoint, urlSession: urlSession)
     }
 
-    init(credential: SpeechCredential, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+    init(credential: SpeechCredential, endpoint: URL? = nil, urlSession: URLSession = SpeechTransport.session()) {
         self.credential = credential
-        self.urlSession = urlSession
+        self.urlSession = SpeechTransport.session(copying: urlSession, pinnedPublicKeyHashes: credential.pinnedPublicKeyHashes)
         self.uploadURL = endpoint ?? Self.defaultUploadURL
     }
 
@@ -191,20 +191,34 @@ struct GrokFileTranscriptionClient {
         file: URL,
         options: GrokFileTranscriptionOptions = GrokFileTranscriptionOptions()
     ) async throws -> GrokFileTranscriptionResponse {
+        if credential.optimizeUploads != nil, options.audioFormat != nil,
+           options.audioFormat != .pcm || options.sampleRate == nil || options.channels != nil || options.multichannel {
+            throw SpeechFailure(.unsupportedMediaType)
+        }
+        let rawPCM = options.audioFormat == .pcm ? options.sampleRate.map { SpeechRelayAudioImport.RawPCM(sampleRate: $0) } : nil
+        let prepared = try await SpeechRelayAudioImport.prepare(file: file, provider: .grok,
+            optimizeUploads: credential.optimizeUploads, rawPCM: rawPCM, maxUploadBytes: maxUploadBytes)
+        defer { prepared.remove() }
+        let file = prepared.file
+        var options = options
+        if prepared.directory != nil {
+            guard !options.multichannel, options.channels == nil else { throw SpeechFailure(.unsupportedMediaType) }
+            options.audioFormat = nil
+            options.sampleRate = nil
+        }
         let request = try await makeAuthorizedRequest(file: file, options: options)
-        let (data, response) = try await urlSession.data(for: request)
+        let (data, response) = try await SpeechTransport.data(for: request, session: urlSession, prepare: self.credential.relayRequestPreparation)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SpeechError.invalidResponse(provider: .grok)
         }
         guard (200...299).contains(httpResponse.statusCode) else {
-            let message = String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)"
-            throw SpeechError.uploadFailed(provider: .grok, reason: message)
+            throw SpeechFailure(.server, statusCode: httpResponse.statusCode)
         }
 
         do {
             return try JSONDecoder().decode(GrokFileTranscriptionResponse.self, from: data)
         } catch {
-            throw SpeechError.decodingFailed(provider: .grok, reason: error.localizedDescription)
+            throw SpeechError.decodingFailed(provider: .grok, reason: .decodingFailed)
         }
     }
 
@@ -216,7 +230,8 @@ struct GrokFileTranscriptionClient {
         guard credential.isConfigured else {
             throw SpeechError.providerNotConfigured(.grok)
         }
-        let resolved = try await credential.resolved(for: .grok)
+        try validate(options)
+        let resolved = try await credential.resolved(for: .grok, model: options.modelID.rawValue, endpoint: uploadURL)
         return try makeRequest(file: file, options: options, secret: resolved.secret)
     }
 
@@ -230,14 +245,14 @@ struct GrokFileTranscriptionClient {
 
     /// Builds an upload request from an already-resolved secret.
     ///
-    /// Grok accepts both a long-lived API key and a short-lived token as a
-    /// bearer token.
+    /// Grok API keys and custom proxy credentials use Bearer authorization.
+    /// Native vendor-token mode is unsupported for this capability.
     func makeRequest(
         file: URL,
         options: GrokFileTranscriptionOptions = GrokFileTranscriptionOptions(),
         secret: String
     ) throws -> URLRequest {
-        guard !secret.isEmpty else {
+        guard !secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw SpeechError.providerNotConfigured(.grok)
         }
         guard let uploadURL else {
@@ -250,9 +265,9 @@ struct GrokFileTranscriptionClient {
         var parts: [SpeechMultipartFormPart] = [
             .file(
                 name: "file",
-                fileURL: file,
+                fileURL: credential.uploadFileURL(file),
                 fileData: audioData,
-                contentType: SpeechFileUploadSupport.mimeType(for: file)
+                contentType: SpeechFileUploadSupport.mimeType(for: credential.uploadFileURL(file))
             )
         ]
         parts.append(contentsOf: makeOptionParts(options))
@@ -302,36 +317,36 @@ struct GrokFileTranscriptionClient {
 
     private func validate(_ options: GrokFileTranscriptionOptions) throws {
         if options.format, options.language == nil {
-            throw SpeechError.providerFailure(provider: .grok, reason: "format=true requires a language.")
+            throw SpeechError.providerFailure(provider: .grok, reason: .requestFailed)
         }
 
         if options.audioFormat != nil, options.sampleRate == nil {
-            throw SpeechError.providerFailure(provider: .grok, reason: "Raw audio requires sample_rate.")
+            throw SpeechError.providerFailure(provider: .grok, reason: .requestFailed)
         }
 
         if let sampleRate = options.sampleRate,
            ![8000, 16000, 22050, 24000, 44100, 48000].contains(sampleRate) {
-            throw SpeechError.providerFailure(provider: .grok, reason: "Unsupported sample_rate: \(sampleRate).")
+            throw SpeechError.providerFailure(provider: .grok, reason: .requestFailed)
         }
 
         if let channels = options.channels,
            !(2...8).contains(channels) {
-            throw SpeechError.providerFailure(provider: .grok, reason: "channels must be between 2 and 8.")
+            throw SpeechError.providerFailure(provider: .grok, reason: .requestFailed)
         }
 
         if options.timeoutInterval <= 0 {
-            throw SpeechError.providerFailure(provider: .grok, reason: "timeoutInterval must be greater than 0.")
+            throw SpeechError.providerFailure(provider: .grok, reason: .requestFailed)
         }
     }
 
     private func readFileData(from fileURL: URL, options: GrokFileTranscriptionOptions) throws -> Data {
         do {
             if fileURL.pathExtension.isEmpty {
-                throw SpeechError.providerFailure(provider: .grok, reason: "Unsupported file extension: (none).")
+                throw SpeechError.providerFailure(provider: .grok, reason: .requestFailed)
             }
             if isRawAudio(fileURL) {
                 if options.audioFormat == nil || options.sampleRate == nil {
-                    throw SpeechError.providerFailure(provider: .grok, reason: "Raw audio requires audio_format and sample_rate.")
+                    throw SpeechError.providerFailure(provider: .grok, reason: .requestFailed)
                 }
             } else {
                 try SpeechFileUploadSupport.validateFileExtension(
@@ -345,7 +360,7 @@ struct GrokFileTranscriptionClient {
         } catch let error as SpeechError {
             throw error
         } catch {
-            throw SpeechError.providerFailure(provider: .grok, reason: error.localizedDescription)
+            throw SpeechError.providerFailure(provider: .grok, reason: .requestFailed)
         }
     }
 

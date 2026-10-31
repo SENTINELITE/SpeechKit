@@ -53,7 +53,7 @@ struct RealtimeTranscriptionView: View {
 
     private var primaryControlTitle: String {
         if !hasSelectedProviderKey && !isAudioActive {
-            return "API Key Required"
+            return configuration.isRelayEnabled ? "Relay Authorization Required" : "API Key Required"
         }
         return speech.realtimeConnectionState.isWorking ? "Stop Speaking" : "Start Speaking"
     }
@@ -66,7 +66,7 @@ struct RealtimeTranscriptionView: View {
         if !hasSelectedProviderKey && !isAudioActive {
             return configuration.missingAPIKeyMessage(for: configuration.realtimeProvider)
         }
-        return speech.lastError?.localizedDescription ?? exportErrorMessage
+        return speech.lastError.map { DemoFailure.message(for: $0) } ?? exportErrorMessage
     }
 
     var body: some View {
@@ -117,7 +117,6 @@ struct RealtimeTranscriptionView: View {
 
     /// Starts or stops the realtime SpeechKit provider while keeping the passive preview out of the audio session.
     private func handleMicrophoneTap() async {
-        configuration.apply(to: speech)
         exportErrorMessage = nil
 
         if speech.realtimeConnectionState.isWorking {
@@ -128,6 +127,12 @@ struct RealtimeTranscriptionView: View {
         }
 
         guard hasSelectedProviderKey else { return }
+        do {
+            try configuration.prepare(speech, for: configuration.realtimeProvider.apiKeyProvider)
+        } catch {
+            exportErrorMessage = DemoFailure.message(for: error)
+            return
+        }
         inputPreview.stop(deactivateAudioSession: false)
         speech.clearTranscript()
         resetRealtimeWords()

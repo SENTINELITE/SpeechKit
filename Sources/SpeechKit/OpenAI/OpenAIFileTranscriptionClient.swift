@@ -403,13 +403,13 @@ struct OpenAIFileTranscriptionClient {
     private let maxUploadBytes: Int64 = 25 * 1024 * 1024
     private let allowedExtensions: Set<String> = ["mp3", "mp4", "mpeg", "mpga", "m4a", "wav", "webm"]
 
-    init(apiKey: String, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+    init(apiKey: String, endpoint: URL? = nil, urlSession: URLSession = SpeechTransport.session()) {
         self.init(credential: .apiKey(apiKey), endpoint: endpoint, urlSession: urlSession)
     }
 
-    init(credential: SpeechCredential, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+    init(credential: SpeechCredential, endpoint: URL? = nil, urlSession: URLSession = SpeechTransport.session()) {
         self.credential = credential
-        self.urlSession = urlSession
+        self.urlSession = SpeechTransport.session(copying: urlSession, pinnedPublicKeyHashes: credential.pinnedPublicKeyHashes)
         self.uploadURL = endpoint ?? Self.defaultUploadURL
     }
 
@@ -425,20 +425,23 @@ struct OpenAIFileTranscriptionClient {
         file: URL,
         options: OpenAIFileTranscriptionOptions = OpenAIFileTranscriptionOptions()
     ) async throws -> OpenAIFileTranscriptionResponse {
+        let prepared = try await SpeechRelayAudioImport.prepare(file: file, provider: .openAI,
+            optimizeUploads: credential.optimizeUploads, maxUploadBytes: maxUploadBytes)
+        defer { prepared.remove() }
+        let file = prepared.file
         let request = try await makeAuthorizedRequest(file: file, options: options)
-        let (data, response) = try await urlSession.data(for: request)
+        let (data, response) = try await SpeechTransport.data(for: request, session: urlSession, prepare: self.credential.relayRequestPreparation)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SpeechError.invalidResponse(provider: .openAI)
         }
         guard (200...299).contains(httpResponse.statusCode) else {
-            let message = String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)"
-            throw SpeechError.uploadFailed(provider: .openAI, reason: message)
+            throw SpeechFailure(.server, statusCode: httpResponse.statusCode)
         }
 
         do {
             return try JSONDecoder().decode(OpenAIFileTranscriptionResponse.self, from: data)
         } catch {
-            throw SpeechError.decodingFailed(provider: .openAI, reason: error.localizedDescription)
+            throw SpeechError.decodingFailed(provider: .openAI, reason: .decodingFailed)
         }
     }
 
@@ -450,7 +453,8 @@ struct OpenAIFileTranscriptionClient {
         guard credential.isConfigured else {
             throw SpeechError.providerNotConfigured(.openAI)
         }
-        let resolved = try await credential.resolved(for: .openAI)
+        try validate(options)
+        let resolved = try await credential.resolved(for: .openAI, model: options.modelID.rawValue, endpoint: uploadURL)
         return try makeRequest(file: file, options: options, secret: resolved.secret)
     }
 
@@ -464,14 +468,14 @@ struct OpenAIFileTranscriptionClient {
 
     /// Builds an upload request from an already-resolved secret.
     ///
-    /// OpenAI accepts both a long-lived API key and an ephemeral client secret
-    /// as a bearer token.
+    /// OpenAI API keys and custom proxy credentials use Bearer authorization.
+    /// Native vendor tokens do not authorize file transcription.
     func makeRequest(
         file: URL,
         options: OpenAIFileTranscriptionOptions = OpenAIFileTranscriptionOptions(),
         secret: String
     ) throws -> URLRequest {
-        guard !secret.isEmpty else {
+        guard !secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw SpeechError.providerNotConfigured(.openAI)
         }
         guard let uploadURL else {
@@ -487,9 +491,9 @@ struct OpenAIFileTranscriptionClient {
         var parts: [SpeechMultipartFormPart] = [
             .file(
                 name: "file",
-                fileURL: file,
+                fileURL: credential.uploadFileURL(file),
                 fileData: audioData,
-                contentType: SpeechFileUploadSupport.mimeType(for: file)
+                contentType: SpeechFileUploadSupport.mimeType(for: credential.uploadFileURL(file))
             ),
             .text(name: "model", value: options.modelID.rawValue),
             .text(name: "response_format", value: responseFormat(for: options))
@@ -538,80 +542,80 @@ struct OpenAIFileTranscriptionClient {
     private func validate(_ options: OpenAIFileTranscriptionOptions) throws {
         if options.modelID.usesLanguageList {
             if options.language != nil, !options.languages.isEmpty {
-                throw SpeechError.providerFailure(provider: .openAI, reason: "Use either language or languages with gpt-transcribe, not both.")
+                throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
             }
         } else if !options.languages.isEmpty {
-            throw SpeechError.providerFailure(provider: .openAI, reason: "languages is only supported with gpt-transcribe.")
+            throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
         }
 
         for language in options.languages where language.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            throw SpeechError.providerFailure(provider: .openAI, reason: "languages cannot contain empty values.")
+            throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
         }
         for keyword in options.keywords {
             if keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                throw SpeechError.providerFailure(provider: .openAI, reason: "keywords cannot contain empty values.")
+                throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
             }
             if keyword.contains("<") || keyword.contains(">") || keyword.contains("\r") || keyword.contains("\n") {
-                throw SpeechError.providerFailure(provider: .openAI, reason: "keywords cannot contain <, >, carriage returns, or line feeds.")
+                throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
             }
         }
 
         if options.modelID.isDiarizationModel {
             if options.prompt != nil {
-                throw SpeechError.providerFailure(provider: .openAI, reason: "prompt is not supported with gpt-4o-transcribe-diarize.")
+                throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
             }
             if options.includeLogprobs {
-                throw SpeechError.providerFailure(provider: .openAI, reason: "includeLogprobs is not supported with gpt-4o-transcribe-diarize.")
+                throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
             }
             if !options.timestampGranularities.isEmpty {
-                throw SpeechError.providerFailure(provider: .openAI, reason: "timestampGranularities are not supported with gpt-4o-transcribe-diarize.")
+                throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
             }
         } else {
             if options.diarizationChunkingStrategy != nil {
-                throw SpeechError.providerFailure(provider: .openAI, reason: "diarizationChunkingStrategy requires gpt-4o-transcribe-diarize.")
+                throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
             }
             if !options.knownSpeakers.isEmpty {
-                throw SpeechError.providerFailure(provider: .openAI, reason: "knownSpeakers require gpt-4o-transcribe-diarize.")
+                throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
             }
         }
 
         if !options.timestampGranularities.isEmpty, !options.modelID.supportsTimestampGranularities {
-            throw SpeechError.providerFailure(provider: .openAI, reason: "timestampGranularities are only supported with whisper-1.")
+            throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
         }
 
         if options.includeLogprobs, !options.modelID.supportsLogprobs {
-            throw SpeechError.providerFailure(provider: .openAI, reason: "includeLogprobs is only supported with GPT-4o transcription models.")
+            throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
         }
 
         if options.knownSpeakers.count > 4 {
-            throw SpeechError.providerFailure(provider: .openAI, reason: "knownSpeakers supports at most 4 speakers.")
+            throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
         }
         for knownSpeaker in options.knownSpeakers {
             if knownSpeaker.name.isEmpty {
-                throw SpeechError.providerFailure(provider: .openAI, reason: "knownSpeakers names cannot be empty.")
+                throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
             }
             if knownSpeaker.referenceDataURL.isEmpty {
-                throw SpeechError.providerFailure(provider: .openAI, reason: "knownSpeakers referenceDataURL cannot be empty.")
+                throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
             }
             if !knownSpeaker.referenceDataURL.hasPrefix("data:audio/") {
-                throw SpeechError.providerFailure(provider: .openAI, reason: "knownSpeakers referenceDataURL must be an audio data URL.")
+                throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
             }
         }
 
         if case .serverVAD(let vadOptions) = options.diarizationChunkingStrategy {
             if let threshold = vadOptions.threshold, threshold < 0 || threshold > 1 {
-                throw SpeechError.providerFailure(provider: .openAI, reason: "diarization VAD threshold must be between 0 and 1.")
+                throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
             }
             if let prefixPaddingMilliseconds = vadOptions.prefixPaddingMilliseconds, prefixPaddingMilliseconds < 0 {
-                throw SpeechError.providerFailure(provider: .openAI, reason: "diarization VAD prefixPaddingMilliseconds must be at least 0.")
+                throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
             }
             if let silenceDurationMilliseconds = vadOptions.silenceDurationMilliseconds, silenceDurationMilliseconds < 0 {
-                throw SpeechError.providerFailure(provider: .openAI, reason: "diarization VAD silenceDurationMilliseconds must be at least 0.")
+                throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
             }
         }
 
         if options.timeoutInterval <= 0 {
-            throw SpeechError.providerFailure(provider: .openAI, reason: "timeoutInterval must be greater than 0.")
+            throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
         }
     }
 
@@ -638,7 +642,7 @@ struct OpenAIFileTranscriptionClient {
         do {
             return try Data(contentsOf: fileURL)
         } catch {
-            throw SpeechError.providerFailure(provider: .openAI, reason: error.localizedDescription)
+            throw SpeechError.providerFailure(provider: .openAI, reason: .requestFailed)
         }
     }
 }

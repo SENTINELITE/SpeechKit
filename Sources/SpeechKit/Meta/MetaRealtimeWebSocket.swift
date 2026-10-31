@@ -1,6 +1,7 @@
 import Foundation
 
 actor MetaRealtimeWebSocket {
+    private var connectionGeneration = UUID()
     private var webSocketTask: URLSessionWebSocketTask?
     private var session: URLSession?
     private var continuation: AsyncThrowingStream<MetaRealtimeMessage, Error>.Continuation?
@@ -26,6 +27,8 @@ actor MetaRealtimeWebSocket {
         endpoint: URL? = nil
     ) throws -> URLRequest {
         try options.validate()
+        try SpeechEndpointPolicy.validate(endpoint ?? defaultURL, websocket: true)
+        try SpeechResolvedCredential.validateSecret(credential.secret)
         guard !credential.isEmpty else {
             throw MetaRealtimeError.apiKeyMissing
         }
@@ -43,7 +46,9 @@ actor MetaRealtimeWebSocket {
         guard let url = components.url else {
             throw MetaRealtimeError.invalidURL
         }
-        return URLRequest(url: url)
+        var request = URLRequest(url: url)
+        try credential.authorize(&request, provider: .meta, capability: .realtime)
+        return request
     }
 
     func connect(
@@ -53,21 +58,37 @@ actor MetaRealtimeWebSocket {
     ) async throws -> AsyncThrowingStream<MetaRealtimeMessage, Error> {
         let request = try Self.makeConnectRequest(credential: credential, options: options, endpoint: endpoint)
 
-        let session = URLSession(configuration: .default)
+        disconnect()
+        let generation = connectionGeneration
+        let opened = try await SpeechSocketConnection.open(request: request, credential: credential)
+        guard generation == connectionGeneration, !Task.isCancelled else {
+            opened.task.cancel(with: .goingAway, reason: nil)
+            opened.session.invalidateAndCancel()
+            throw CancellationError()
+        }
+        let session = opened.session
+        let task = opened.task
         self.session = session
-
-        let task = session.webSocketTask(with: request)
         self.webSocketTask = task
         didAcknowledgeHandshake = false
 
-        task.resume()
-        try await sendEncodable(options.handshakeMessage(secret: credential.secret))
+        do {
+            try await sendEncodable(options.handshakeMessage(secret: opened.credential.secret))
+        } catch {
+            disconnect(ifCurrent: task)
+            throw SpeechErrorBoundary.safe(error)
+        }
+
+        guard webSocketTask === task, !Task.isCancelled else {
+            disconnect(ifCurrent: task)
+            throw CancellationError()
+        }
 
         return AsyncThrowingStream { continuation in
             self.continuation = continuation
 
             continuation.onTermination = { @Sendable _ in
-                Task { await self.disconnect() }
+                Task { await self.disconnect(ifCurrent: task) }
             }
 
             self.handshakeTimeoutTask = Task { [weak self, handshakeTimeoutNanoseconds] in
@@ -81,12 +102,13 @@ actor MetaRealtimeWebSocket {
             }
 
             Task {
-                await self.receiveMessages()
+                await self.receiveMessages(from: task)
             }
         }
     }
 
     func sendAudio(_ audioData: Data) async throws {
+        try Task.checkCancellation()
         guard let task = webSocketTask, task.state == .running else {
             throw MetaRealtimeError.disconnected
         }
@@ -99,6 +121,7 @@ actor MetaRealtimeWebSocket {
     }
 
     func disconnect() {
+        connectionGeneration = UUID()
         handshakeTimeoutTask?.cancel()
         handshakeTimeoutTask = nil
         didAcknowledgeHandshake = false
@@ -111,6 +134,7 @@ actor MetaRealtimeWebSocket {
     }
 
     private func sendEncodable<T: Encodable & Sendable>(_ message: T) async throws {
+        try Task.checkCancellation()
         guard let task = webSocketTask, task.state == .running else {
             throw MetaRealtimeError.disconnected
         }
@@ -123,13 +147,19 @@ actor MetaRealtimeWebSocket {
         try await task.send(.string(jsonString))
     }
 
-    private func receiveMessages() async {
-        guard let task = webSocketTask else { return }
+    private func disconnect(ifCurrent task: URLSessionWebSocketTask) {
+        guard webSocketTask === task else { return }
+        disconnect()
+    }
 
-        while task.state == .running {
+    private func receiveMessages(from task: URLSessionWebSocketTask) async {
+        guard webSocketTask === task else { return }
+
+        while task.state == .running && webSocketTask === task {
             do {
                 let message = try await task.receive()
 
+                guard webSocketTask === task else { return }
                 switch message {
                 case .string(let text):
                     guard let data = text.data(using: .utf8) else { continue }
@@ -145,12 +175,13 @@ actor MetaRealtimeWebSocket {
                 if task.state != .running {
                     break
                 }
-                continuation?.finish(throwing: error)
+                guard webSocketTask === task else { return }
+                continuation?.finish(throwing: SpeechErrorBoundary.safe(error))
                 return
             }
         }
 
-        continuation?.finish()
+        if webSocketTask === task { continuation?.finish() }
     }
 
     private func yieldDecodedMessage(_ data: Data) {

@@ -4,6 +4,33 @@ import Testing
 
 @Suite("Public API Smoke Tests")
 struct PublicAPISmokeTests {
+    @Test @MainActor func relayAndOpaqueCredentialsArePubliclyConstructible() throws {
+        let resolver = SpeechTokenResolver { context in
+            SpeechAccessToken(value: "synthetic-token", expiresAt: Date().addingTimeInterval(60), isReusable: false)
+        }
+        var config = OpenAIConfiguration()
+        config.setCredential(.vendorToken(resolver), for: .realtime)
+        #expect(config.credentialKind(for: .realtime) == .vendorToken)
+        #expect(config.hasCredential(for: .realtime))
+        #expect(!config.hasCredential(for: .fileTranscription))
+        config.setCredential(.apiKey("synthetic-key"))
+        #expect(config.credentialKind == .apiKey)
+        let relay = SpeechRelay(url: URL(string: "https://relay.example.com")!,
+                                authentication: .appAttestAndBearer(resolver), providers: [.openAI],
+                                tokenStrategy: .vendorTokensWhenAvailable, pinnedPublicKeyHashes: [])
+        let service = SpeechService(relay: relay, credentialPolicy: .disallowStaticKeys)
+        service.recordingRetention = .discardOnStop
+        #expect(service.relay?.tokenStrategy == .vendorTokensWhenAvailable)
+        #expect(service.credentialPolicy == .disallowStaticKeys)
+        let route = try GeminiRoute(interactions: URL(string: "https://relay.example.com/interactions")!,
+                                    files: URL(string: "https://relay.example.com/files")!,
+                                    realtime: URL(string: "wss://relay.example.com/live")!)
+        var gemini = GeminiConfiguration()
+        gemini.setRoute(route)
+        #expect(gemini.fileEndpoint == route.interactions)
+        #expect(SpeechFailure(.unsupportedAuthentication).category == .unsupportedAuthentication)
+    }
+
     @Test("OpenAI diarization public options are constructible")
     @available(*, deprecated, message: "Covers OpenAI models scheduled for shutdown.")
     func openAIDiarizationPublicOptionsAreConstructible() {

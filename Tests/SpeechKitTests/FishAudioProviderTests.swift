@@ -98,7 +98,7 @@ struct FishAudioProviderTests {
 
     @Test("Fish Audio sends a resolved token as a bearer token")
     func fishAudioSendsResolvedTokenAsBearer() async throws {
-        let client = FishAudioFileTranscriptionClient(credential: .token(SpeechTokenProvider { "fish-token" }))
+        let client = FishAudioFileTranscriptionClient(credential: .bearer(SpeechTokenResolver { _ in "fish-token" }), endpoint: URL(string: "https://proxy.example.com/fish"))
 
         let request = try await client.makeRequest(file: fishAudioTemporaryAudioFileURL(named: "call.wav"))
 
@@ -135,44 +135,41 @@ struct FishAudioProviderTests {
         for language in ["EN", "eng", "en-US", "e", "é1"] {
             await #expect(throws: SpeechError.providerFailure(
                 provider: .fishAudio,
-                reason: "language must be a lowercase two-letter ISO 639-1 code: \"\(language)\"."
-            )) {
+                reason: .requestFailed)) {
                 _ = try await client.makeRequest(file: fileURL, options: FishAudioFileTranscriptionOptions(language: language))
             }
         }
 
-        await #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: "timeoutInterval must be greater than 0.")) {
+        await #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)) {
             _ = try await client.makeRequest(file: fileURL, options: FishAudioFileTranscriptionOptions(timeoutInterval: 0))
         }
     }
 
     @Test("Fish Audio rejects speaker hints that conflict or are out of range")
     func fishAudioRejectsInvalidSpeakerHints() throws {
-        #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: "speakerCount cannot be combined with diarize off.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)) {
             try FishAudioValidation.validateSpeakerCount(.exact(2), diarize: .off)
         }
-        #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: "speakerCount cannot be combined with diarize off.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)) {
             try FishAudioValidation.validateSpeakerCount(.range(min: 1, max: 3), diarize: .off)
         }
-        #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: "speakerCount must be at least 1.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)) {
             try FishAudioValidation.validateSpeakerCount(.exact(0), diarize: .auto)
         }
         #expect(throws: SpeechError.providerFailure(
             provider: .fishAudio,
-            reason: "speakerCount range needs a minimum, a maximum, or both."
-        )) {
+            reason: .requestFailed)) {
             try FishAudioValidation.validateSpeakerCount(.range(min: nil, max: nil), diarize: .auto)
         }
-        #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: "speakerCount minimum must be at least 1.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)) {
             try FishAudioValidation.validateSpeakerCount(.range(min: 0, max: 2), diarize: .on)
         }
-        #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: "speakerCount maximum must be at least 1.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .fishAudio, reason: .requestFailed)) {
             try FishAudioValidation.validateSpeakerCount(.range(min: nil, max: 0), diarize: .on)
         }
         #expect(throws: SpeechError.providerFailure(
             provider: .fishAudio,
-            reason: "speakerCount minimum cannot be greater than its maximum."
-        )) {
+            reason: .requestFailed)) {
             try FishAudioValidation.validateSpeakerCount(.range(min: 4, max: 2), diarize: .on)
         }
 
@@ -188,11 +185,9 @@ struct FishAudioProviderTests {
         let client = FishAudioFileTranscriptionClient(apiKey: "fish-key")
 
         for fileExtension in ["aif", "aiff", "AIFF", "aifc", "caf"] {
-            let lowercased = fileExtension.lowercased()
             await #expect(throws: SpeechError.providerFailure(
                 provider: .fishAudio,
-                reason: "Unsupported file extension: \(lowercased). Fish Audio does not accept AIFF or CAF audio; convert the file to WAV, M4A, MP3, or FLAC."
-            )) {
+                reason: .requestFailed)) {
                 _ = try await client.makeRequest(file: fishAudioTemporaryAudioFileURL(named: "memo.\(fileExtension)"))
             }
         }
@@ -203,7 +198,7 @@ struct FishAudioProviderTests {
         let client = FishAudioFileTranscriptionClient(apiKey: "fish-key")
         let fileURL = try fishAudioSparseWAVFileURL(named: "long.wav", seconds: 3601)
 
-        await #expect(throws: SpeechError.uploadFailed(provider: .fishAudio, reason: "Audio exceeds the 3600 second limit.")) {
+        await #expect(throws: SpeechError.uploadFailed(provider: .fishAudio, reason: .uploadFailed)) {
             _ = try await client.makeRequest(file: fileURL)
         }
     }
@@ -432,10 +427,7 @@ struct FishAudioProviderTests {
             #expect(failure.code == testCase.code)
             #expect(failure.requestID == "req-9")
             #expect(failure.isRetryable == testCase.retryable)
-            #expect(failure.speechError == .uploadFailed(
-                provider: .fishAudio,
-                reason: "\(testCase.summary): Details here (HTTP \(testCase.status), code \(testCase.code), request req-9)."
-            ))
+            #expect(failure.speechError == .httpFailure(provider: .fishAudio, statusCode: testCase.status))
         }
     }
 
@@ -457,10 +449,7 @@ struct FishAudioProviderTests {
 
             #expect(failure.code == nil)
             #expect(failure.isRetryable == testCase.retryable)
-            #expect(failure.speechError == .uploadFailed(
-                provider: .fishAudio,
-                reason: "\(testCase.summary): Platform says no (HTTP \(testCase.status))."
-            ))
+            #expect(failure.speechError == .httpFailure(provider: .fishAudio, statusCode: testCase.status))
         }
     }
 
@@ -471,25 +460,16 @@ struct FishAudioProviderTests {
             body: Data(#"{"status": 401, "message": "Bad key", "code": "something_new"}"#.utf8)
         )
 
-        #expect(failure.speechError == .uploadFailed(
-            provider: .fishAudio,
-            reason: "The API key is invalid: Bad key (HTTP 401, code something_new)."
-        ))
+        #expect(failure.speechError == .httpFailure(provider: .fishAudio, statusCode: 401))
     }
 
     @Test("Fish Audio maps a 413 with no body and a non-JSON body")
     func fishAudioMapsBodylessErrors() throws {
-        #expect(throws: SpeechError.uploadFailed(
-            provider: .fishAudio,
-            reason: "The audio file is too large; upload compressed audio such as MP3 or M4A (HTTP 413)."
-        )) {
+        #expect(throws: SpeechError.httpFailure(provider: .fishAudio, statusCode: 413)) {
             _ = try FishAudioFileTranscriptionClient.decodeResponse(data: Data(), statusCode: 413)
         }
 
-        #expect(throws: SpeechError.uploadFailed(
-            provider: .fishAudio,
-            reason: "Fish Audio had a server error; retry later: <html>Bad Gateway</html> (HTTP 502)."
-        )) {
+        #expect(throws: SpeechError.httpFailure(provider: .fishAudio, statusCode: 502)) {
             _ = try FishAudioFileTranscriptionClient.decodeResponse(data: Data("<html>Bad Gateway</html>\n".utf8), statusCode: 502)
         }
     }
@@ -499,7 +479,7 @@ struct FishAudioProviderTests {
         #expect(performing: {
             _ = try FishAudioFileTranscriptionClient.decodeResponse(data: Data("not json".utf8), statusCode: 200)
         }, throws: { error in
-            guard case .decodingFailed(provider: .fishAudio, reason: _) = error as? SpeechError else { return false }
+            guard case .decodingFailed(provider: .fishAudio, reason: .decodingFailed) = error as? SpeechError else { return false }
             return true
         })
     }
@@ -540,10 +520,7 @@ struct FishAudioProviderTests {
             elevenLabsRealtimeService: ElevenLabsService()
         )
 
-        await #expect(throws: SpeechError.uploadFailed(
-            provider: .fishAudio,
-            reason: "The account has no remaining credit: Insufficient balance (HTTP 402, request req-2)."
-        )) {
+        await #expect(throws: SpeechError.httpFailure(provider: .fishAudio, statusCode: 402)) {
             _ = try await service.transcribeAudioFile(provider: .fishAudio, file: fishAudioTemporaryAudioFileURL(named: "call.wav"))
         }
     }
@@ -638,8 +615,7 @@ struct FishAudioProviderTests {
 
         await #expect(throws: SpeechError.providerFailure(
             provider: .fishAudio,
-            reason: "Unsupported file extension: aiff. Fish Audio does not accept AIFF or CAF audio; convert the file to WAV, M4A, MP3, or FLAC."
-        )) {
+            reason: .requestFailed)) {
             _ = try await service.transcribeFishAudioAudioFile(file: fishAudioTemporaryAudioFileURL(named: "memo.aiff"))
         }
     }

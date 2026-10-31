@@ -174,7 +174,7 @@ public enum SpeechAudioCaptureError: Error, LocalizedError, Sendable, Equatable 
     /// The user denied microphone permission.
     case permissionDenied
     /// The audio engine failed.
-    case audioEngineError(String)
+    case audioEngineError(SpeechFailureReason)
 
     /// A localized description of the error.
     public var errorDescription: String? {
@@ -185,4 +185,10 @@ public enum SpeechAudioCaptureError: Error, LocalizedError, Sendable, Equatable 
             return "Audio engine error: \(reason)"
         }
     }
+}
+
+/// Controls how long SpeechKit keeps its in-memory microphone recording.
+public enum SpeechRecordingRetention: Sendable {
+    case retainUntilDiscarded
+    case discardOnStop
 }

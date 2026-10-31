@@ -43,6 +43,9 @@ struct FileTranscriptionView: View {
             .onChange(of: configuration.fileProvider) { _, _ in
                 cancelTranscriptionForProviderChange()
             }
+            .onChange(of: configuration.credentialRevision) { _, _ in
+                cancelTranscriptionForProviderChange()
+            }
             .onDisappear {
                 cancelTranscriptionForProviderChange()
             }
@@ -106,8 +109,8 @@ struct FileTranscriptionView: View {
             Button("Cancel preparation", role: .cancel, action: speech.releaseVozModel)
         case .ready:
             EmptyView()
-        case .failed(let message):
-            Label(message, systemImage: "exclamationmark.triangle.fill")
+        case .failed:
+            Label("VOZ model preparation failed. Check the connection and available storage, then retry.", systemImage: "exclamationmark.triangle.fill")
                 .font(.caption)
                 .foregroundStyle(.red)
                 .textSelection(.enabled)
@@ -182,7 +185,7 @@ struct FileTranscriptionView: View {
             vozResponse = nil
             errorMessage = nil
         case .failure(let error):
-            errorMessage = "Failed to import audio: \(error.localizedDescription)"
+            errorMessage = "Failed to import audio. \(DemoFailure.message(for: error))"
         }
     }
 
@@ -199,6 +202,7 @@ struct FileTranscriptionView: View {
 
     /// Calls SpeechKit with a security-scoped URL so files picked outside the sandbox remain readable.
     private func transcribe(_ url: URL, provider: DemoFileProvider, requestID: UUID) async {
+        guard ownsCurrentResult(for: provider, requestID: requestID) else { return }
         guard provider == .voz || configuration.hasAPIKey(for: provider) else {
             errorMessage = configuration.missingAPIKeyMessage(for: configuration.fileProvider)
             return
@@ -209,7 +213,6 @@ struct FileTranscriptionView: View {
             return
         }
 
-        configuration.apply(to: speech)
         isTranscribing = true
         startedAt = Date()
         activeTimeout = configuration.timeoutInterval(for: provider)
@@ -226,6 +229,10 @@ struct FileTranscriptionView: View {
         }
 
         do {
+            try configuration.prepare(speech, for: provider.apiKeyProvider)
+            defer {
+                if activeRequestID == requestID { configuration.releaseAuthorization(from: speech) }
+            }
             if provider == .voz {
                 let response = try await speech.transcribeVozAudioFile(securityScopedURL: url)
                 guard ownsCurrentResult(for: provider, requestID: requestID) else { return }
@@ -252,13 +259,14 @@ struct FileTranscriptionView: View {
             }
         } catch {
             guard ownsCurrentResult(for: provider, requestID: requestID) else { return }
-            errorMessage = error.localizedDescription
+            errorMessage = DemoFailure.message(for: error)
         }
     }
 
     /// Invalidates an in-flight result before a provider change can display stale content.
     private func cancelTranscriptionForProviderChange() {
         transcriptionTask?.cancel()
+        configuration.releaseAuthorization(from: speech)
         transcriptionTask = nil
         activeRequestID = nil
         isTranscribing = false

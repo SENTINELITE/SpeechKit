@@ -63,7 +63,7 @@ struct SpeechServiceTests {
     func elevenLabsConfigurationAppliesDefaults() {
         let service = SpeechService(elevenLabs: ElevenLabsConfiguration(apiKey: "eleven"))
 
-        #expect(service.elevenLabs?.apiKey == "eleven")
+        #expect(service.elevenLabs?.credentialKind == .apiKey)
         #expect(service.elevenLabs?.realtimeModelID == .scribeV2Realtime)
         #expect(service.elevenLabs?.fileTranscriptionModelID == .scribeV2)
     }
@@ -73,7 +73,7 @@ struct SpeechServiceTests {
     func openAIConfigurationAppliesDefaults() {
         let service = SpeechService(openAI: OpenAIConfiguration(apiKey: "openai"))
 
-        #expect(service.openAI?.apiKey == "openai")
+        #expect(service.openAI?.credentialKind == .apiKey)
         #expect(service.openAI?.fileTranscriptionModelID == .gptTranscribe)
         #expect(service.openAI?.realtimeSessionModelID == .gptRealtime)
         #expect(service.openAI?.realtimeTranscriptionModelID == .gptLiveTranscribe)
@@ -110,7 +110,7 @@ struct SpeechServiceTests {
     func grokConfigurationAppliesRealtimeDefaults() {
         let service = SpeechService(grok: GrokConfiguration(apiKey: "xai"))
 
-        #expect(service.grok?.apiKey == "xai")
+        #expect(service.grok?.credentialKind == .apiKey)
         #expect(service.grok?.modelID == .stt)
         #expect(service.grok?.realtimeOptions.sampleRate == 16000)
         #expect(service.grok?.realtimeOptions.encoding == .pcm)
@@ -134,7 +134,7 @@ struct SpeechServiceTests {
     func metaConfigurationAppliesDefaults() {
         let service = SpeechService(meta: MetaConfiguration(apiKey: "meta"))
 
-        #expect(service.meta?.apiKey == "meta")
+        #expect(service.meta?.credentialKind == .apiKey)
         #expect(service.meta?.modelID == .museVoiceTranscribe1)
         #expect(service.meta?.mode == .endpointing)
         #expect(service.meta?.languageBias == [])
@@ -148,7 +148,7 @@ struct SpeechServiceTests {
     func geminiConfigurationAppliesDefaults() {
         let service = SpeechService(gemini: GeminiConfiguration(apiKey: "gemini"))
 
-        #expect(service.gemini?.apiKey == "gemini")
+        #expect(service.gemini?.credentialKind == .apiKey)
         #expect(service.gemini?.fileTranscriptionModelID == .transcribe35)
         #expect(service.gemini?.realtimeModelID == .transcribeLive35)
         #expect(service.gemini?.mode == .verbatim)
@@ -168,7 +168,7 @@ struct SpeechServiceTests {
 
     @Test("Meta configuration rejects unknown language names")
     func metaConfigurationRejectsUnknownLanguageNames() {
-        #expect(throws: SpeechError.providerFailure(provider: .meta, reason: "Unsupported language: Klingon.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .meta, reason: .requestFailed)) {
             _ = try MetaConfiguration(apiKey: "meta", languageNames: ["Klingon"])
         }
     }
@@ -243,7 +243,7 @@ struct SpeechServiceTests {
     func metaRealtimeOptionsRejectWAVEncoding() {
         let options = MetaRealtimeOptions(audioEncoding: .wav)
 
-        #expect(throws: SpeechError.providerFailure(provider: .meta, reason: "Realtime transcription requires a raw PCM audio encoding.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .meta, reason: .requestFailed)) {
             try options.validate()
         }
     }
@@ -588,7 +588,7 @@ struct SpeechServiceTests {
     func grokRealtimeOptionsRejectInvalidEndpointing() throws {
         let options = GrokRealtimeOptions(endpointingMilliseconds: 5001)
 
-        #expect(throws: SpeechError.providerFailure(provider: .grok, reason: "endpointingMilliseconds must be between 0 and 5000.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .grok, reason: .requestFailed)) {
             try options.validate()
         }
     }

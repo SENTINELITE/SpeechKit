@@ -7,6 +7,7 @@ enum SettingsRoute: Hashable {
     case provider(DemoAPIKeyProvider)
     case voz
     case appleSpeech
+    case relay
 }
 
 /// The settings root: which providers the workflows use, plus one page per provider.
@@ -21,13 +22,25 @@ struct SettingsSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Credentials") {
+                    NavigationLink(value: SettingsRoute.relay) {
+                        LabeledContent("Relay", value: configuration.isRelayEnabled ? (configuration.isRelayReady ? "Enabled" : "Reauthenticate") : "Off, vendor keys")
+                    }
+                }
                 defaultProvidersSection
                 cloudProvidersSection
                 onDeviceSection
+                Section {
+                    Button("Clear private text", role: .destructive) { configuration.resetPrivateText() }
+                } footer: {
+                    Text("Prompts, names, and vocabulary stay in this app session. Clear removes them and any values saved by older versions. Transcripts and audio leave the app only when you choose an export or a cloud provider.")
+                }
             }
             .navigationTitle("Settings")
             .navigationDestination(for: SettingsRoute.self) { route in
                 switch route {
+                case .relay:
+                    RelaySettingsView(configuration: configuration)
                 case .provider(let provider):
                     ProviderSettingsView(configuration: configuration, provider: provider)
                 case .voz:
@@ -67,7 +80,7 @@ struct SettingsSheet: View {
         } header: {
             Text("Default Providers")
         } footer: {
-            Text("A cloud provider becomes selectable once its API key is saved. On-device providers need no key.")
+            Text("Cloud providers use Relay while it is enabled, without loading vendor keys. Otherwise, save a provider key. On-device providers need neither.")
         }
     }
 
@@ -76,7 +89,8 @@ struct SettingsSheet: View {
         Section("Cloud Providers") {
             ForEach(DemoAPIKeyProvider.allCases) { provider in
                 NavigationLink(value: SettingsRoute.provider(provider)) {
-                    ProviderRow(provider: provider, hasKey: configuration.hasAPIKey(for: provider))
+                    ProviderRow(provider: provider, hasKey: configuration.hasAPIKey(for: provider),
+                                usesRelay: configuration.isRelayEnabled, relayReady: configuration.isRelayReady)
                 }
             }
         }
@@ -120,18 +134,140 @@ struct SettingsSheet: View {
 private struct ProviderRow: View {
     let provider: DemoAPIKeyProvider
     let hasKey: Bool
+    let usesRelay: Bool
+    let relayReady: Bool
 
     var body: some View {
         LabeledContent {
-            Image(systemName: hasKey ? "checkmark.circle.fill" : "key.slash")
-                .foregroundStyle(hasKey ? .green : .secondary)
-                .accessibilityLabel(hasKey ? "Key saved" : "No key")
+            if usesRelay {
+                Text(relayReady ? "Relay" : "Reauthenticate")
+                    .font(.caption)
+                    .foregroundStyle(relayReady ? .green : .secondary)
+            } else {
+                Image(systemName: hasKey ? "checkmark.circle.fill" : "key.slash")
+                    .foregroundStyle(hasKey ? .green : .secondary)
+                    .accessibilityLabel(hasKey ? "Key saved" : "No key")
+            }
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(provider.title)
                 Text(provider.capabilities)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private struct RelaySettingsView: View {
+    @Bindable var configuration: DemoConfiguration
+    @Environment(\.speechService) private var speech
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var url = ""
+    @State private var authentication = DemoRelayAuthentication.appAttest
+    @State private var bearerToken = ""
+    @State private var useVendorTokens = false
+    @State private var optimizeUploads = true
+    @State private var isApplying = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("https://relay.example.com", text: $url)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Picker("Authentication", selection: $authentication) {
+                    ForEach(DemoRelayAuthentication.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                if authentication == .appAttest, !DemoConfiguration.supportsAppAttest {
+                    Text("App Attest is unavailable on this device or Simulator. Choose Bearer test authentication explicitly or use a supported device. No fallback happens automatically.")
+                        .foregroundStyle(.orange)
+                }
+                if authentication == .bearer {
+                    SecureField("Short-lived Relay sign-in token, test only", text: $bearerToken)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Text("Paste a backend-issued sign-in token, not a vendor key or Relay session ticket. This test entry is never saved or prefilled. The app releases it after five minutes; the backend must enforce its own expiry. Reapply with a fresh token to reauthenticate.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if authentication == .none {
+                    Text("Development only. No client authentication is sent. Use only a Relay configured for none-dev in an isolated test environment, never a production deployment.")
+                        .foregroundStyle(.orange)
+                }
+                Toggle("Use vendor tokens when available", isOn: $useVendorTokens)
+                Text("Off proxies every request through Relay. On allows supported short-lived vendor tokens and proxies other requests. Only providers configured on your Relay can succeed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("Optimize uploads", isOn: $optimizeUploads)
+                Text("On keeps supported audio unchanged, repackages AAC when needed, and converts other imports locally. Off sends original audio only or refuses it before uploading.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Relay")
+            } footer: {
+                Text("Enter an HTTPS origin without a path, query, or credentials. HTTP is accepted only for loopback development. Applying settings stops current work and clears SDK credentials. No Relay requests occur until you start a workflow.")
+            }
+            Section {
+                Button(configuration.isRelayEnabled ? "Apply and reauthenticate" : "Enable Relay") {
+                    applyRelay()
+                }
+                .disabled(url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                          (authentication == .bearer && bearerToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) ||
+                          (authentication == .appAttest && !DemoConfiguration.supportsAppAttest))
+                if configuration.isRelayEnabled {
+                    Button("Disable Relay", role: .destructive) {
+                        bearerToken = ""
+                        isApplying = true
+                        Task {
+                            await configuration.disableRelay(in: speech)
+                            isApplying = false
+                            errorMessage = nil
+                        }
+                    }
+                    Text(configuration.isRelayReady ? "Relay enabled. Vendor keys are not used." : "Relay authorization expired or was cleared. Reapply settings before using a cloud provider.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let errorMessage {
+                    Text(errorMessage).foregroundStyle(.red)
+                }
+            }
+        }
+        .disabled(isApplying || configuration.isResettingAuthorization)
+        .interactiveDismissDisabled(isApplying)
+        .navigationTitle("Relay")
+        .onAppear {
+            url = configuration.relayURL
+            authentication = configuration.relayAuthentication
+            useVendorTokens = configuration.relayUsesVendorTokens
+            optimizeUploads = configuration.relayOptimizesUploads
+            bearerToken = ""
+        }
+        .onDisappear { bearerToken = "" }
+        .onChange(of: authentication) { _, _ in bearerToken = "" }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { bearerToken = "" }
+        }
+    }
+
+    private func applyRelay() {
+        let token = bearerToken
+        bearerToken = ""
+        isApplying = true
+        errorMessage = nil
+        Task {
+            defer { isApplying = false }
+            do {
+                try await configuration.enableRelay(url: url, authentication: authentication, bearerToken: token,
+                                                    useVendorTokens: useVendorTokens, optimizeUploads: optimizeUploads, replacing: speech)
+                configuration.relayService?.voz = speech.voz
+            } catch {
+                errorMessage = DemoFailure.message(for: error)
             }
         }
     }

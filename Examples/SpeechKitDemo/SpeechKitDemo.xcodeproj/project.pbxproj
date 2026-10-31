@@ -31,6 +31,11 @@
 		1A000001000000000000020B /* SpeechRealtimeConnectionState+Demo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A000001000000000000010B /* SpeechRealtimeConnectionState+Demo.swift */; };
 		A15C2F8B2FCCD54D00DDE69E /* Aurora in Frameworks */ = {isa = PBXBuildFile; productRef = A15C2F8A2FCCD54D00DDE69E /* Aurora */; };
 		5E0A1C012FD0000000000003 /* SpeechKitVoz in Frameworks */ = {isa = PBXBuildFile; productRef = 5E0A1C012FD0000000000002 /* SpeechKitVoz */; };
+		1A0000010000000000000401 /* DemoKeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000411 /* DemoKeychainStore.swift */; };
+		1A0000010000000000000402 /* DemoPrivateTextPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000412 /* DemoPrivateTextPreferences.swift */; };
+		1A0000010000000000000403 /* DemoProtectedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000413 /* DemoProtectedStorage.swift */; };
+		1A0000010000000000000404 /* DemoPrivacyCover.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000414 /* DemoPrivacyCover.swift */; };
+		1A0000010000000000000405 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 1A0000010000000000000415 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -57,6 +62,11 @@
 		1A0000010000000000000109 /* RealtimeWordEmitterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeWordEmitterView.swift; sourceTree = "<group>"; };
 		1A000001000000000000010A /* DemoGlassModifiers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoGlassModifiers.swift; sourceTree = "<group>"; };
 		1A000001000000000000010B /* SpeechRealtimeConnectionState+Demo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SpeechRealtimeConnectionState+Demo.swift"; sourceTree = "<group>"; };
+		1A0000010000000000000411 /* DemoKeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoKeychainStore.swift; sourceTree = "<group>"; };
+		1A0000010000000000000412 /* DemoPrivateTextPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoPrivateTextPreferences.swift; sourceTree = "<group>"; };
+		1A0000010000000000000413 /* DemoProtectedStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoProtectedStorage.swift; sourceTree = "<group>"; };
+		1A0000010000000000000414 /* DemoPrivacyCover.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoPrivacyCover.swift; sourceTree = "<group>"; };
+		1A0000010000000000000415 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -85,6 +95,7 @@
 		1A0000010000000000000041 /* SpeechKitDemo */ = {
 			isa = PBXGroup;
 			children = (
+				1A0000010000000000000415 /* PrivacyInfo.xcprivacy */,
 				1A0000010000000000000011 /* SpeechKitDemoApp.swift */,
 				1A0000010000000000000012 /* ContentView.swift */,
 				1A0000010000000000000110 /* Audio */,
@@ -102,6 +113,7 @@
 		1A0000010000000000000110 /* Audio */ = {
 			isa = PBXGroup;
 			children = (
+				1A0000010000000000000413 /* DemoProtectedStorage.swift */,
 				1A0000010000000000000015 /* DemoAudioRecorder.swift */,
 			);
 			path = Audio;
@@ -110,6 +122,7 @@
 		1A0000010000000000000111 /* Components */ = {
 			isa = PBXGroup;
 			children = (
+				1A0000010000000000000414 /* DemoPrivacyCover.swift */,
 				1A0000010000000000000104 /* DemoControlDock.swift */,
 				1A0000010000000000000106 /* DemoProviderControls.swift */,
 				1A0000010000000000000107 /* DemoUploadStatusView.swift */,
@@ -123,6 +136,8 @@
 		1A0000010000000000000112 /* Configuration */ = {
 			isa = PBXGroup;
 			children = (
+				1A0000010000000000000412 /* DemoPrivateTextPreferences.swift */,
+				1A0000010000000000000411 /* DemoKeychainStore.swift */,
 				1A0000010000000000000014 /* DemoConfiguration.swift */,
 			);
 			path = Configuration;
@@ -267,6 +282,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A0000010000000000000405 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -277,6 +293,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A0000010000000000000404 /* DemoPrivacyCover.swift in Sources */,
+				1A0000010000000000000403 /* DemoProtectedStorage.swift in Sources */,
+				1A0000010000000000000402 /* DemoPrivateTextPreferences.swift in Sources */,
+				1A0000010000000000000401 /* DemoKeychainStore.swift in Sources */,
 				1A0000010000000000000001 /* SpeechKitDemoApp.swift in Sources */,
 				1A0000010000000000000002 /* ContentView.swift in Sources */,
 				1A0000010000000000000004 /* DemoConfiguration.swift in Sources */,
@@ -424,6 +444,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = SpeechKitDemo/SpeechKitDemo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 9JJ9796LNX;
@@ -450,6 +471,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = SpeechKitDemo/SpeechKitDemo.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 9JJ9796LNX;

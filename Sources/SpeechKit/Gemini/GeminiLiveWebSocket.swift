@@ -1,6 +1,7 @@
 import Foundation
 
 actor GeminiLiveWebSocket {
+    private var connectionGeneration = UUID()
     private var webSocketTask: URLSessionWebSocketTask?
     private var session: URLSession?
     private var continuation: AsyncThrowingStream<GeminiLiveMessage, Error>.Continuation?
@@ -16,15 +17,16 @@ actor GeminiLiveWebSocket {
 
     /// Builds the WebSocket handshake request for a Gemini Live session.
     ///
-    /// An API key goes in the `key` query parameter. A short-lived Google
-    /// ephemeral token goes in an `Authorization: Token` header instead, which
-    /// keeps the secret out of the URL.
+    /// API keys use `x-goog-api-key`. Google vendor tokens use the Constrained
+    /// method and `Authorization: Token`. Relay tickets use Bearer authorization.
     nonisolated static func makeConnectRequest(
         credential: SpeechResolvedCredential,
         options: GeminiRealtimeOptions,
         endpoint: URL? = nil
     ) throws -> URLRequest {
         try options.validate()
+        try SpeechEndpointPolicy.validate(endpoint ?? defaultURL, websocket: true)
+        try SpeechResolvedCredential.validateSecret(credential.secret)
         guard !credential.isEmpty else {
             throw GeminiRealtimeError.apiKeyMissing
         }
@@ -33,10 +35,8 @@ actor GeminiLiveWebSocket {
             throw GeminiRealtimeError.invalidURL
         }
 
-        if case .apiKey(let key) = credential {
-            var queryItems = components.queryItems ?? []
-            queryItems.append(URLQueryItem(name: "key", value: key))
-            components.queryItems = queryItems
+        if credential.kind == .vendorToken && components.host?.lowercased() == "generativelanguage.googleapis.com" {
+            components.path = "/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained"
         }
 
         guard let url = components.url else {
@@ -44,9 +44,7 @@ actor GeminiLiveWebSocket {
         }
 
         var request = URLRequest(url: url)
-        if case .token(let token) = credential {
-            request.setValue("Token \(token)", forHTTPHeaderField: "Authorization")
-        }
+        try credential.authorize(&request, provider: .gemini, capability: .realtime)
         return request
     }
 
@@ -59,24 +57,40 @@ actor GeminiLiveWebSocket {
 
         sampleRate = options.sampleRate
 
-        let session = URLSession(configuration: .default)
+        disconnect()
+        let generation = connectionGeneration
+        let opened = try await SpeechSocketConnection.open(request: request, credential: credential)
+        guard generation == connectionGeneration, !Task.isCancelled else {
+            opened.task.cancel(with: .goingAway, reason: nil)
+            opened.session.invalidateAndCancel()
+            throw CancellationError()
+        }
+        let session = opened.session
+        let task = opened.task
         self.session = session
-
-        let task = session.webSocketTask(with: request)
         self.webSocketTask = task
 
-        task.resume()
-        try await sendEncodable(options.setupMessage())
+        do {
+            try await sendEncodable(options.setupMessage())
+        } catch {
+            disconnect(ifCurrent: task)
+            throw SpeechErrorBoundary.safe(error)
+        }
+
+        guard webSocketTask === task, !Task.isCancelled else {
+            disconnect(ifCurrent: task)
+            throw CancellationError()
+        }
 
         return AsyncThrowingStream { continuation in
             self.continuation = continuation
 
             continuation.onTermination = { @Sendable _ in
-                Task { await self.disconnect() }
+                Task { await self.disconnect(ifCurrent: task) }
             }
 
             Task {
-                await self.receiveMessages()
+                await self.receiveMessages(from: task)
             }
         }
     }
@@ -98,6 +112,7 @@ actor GeminiLiveWebSocket {
     }
 
     func disconnect() {
+        connectionGeneration = UUID()
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
         continuation?.finish()
@@ -107,6 +122,7 @@ actor GeminiLiveWebSocket {
     }
 
     private func sendEncodable<T: Encodable & Sendable>(_ message: T) async throws {
+        try Task.checkCancellation()
         guard let task = webSocketTask, task.state == .running else {
             throw GeminiRealtimeError.disconnected
         }
@@ -119,13 +135,19 @@ actor GeminiLiveWebSocket {
         try await task.send(.string(jsonString))
     }
 
-    private func receiveMessages() async {
-        guard let task = webSocketTask else { return }
+    private func disconnect(ifCurrent task: URLSessionWebSocketTask) {
+        guard webSocketTask === task else { return }
+        disconnect()
+    }
 
-        while task.state == .running {
+    private func receiveMessages(from task: URLSessionWebSocketTask) async {
+        guard webSocketTask === task else { return }
+
+        while task.state == .running && webSocketTask === task {
             do {
                 let message = try await task.receive()
 
+                guard webSocketTask === task else { return }
                 switch message {
                 case .string(let text):
                     guard let data = text.data(using: .utf8) else { continue }
@@ -141,12 +163,13 @@ actor GeminiLiveWebSocket {
                 if task.state != .running {
                     break
                 }
-                continuation?.finish(throwing: error)
+                guard webSocketTask === task else { return }
+                continuation?.finish(throwing: SpeechErrorBoundary.safe(error))
                 return
             }
         }
 
-        continuation?.finish()
+        if webSocketTask === task { continuation?.finish() }
     }
 
     private func yieldDecodedMessage(_ data: Data) {

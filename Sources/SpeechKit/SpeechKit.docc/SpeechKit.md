@@ -9,13 +9,14 @@ SpeechKit provides one observable service, ``SpeechService``, for realtime micro
 Create a service with the provider configurations your app needs, then place it in SwiftUI's environment or keep it in your own model layer. Use ``SpeechService`` as the main app-facing facade; provider-specific realtime services are advanced APIs for direct provider integrations.
 
 ```swift
+import Foundation
 import SpeechKit
 import SwiftUI
 
 @main
 struct DemoApp: App {
     @State private var speech = SpeechService(
-        elevenLabs: ElevenLabsConfiguration(apiKey: "<ELEVENLABS_API_KEY>")
+        relay: SpeechRelay(url: URL(string: "https://speech.example.workers.dev")!)
     )
 
     var body: some Scene {
@@ -27,16 +28,22 @@ struct DemoApp: App {
 }
 ```
 
+The relay template is a self-hosted sibling repository, [speechkit-relay](https://github.com/SENTINELITE/speechkit-relay), not yet published. App Attest is the default and fails closed on unsupported devices. Configure the entitlement and deploy/review your relay before using this URL. For BYOK, native tokens, and existing login providers, see <doc:ShippingInProduction>. For source changes from 2.x, see <doc:MigratingTo3>.
+
 ## Topics
 
 ### Essentials
 
 - <doc:GettingStarted>
+- <doc:ShippingInProduction>
+- <doc:MigratingTo3>
 - <doc:ProviderHowToGuides>
 - <doc:AppleLocalSpeech>
 - ``SpeechService``
 - ``SpeechCredential``
-- ``SpeechTokenProvider``
+- ``SpeechTokenResolver``
+- ``SpeechTokenContext``
+- ``SpeechAccessToken``
 - ``SpeechServiceExtensionKey``
 - ``SpeechService/subscript(extension:)``
 
@@ -188,3 +195,18 @@ struct DemoApp: App {
 - ``AppleSpeechFileTranscriptionOptions``
 - ``AppleSpeechFileTranscriptionClient``
 - ``AppleSpeechFileTranscriptionResponse``
+
+### Authentication and cleanup
+
+- ``SpeechRelay``
+- ``SpeechRelay/Authentication``
+- ``SpeechRelay/TokenStrategy``
+- ``SpeechCredentialPolicy``
+- ``SpeechCapability``
+- ``GeminiRoute``
+- ``SpeechFailure``
+- ``SpeechFailureReason``
+- ``SpeechRecordingRetention``
+- ``SpeechService/resetSession(discardTranscript:discardRecording:)``
+- ``SpeechService/clearCredentials()``
+- ``SpeechService/discardRecording()``

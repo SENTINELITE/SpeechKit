@@ -1,6 +1,7 @@
 import Foundation
 
 actor MistralRealtimeWebSocket {
+    private var connectionGeneration = UUID()
     private var webSocketTask: URLSessionWebSocketTask?
     private var session: URLSession?
     private var continuation: AsyncThrowingStream<MistralRealtimeMessage, Error>.Continuation?
@@ -19,14 +20,17 @@ actor MistralRealtimeWebSocket {
 
     /// Builds the WebSocket handshake request for a realtime session.
     ///
-    /// Mistral takes the model as a query parameter and accepts both a
-    /// long-lived API key and a short-lived token as a bearer token.
+    /// Mistral takes the model as a query parameter. API keys use Bearer;
+    /// supported native tokens use the `realtime, <token>` subprotocol.
     nonisolated static func makeConnectRequest(
         credential: SpeechResolvedCredential,
         options: MistralRealtimeOptions,
         endpoint: URL? = nil
     ) throws -> URLRequest {
         try options.validate()
+        if credential.kind == .vendorToken && options.modelID != .voxtralMiniTranscribeRealtime2602 { throw SpeechFailure(.unsupportedAuthentication) }
+        try SpeechEndpointPolicy.validate(endpoint ?? defaultURL, websocket: true)
+        try SpeechResolvedCredential.validateSecret(credential.secret)
         guard !credential.isEmpty else {
             throw MistralRealtimeError.apiKeyMissing
         }
@@ -44,7 +48,7 @@ actor MistralRealtimeWebSocket {
         }
 
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(credential.secret)", forHTTPHeaderField: "Authorization")
+        try credential.authorize(&request, provider: .mistral, capability: .realtime)
         return request
     }
 
@@ -61,21 +65,32 @@ actor MistralRealtimeWebSocket {
     ) async throws -> AsyncThrowingStream<MistralRealtimeMessage, Error> {
         let request = try Self.makeConnectRequest(credential: credential, options: options, endpoint: endpoint)
 
-        let session = URLSession(configuration: .default)
+        disconnect()
+        let generation = connectionGeneration
+        let opened = try await SpeechSocketConnection.open(request: request, credential: credential)
+        guard generation == connectionGeneration, !Task.isCancelled else {
+            opened.task.cancel(with: .goingAway, reason: nil)
+            opened.session.invalidateAndCancel()
+            throw CancellationError()
+        }
+        let session = opened.session
+        let task = opened.task
         self.session = session
-        self.options = options
-
-        let task = session.webSocketTask(with: request)
         self.webSocketTask = task
+        self.options = options
         didAcknowledgeHandshake = false
 
-        task.resume()
+
+        guard webSocketTask === task, !Task.isCancelled else {
+            disconnect(ifCurrent: task)
+            throw CancellationError()
+        }
 
         return AsyncThrowingStream { continuation in
             self.continuation = continuation
 
             continuation.onTermination = { @Sendable _ in
-                Task { await self.disconnect() }
+                Task { await self.disconnect(ifCurrent: task) }
             }
 
             self.handshakeTimeoutTask = Task { [weak self, handshakeTimeoutNanoseconds] in
@@ -89,7 +104,7 @@ actor MistralRealtimeWebSocket {
             }
 
             Task {
-                await self.receiveMessages()
+                await self.receiveMessages(from: task)
             }
         }
     }
@@ -103,6 +118,7 @@ actor MistralRealtimeWebSocket {
     }
 
     func disconnect() {
+        connectionGeneration = UUID()
         handshakeTimeoutTask?.cancel()
         handshakeTimeoutTask = nil
         didAcknowledgeHandshake = false
@@ -115,6 +131,7 @@ actor MistralRealtimeWebSocket {
     }
 
     private func sendEncodable<T: Encodable & Sendable>(_ message: T) async throws {
+        try Task.checkCancellation()
         guard let task = webSocketTask, task.state == .running else {
             throw MistralRealtimeError.disconnected
         }
@@ -127,20 +144,26 @@ actor MistralRealtimeWebSocket {
         try await task.send(.string(jsonString))
     }
 
-    private func receiveMessages() async {
-        guard let task = webSocketTask else { return }
+    private func disconnect(ifCurrent task: URLSessionWebSocketTask) {
+        guard webSocketTask === task else { return }
+        disconnect()
+    }
 
-        while task.state == .running {
+    private func receiveMessages(from task: URLSessionWebSocketTask) async {
+        guard webSocketTask === task else { return }
+
+        while task.state == .running && webSocketTask === task {
             do {
                 let message = try await task.receive()
 
+                guard webSocketTask === task else { return }
                 switch message {
                 case .string(let text):
                     guard let data = text.data(using: .utf8) else { continue }
-                    await handleReceivedData(data)
+                    await handleReceivedData(data, from: task)
 
                 case .data(let data):
-                    await handleReceivedData(data)
+                    await handleReceivedData(data, from: task)
 
                 @unknown default:
                     break
@@ -149,7 +172,8 @@ actor MistralRealtimeWebSocket {
                 if task.state != .running {
                     break
                 }
-                continuation?.finish(throwing: error)
+                guard webSocketTask === task else { return }
+                continuation?.finish(throwing: SpeechErrorBoundary.safe(error))
                 return
             }
         }
@@ -157,7 +181,8 @@ actor MistralRealtimeWebSocket {
         continuation?.finish()
     }
 
-    private func handleReceivedData(_ data: Data) async {
+    private func handleReceivedData(_ data: Data, from task: URLSessionWebSocketTask) async {
+        guard webSocketTask === task else { return }
         let decoded: MistralRealtimeMessage
         do {
             decoded = try decoder.decode(MistralRealtimeMessage.self, from: data)
@@ -172,7 +197,8 @@ actor MistralRealtimeWebSocket {
             do {
                 try await sendEncodable(options.sessionUpdateMessage())
             } catch {
-                continuation?.finish(throwing: error)
+                guard webSocketTask === task else { return }
+                continuation?.finish(throwing: SpeechErrorBoundary.safe(error))
             }
         case .sessionUpdated:
             acknowledgeHandshake()

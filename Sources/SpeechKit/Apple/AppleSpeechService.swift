@@ -41,6 +41,12 @@ final class AppleSpeechService {
         audioManager.currentLevel
     }
 
+    /// Recording retention after a session stops. The default preserves export after stop.
+    public var recordingRetention: SpeechRecordingRetention {
+        get { audioManager.recordingRetention }
+        set { audioManager.recordingRetention = newValue }
+    }
+
     /// The latest realtime microphone recording as WAV data, if capture has produced audio.
     var realtimeRecordingData: Data? {
         audioManager.recordedWAVData
@@ -68,9 +74,13 @@ final class AppleSpeechService {
 
         let currentRunID = UUID()
         runID = currentRunID
+        defer {
+            if runID == currentRunID, Task.isCancelled { invalidateConfiguration() }
+        }
 
         do {
             let resolved = try await AppleSpeechSupport.makeRealtimeTranscriber(configuration: configuration)
+            guard runID == currentRunID, !Task.isCancelled else { return }
             let transcriber = resolved.transcriber
             let modules: [any SpeechModule] = [transcriber]
             let analyzer = SpeechAnalyzer(
@@ -78,13 +88,17 @@ final class AppleSpeechService {
                 options: AppleSpeechSupport.analyzerOptions(from: configuration.modelRetention)
             )
             let targetFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: modules)
+            guard runID == currentRunID, !Task.isCancelled else { return }
             try await analyzer.setContext(AppleSpeechSupport.analysisContext(from: configuration))
+            guard runID == currentRunID, !Task.isCancelled else { return }
             try await analyzer.prepareToAnalyze(in: targetFormat)
 
+            guard runID == currentRunID, !Task.isCancelled else { return }
             guard await audioManager.requestPermission() else {
                 throw SpeechAudioCaptureError.permissionDenied
             }
 
+            guard runID == currentRunID, !Task.isCancelled else { return }
             let inputStream = try audioManager.startCapture(targetFormat: targetFormat)
             self.analyzer = analyzer
 
@@ -112,14 +126,16 @@ final class AppleSpeechService {
 
             connectionState = .listening
         } catch {
+            guard runID == currentRunID, !Task.isCancelled else { return }
             await stopInternal(cancelAnalysis: true)
-            connectionState = .error(error.localizedDescription)
-            lastError = error
+            connectionState = .error(SpeechErrorBoundary.safe(error).localizedDescription)
+            lastError = SpeechErrorBoundary.safe(error)
         }
     }
 
     /// Stops Apple local realtime transcription and finalizes pending audio.
     func stopListening() async {
+        if connectionState == .connecting { runID = nil }
         guard connectionState.isLifecycleActive else { return }
         connectionState = .stopping
         audioManager.stopCapture()
@@ -131,14 +147,16 @@ final class AppleSpeechService {
             connectionState = .disconnected
         } catch {
             await stopInternal(cancelAnalysis: true)
-            connectionState = .error(error.localizedDescription)
-            lastError = error
+            connectionState = .error(SpeechErrorBoundary.safe(error).localizedDescription)
+            lastError = SpeechErrorBoundary.safe(error)
         }
 
         await stopInternal(cancelAnalysis: false)
     }
 
     /// Clears committed and volatile Apple transcript text.
+    func discardRecording() { audioManager.discardRecording() }
+
     func clearTranscript() {
         partialTranscriptEntry = nil
         partialEntryID = nil
@@ -175,8 +193,22 @@ final class AppleSpeechService {
 
     private func handleRealtimeError(_ error: Error, runID: UUID) {
         guard runID == self.runID, connectionState.isLifecycleActive else { return }
-        lastError = error
-        connectionState = .error(error.localizedDescription)
+        lastError = SpeechErrorBoundary.safe(error)
+        connectionState = .error(SpeechErrorBoundary.safe(error).localizedDescription)
+    }
+
+    func invalidateConfiguration() {
+        runID = nil
+        audioManager.stopCapture()
+        resultTask?.cancel()
+        resultTask = nil
+        analysisTask?.cancel()
+        analysisTask = nil
+        let previous = analyzer
+        analyzer = nil
+        connectionState = .disconnected
+        lastError = nil
+        Task { await previous?.cancelAndFinishNow() }
     }
 
     private func stopInternal(cancelAnalysis: Bool) async {

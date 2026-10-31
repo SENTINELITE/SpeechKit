@@ -17,19 +17,17 @@ public final class OpenAIRealtimeService {
     public private(set) var lastError: Error?
 
     /// The credential used for realtime transcription.
-    public var credential: SpeechCredential
-    /// The OpenAI API key used for realtime transcription.
-    ///
-    /// Reading this property returns the key for a ``SpeechCredential/apiKey(_:)``
-    /// credential and an empty string for a ``SpeechCredential/token(_:)``
-    /// credential. Writing it replaces ``credential`` with
-    /// ``SpeechCredential/apiKey(_:)``.
-    public var apiKey: String {
-        get { credential.staticAPIKey }
-        set { credential = .apiKey(newValue) }
+    var credential: SpeechCredential { didSet { if oldValue != credential { configurationDidChange() } } }
+    /// The configured authorization mode, without exposing its value.
+    public var credentialKind: SpeechCredential.Kind { credential.kind }
+    public var hasCredential: Bool { credential.isConfigured }
+    public func setCredential(_ credential: SpeechCredential) {
+        configurationDidChange()
+        self.credential = credential
     }
+
     /// An override for the OpenAI realtime WebSocket endpoint, or `nil` to use the vendor default.
-    public var realtimeEndpoint: URL?
+    public var realtimeEndpoint: URL? { didSet { if oldValue != realtimeEndpoint { configurationDidChange() } } }
     /// Options for the OpenAI realtime transcription session.
     public var options: OpenAIRealtimeSessionOptions
 
@@ -38,6 +36,11 @@ public final class OpenAIRealtimeService {
     private var listeningTask: Task<Void, Never>?
     private var partialsByItemID: [String: String] = [:]
     private var commitTask: Task<Void, Never>?
+    private var authorizationTask: Task<SpeechResolvedCredential, Error>?
+    private var reconfigurationTask: Task<Void, Never>?
+    public var credentialPolicy: SpeechCredentialPolicy = .allowStaticKeys {
+        didSet { if oldValue != credentialPolicy { configurationDidChange() } }
+    }
     private var lifecycleRunID = UUID()
 
     /// The committed transcript text joined with spaces.
@@ -50,6 +53,12 @@ public final class OpenAIRealtimeService {
         audioManager.currentLevel
     }
 
+    /// Recording retention after a session stops. The default preserves export after stop.
+    public var recordingRetention: SpeechRecordingRetention {
+        get { audioManager.recordingRetention }
+        set { audioManager.recordingRetention = newValue }
+    }
+
     /// The latest realtime microphone recording as WAV data, if capture has produced audio.
     public var realtimeRecordingData: Data? {
         audioManager.recordedWAVData
@@ -59,9 +68,11 @@ public final class OpenAIRealtimeService {
     public init(
         apiKey: String = "",
         options: OpenAIRealtimeSessionOptions = OpenAIRealtimeSessionOptions(),
-        realtimeEndpoint: URL? = nil
+        realtimeEndpoint: URL? = nil,
+        credentialPolicy: SpeechCredentialPolicy = .allowStaticKeys
     ) {
         self.credential = .apiKey(apiKey)
+        self.credentialPolicy = credentialPolicy
         self.options = options
         self.realtimeEndpoint = realtimeEndpoint
     }
@@ -70,9 +81,11 @@ public final class OpenAIRealtimeService {
     public init(
         credential: SpeechCredential,
         options: OpenAIRealtimeSessionOptions = OpenAIRealtimeSessionOptions(),
-        realtimeEndpoint: URL? = nil
+        realtimeEndpoint: URL? = nil,
+        credentialPolicy: SpeechCredentialPolicy = .allowStaticKeys
     ) {
         self.credential = credential
+        self.credentialPolicy = credentialPolicy
         self.options = options
         self.realtimeEndpoint = realtimeEndpoint
     }
@@ -80,6 +93,22 @@ public final class OpenAIRealtimeService {
     /// Starts realtime microphone transcription.
     public func startListening() async {
         guard !connectionState.isLifecycleActive else { return }
+
+        let runID = beginLifecycleRun()
+        defer {
+            if isCurrentLifecycleRun(runID) {
+                authorizationTask = nil
+                if Task.isCancelled { configurationDidChange() }
+            }
+        }
+        let credentialPolicy = credentialPolicy
+        let credential = credential
+        let options = options
+        let realtimeEndpoint = realtimeEndpoint
+        connectionState = .connecting
+        let teardown = reconfigurationTask
+        await teardown?.value
+        guard isCurrentLifecycleRun(runID), !Task.isCancelled else { return }
 
         guard credential.isConfigured else {
             connectionState = .error("OpenAI is not configured")
@@ -89,28 +118,32 @@ public final class OpenAIRealtimeService {
 
         let resolvedCredential: SpeechResolvedCredential
         do {
-            resolvedCredential = try await credential.resolved()
+            try credential.validate(provider: .openAI, capability: .realtime, endpoint: realtimeEndpoint ?? OpenAIRealtimeWebSocket.defaultURL, policy: credentialPolicy)
+            try options.validate()
+            let task = Task { try await credential.resolved(for: .openAI, capability: .realtime, model: options.transcriptionModelID.rawValue, endpoint: realtimeEndpoint ?? OpenAIRealtimeWebSocket.defaultURL, policy: credentialPolicy) }
+            authorizationTask = task
+            resolvedCredential = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            guard isCurrentLifecycleRun(runID), !Task.isCancelled else { return }
+            authorizationTask = nil
         } catch {
-            connectionState = .error(error.localizedDescription)
-            lastError = error
+            guard isCurrentLifecycleRun(runID), !Task.isCancelled, !(error is CancellationError) else { return }
+            connectionState = .error(SpeechErrorBoundary.safe(error).localizedDescription)
+            lastError = SpeechErrorBoundary.safe(error)
             return
         }
 
-        let runID = beginLifecycleRun()
         connectionState = .connecting
         partialTranscriptText = ""
         lastError = nil
 
         let hasPermission = await audioManager.requestPermission()
-        guard isCurrentLifecycleRun(runID) else { return }
+        guard isCurrentLifecycleRun(runID), !Task.isCancelled else { return }
         guard hasPermission else {
             connectionState = .error("Microphone permission denied")
             lastError = OpenAIError.permissionDenied
             return
         }
 
-        let options = options
-        let realtimeEndpoint = realtimeEndpoint
 
         listeningTask = Task {
             do {
@@ -119,12 +152,12 @@ public final class OpenAIRealtimeService {
                     options: options,
                     endpoint: realtimeEndpoint
                 )
-                guard isCurrentLifecycleRun(runID) else {
+                guard isCurrentLifecycleRun(runID), !Task.isCancelled else {
                     await webSocket.disconnect()
                     return
                 }
                 let audioStream = try audioManager.startCapture()
-                guard isCurrentLifecycleRun(runID) else {
+                guard isCurrentLifecycleRun(runID), !Task.isCancelled else {
                     audioManager.stopCapture()
                     await webSocket.disconnect()
                     return
@@ -139,7 +172,7 @@ public final class OpenAIRealtimeService {
 
                 for try await message in messageStream {
                     if Task.isCancelled { break }
-                    guard isCurrentLifecycleRun(runID) else { break }
+                    guard isCurrentLifecycleRun(runID), !Task.isCancelled else { break }
 
                     switch message {
                     case .sessionCreated(let sessionID), .sessionUpdated(let sessionID):
@@ -171,9 +204,9 @@ public final class OpenAIRealtimeService {
                             partialTranscriptText = ""
                         }
 
-                    case .error(let message):
-                        lastError = OpenAIError.connectionFailed(message)
-                        connectionState = .error(message)
+                    case .error:
+                        lastError = SpeechFailure(.server)
+                        connectionState = .error("The realtime session failed.")
 
                     case .unknown:
                         break
@@ -184,8 +217,8 @@ public final class OpenAIRealtimeService {
                 commitTask?.cancel()
             } catch {
                 if !Task.isCancelled, isCurrentLifecycleRun(runID) {
-                    lastError = error
-                    connectionState = .error(error.localizedDescription)
+                    lastError = SpeechErrorBoundary.safe(error)
+                    connectionState = .error(SpeechErrorBoundary.safe(error).localizedDescription)
                 }
             }
 
@@ -195,6 +228,10 @@ public final class OpenAIRealtimeService {
 
     /// Stops realtime microphone transcription and disconnects from OpenAI.
     public func stopListening() async {
+        authorizationTask?.cancel()
+        authorizationTask = nil
+        if listeningTask == nil { invalidateLifecycleRun() }
+
         guard connectionState.isLifecycleActive || listeningTask != nil || audioManager.isCapturing else {
             connectionState = .disconnected
             return
@@ -241,7 +278,7 @@ public final class OpenAIRealtimeService {
             } catch {
                 if !Task.isCancelled, isCurrentLifecycleRun(runID) {
                     await MainActor.run {
-                        lastError = error
+                        lastError = SpeechErrorBoundary.safe(error)
                     }
                 }
                 break
@@ -287,4 +324,44 @@ public final class OpenAIRealtimeService {
     private func isCurrentLifecycleRun(_ runID: UUID) -> Bool {
         lifecycleRunID == runID
     }
+
+    private func configurationDidChange() {
+        invalidateLifecycleRun()
+        authorizationTask?.cancel()
+        authorizationTask = nil
+        listeningTask?.cancel()
+        listeningTask = nil
+        audioManager.stopCapture()
+        connectionState = .disconnected
+        lastError = nil
+        let previous = reconfigurationTask
+        reconfigurationTask = Task { [webSocket] in
+            await previous?.value
+            await webSocket.disconnect()
+        }
+    }
+
+    /// Replaces authorization and its destination together, cancelling the previous session.
+    public func reconfigure(credential: SpeechCredential, realtimeEndpoint: URL? = nil) async {
+        configurationDidChange()
+        self.credential = credential
+        self.realtimeEndpoint = realtimeEndpoint
+        await reconfigurationTask?.value
+    }
+
+    /// Cancels local work. Ordinary stop retains configured authorization and recordings.
+    public func resetSession(discardTranscript: Bool = true, discardRecording: Bool = true) async {
+        configurationDidChange()
+        await reconfigurationTask?.value
+        lastError = nil
+        if discardTranscript { clearTranscript() }
+        if discardRecording { self.discardRecording() }
+    }
+
+    public func clearCredentials() async {
+        credential = .apiKey("")
+        await resetSession()
+    }
+
+    public func discardRecording() { audioManager.discardRecording() }
 }

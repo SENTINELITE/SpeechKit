@@ -1,7 +1,19 @@
+import DeviceCheck
 import Foundation
 import Observation
-import Security
 import SpeechKit
+
+enum DemoRelayAuthentication: String, CaseIterable, Identifiable {
+    case appAttest, bearer, none
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .appAttest: "App Attest"
+        case .bearer: "Bearer token, test only"
+        case .none: "None, development only"
+        }
+    }
+}
 
 /// Named latency/accuracy tiers exposed by the OpenAI realtime transcription demo.
 enum DemoOpenAIRealtimeDelay: String, CaseIterable, Identifiable {
@@ -275,10 +287,107 @@ enum DemoAPIKeyProvider: String, CaseIterable, Identifiable {
 @MainActor
 final class DemoConfiguration {
     private let defaults: UserDefaults
-    private let keychain = DemoKeychainStore(service: "com.sentinelite.SpeechKitDemo.api-keys")
+    private let keychain: any DemoCredentialStore
 
-    /// Provider keys loaded from the keychain for the current demo session.
-    var apiKeys: [DemoAPIKeyProvider: String] = [:]
+    /// Presence metadata only. Secret values are loaded when preparing one operation.
+    private(set) var savedKeyProviders: Set<DemoAPIKeyProvider> = []
+    private(set) var keychainError: String?
+    private(set) var credentialRevision = 0
+    private var authorizationResetsInProgress = 0
+    var isResettingAuthorization: Bool { authorizationResetsInProgress > 0 }
+    private(set) var relayService: SpeechService?
+    private(set) var isRelayEnabled = false
+    private(set) var relayExpiresAt: Date?
+    private var relayExpiryTask: Task<Void, Never>?
+
+    var relayURL: String { defaults.string(forKey: "relayURL") ?? "" }
+    var relayAuthentication: DemoRelayAuthentication {
+        Self.enumValue(for: "relayAuthentication", default: .appAttest, defaults: defaults)
+    }
+    var relayUsesVendorTokens: Bool { defaults.bool(forKey: "relayUsesVendorTokens") }
+    var relayOptimizesUploads: Bool { defaults.object(forKey: "relayOptimizesUploads") as? Bool ?? true }
+    var isRelayReady: Bool {
+        !isResettingAuthorization && relayService?.relay != nil && (relayExpiresAt.map { $0 > Date() } ?? true)
+    }
+
+    static var supportsAppAttest: Bool { DCAppAttestService.shared.isSupported }
+
+    func enableRelay(url: String, authentication: DemoRelayAuthentication, bearerToken: String,
+                     useVendorTokens: Bool, optimizeUploads: Bool = true, replacing speech: SpeechService) async throws {
+        guard !isResettingAuthorization else { throw CancellationError() }
+        let relayURL = try Self.validatedRelayURL(url)
+        let auth: SpeechRelay.Authentication
+        let expiresAt: Date?
+        switch authentication {
+        case .appAttest:
+            guard Self.supportsAppAttest else { throw SpeechFailure(.attestationUnsupported) }
+            auth = .appAttest
+            expiresAt = nil
+        case .bearer:
+            let token = bearerToken.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !token.isEmpty, !token.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+                throw SpeechFailure(.invalidCredential)
+            }
+            let deadline = Date().addingTimeInterval(5 * 60)
+            auth = .bearer(SpeechTokenResolver { _ -> SpeechAccessToken in
+                guard Date() < deadline else { throw SpeechFailure(.invalidCredential) }
+                return SpeechAccessToken(value: token, expiresAt: deadline, isReusable: true)
+            })
+            expiresAt = deadline
+        case .none:
+            auth = .none
+            expiresAt = nil
+        }
+        authorizationResetsInProgress += 1
+        defer { authorizationResetsInProgress -= 1 }
+        relayExpiryTask?.cancel()
+        await speech.clearCredentials()
+        try Task.checkCancellation()
+        let service = SpeechService(
+            relay: SpeechRelay(url: relayURL, authentication: auth,
+                               providers: Set(SpeechFileTranscriptionProvider.allCases.filter { $0 != .apple }),
+                               tokenStrategy: useVendorTokens ? .vendorTokensWhenAvailable : .proxyAll,
+                               pinnedPublicKeyHashes: [], optimizedUploads: optimizeUploads ? .on : .off),
+            credentialPolicy: useVendorTokens ? .disallowStaticKeys : .relayOnly
+        )
+        relayService = service
+        isRelayEnabled = true
+        relayExpiresAt = expiresAt
+        set(relayURL.absoluteString, for: "relayURL")
+        set(authentication.rawValue, for: "relayAuthentication")
+        set(useVendorTokens, for: "relayUsesVendorTokens")
+        set(optimizeUploads, for: "relayOptimizesUploads")
+        credentialRevision += 1
+        if let expiresAt {
+            relayExpiryTask = Task { [weak self, weak service] in
+                do { try await Task.sleep(for: .seconds(max(0, expiresAt.timeIntervalSinceNow))) } catch { return }
+                guard let self, let service, self.relayService === service else { return }
+                await self.clearAuthorization(in: service)
+            }
+        }
+    }
+
+    func disableRelay(in speech: SpeechService) async {
+        guard !isResettingAuthorization else { return }
+        relayExpiryTask?.cancel()
+        relayExpiryTask = nil
+        await clearAuthorization(in: speech)
+        relayService = nil
+        relayExpiresAt = nil
+        isRelayEnabled = false
+        credentialRevision += 1
+    }
+
+    nonisolated static func validatedRelayURL(_ value: String) throws -> URL {
+        guard let components = URLComponents(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let host = components.host, !host.isEmpty, components.user == nil, components.password == nil,
+              components.query == nil, components.fragment == nil,
+              components.path.isEmpty || components.path == "/",
+              components.scheme?.lowercased() == "https" ||
+                (components.scheme?.lowercased() == "http" && ["localhost", "127.0.0.1", "::1", "[::1]"].contains(host.lowercased())),
+              let url = components.url else { throw SpeechFailure(.invalidEndpoint) }
+        return url
+    }
 
     /// The provider used by the realtime sample.
     var realtimeProvider: DemoRealtimeProvider {
@@ -366,13 +475,9 @@ final class DemoConfiguration {
         didSet { set(openAILanguages, for: "openAILanguages") }
     }
 
-    var openAIPrompt: String {
-        didSet { set(openAIPrompt, for: "openAIPrompt") }
-    }
+    var openAIPrompt: String
 
-    var openAIKeywords: String {
-        didSet { set(openAIKeywords, for: "openAIKeywords") }
-    }
+    var openAIKeywords: String
 
     var openAIRealtimeDelay: DemoOpenAIRealtimeDelay {
         didSet { set(openAIRealtimeDelay.rawValue, for: "openAIRealtimeDelay") }
@@ -414,9 +519,7 @@ final class DemoConfiguration {
         didSet { set(metaLanguage?.rawValue ?? "", for: "metaLanguage") }
     }
 
-    var metaKeywords: String {
-        didSet { set(metaKeywords, for: "metaKeywords") }
-    }
+    var metaKeywords: String
 
     var metaRealtimePartialMode: MetaPartialMode {
         didSet { set(metaRealtimePartialMode.rawValue, for: "metaRealtimePartialMode") }
@@ -434,9 +537,7 @@ final class DemoConfiguration {
         didSet { set(geminiLanguageCodes, for: "geminiLanguageCodes") }
     }
 
-    var geminiCustomVocabulary: String {
-        didSet { set(geminiCustomVocabulary, for: "geminiCustomVocabulary") }
-    }
+    var geminiCustomVocabulary: String
 
     var geminiMode: GeminiTranscriptionMode {
         didSet { set(geminiMode.rawValue, for: "geminiMode") }
@@ -463,9 +564,7 @@ final class DemoConfiguration {
         didSet { set(mistralLanguage, for: "mistralLanguage") }
     }
 
-    var mistralContextBias: String {
-        didSet { set(mistralContextBias, for: "mistralContextBias") }
-    }
+    var mistralContextBias: String
 
     /// Labels speakers in both Mistral file transcripts and realtime sessions.
     var mistralDiarize: Bool {
@@ -504,26 +603,23 @@ final class DemoConfiguration {
     }
 
     /// Recognition terms for Fish Audio realtime sessions.
-    var fishAudioRealtimeTerms: String {
-        didSet { set(fishAudioRealtimeTerms, for: "fishAudioRealtimeTerms") }
-    }
+    var fishAudioRealtimeTerms: String
 
     /// A locale identifier for Apple Speech; empty uses the device's current locale.
     var appleLocaleIdentifier: String {
         didSet { set(appleLocaleIdentifier, for: "appleLocaleIdentifier") }
     }
 
-    var appleContextualStrings: String {
-        didSet { set(appleContextualStrings, for: "appleContextualStrings") }
-    }
+    var appleContextualStrings: String
 
     var appleModelRetention: DemoAppleModelRetention {
         didSet { set(appleModelRetention.rawValue, for: "appleModelRetention") }
     }
 
-    /// Loads persisted provider defaults and keychain-backed secrets.
-    init(defaults: UserDefaults = .standard) {
+    /// Loads nonsecret defaults and removes legacy persisted private text.
+    init(defaults: UserDefaults = .standard, keychain: any DemoCredentialStore = DemoKeychainStore()) {
         self.defaults = defaults
+        self.keychain = keychain
         // A saved Apple selection is unusable on an OS without SpeechAnalyzer, so fall back.
         let savedRealtimeProvider: DemoRealtimeProvider = Self.enumValue(for: "realtimeProvider", default: .elevenLabs, defaults: defaults)
         realtimeProvider = DemoRealtimeProvider.allCases.contains(savedRealtimeProvider) ? savedRealtimeProvider : .elevenLabs
@@ -548,8 +644,8 @@ final class DemoConfiguration {
         openAIRealtimeTranscriptionModel = Self.enumValue(for: "openAIRealtimeTranscriptionModel", default: .gptLiveTranscribe, defaults: defaults)
         openAILanguage = defaults.string(forKey: "openAILanguage") ?? ""
         openAILanguages = defaults.string(forKey: "openAILanguages") ?? ""
-        openAIPrompt = defaults.string(forKey: "openAIPrompt") ?? ""
-        openAIKeywords = defaults.string(forKey: "openAIKeywords") ?? ""
+        openAIPrompt = ""
+        openAIKeywords = ""
         openAIRealtimeDelay = Self.enumValue(for: "openAIRealtimeDelay", default: .low, defaults: defaults)
         openAITemperature = defaults.string(forKey: "openAITemperature") ?? ""
         openAIIncludeLogprobs = defaults.object(forKey: "openAIIncludeLogprobs") as? Bool ?? false
@@ -560,19 +656,19 @@ final class DemoConfiguration {
         metaModel = Self.enumValue(for: "metaModel", default: .museVoiceTranscribe1, defaults: defaults)
         metaMode = Self.enumValue(for: "metaMode", default: .endpointing, defaults: defaults)
         metaLanguage = Self.optionalEnumValue(for: "metaLanguage", defaults: defaults)
-        metaKeywords = defaults.string(forKey: "metaKeywords") ?? ""
+        metaKeywords = ""
         metaRealtimePartialMode = Self.enumValue(for: "metaRealtimePartialMode", default: .cumulative, defaults: defaults)
         geminiFileModel = Self.enumValue(for: "geminiFileModel", default: .transcribe35, defaults: defaults)
         geminiRealtimeModel = Self.enumValue(for: "geminiRealtimeModel", default: .transcribeLive35, defaults: defaults)
         geminiLanguageCodes = defaults.string(forKey: "geminiLanguageCodes") ?? ""
-        geminiCustomVocabulary = defaults.string(forKey: "geminiCustomVocabulary") ?? ""
+        geminiCustomVocabulary = ""
         geminiMode = Self.enumValue(for: "geminiMode", default: .verbatim, defaults: defaults)
         geminiDiarize = defaults.object(forKey: "geminiDiarize") as? Bool ?? false
         geminiWordTimestamps = defaults.object(forKey: "geminiWordTimestamps") as? Bool ?? false
         geminiBackgroundProcessing = defaults.object(forKey: "geminiBackgroundProcessing") as? Bool ?? false
         mistralFileModel = Self.enumValue(for: "mistralFileModel", default: .voxtralMiniTranscribe3, defaults: defaults)
         mistralLanguage = defaults.string(forKey: "mistralLanguage") ?? ""
-        mistralContextBias = defaults.string(forKey: "mistralContextBias") ?? ""
+        mistralContextBias = ""
         mistralDiarize = defaults.object(forKey: "mistralDiarize") as? Bool ?? false
         mistralRealtimeDelay = Self.enumValue(for: "mistralRealtimeDelay", default: .providerDefault, defaults: defaults)
         fishAudioLanguage = defaults.string(forKey: "fishAudioLanguage") ?? ""
@@ -581,185 +677,235 @@ final class DemoConfiguration {
         fishAudioTagAudioEvents = defaults.object(forKey: "fishAudioTagAudioEvents") as? Bool ?? true
         fishAudioRealtimeMode = Self.enumValue(for: "fishAudioRealtimeMode", default: .auto, defaults: defaults)
         fishAudioRealtimeDiarize = defaults.object(forKey: "fishAudioRealtimeDiarize") as? Bool ?? true
-        fishAudioRealtimeTerms = defaults.string(forKey: "fishAudioRealtimeTerms") ?? ""
+        fishAudioRealtimeTerms = ""
         appleLocaleIdentifier = defaults.string(forKey: "appleLocaleIdentifier") ?? ""
-        appleContextualStrings = defaults.string(forKey: "appleContextualStrings") ?? ""
+        appleContextualStrings = ""
         appleModelRetention = Self.enumValue(for: "appleModelRetention", default: .whileInUse, defaults: defaults)
-        loadAPIKeys()
+        resetPrivateText()
+        refreshKeyStatus()
     }
 
-    /// Reads the current secret for a provider, returning an empty string when none is saved.
-    func apiKey(for provider: DemoAPIKeyProvider) -> String {
-        apiKeys[provider] ?? ""
-    }
-
-    /// Saves or clears a provider secret in the keychain.
-    func setAPIKey(_ value: String, for provider: DemoAPIKeyProvider) {
+    /// Changes observable status only after Keychain confirms persistence.
+    func setAPIKey(_ value: String, for provider: DemoAPIKeyProvider) throws {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            try? keychain.delete(account: provider.account)
-            apiKeys[provider] = ""
+            try keychain.delete(account: provider.account)
+            savedKeyProviders.remove(provider)
         } else {
-            try? keychain.save(trimmed, account: provider.account)
-            apiKeys[provider] = trimmed
+            try keychain.save(trimmed, account: provider.account)
+            savedKeyProviders.insert(provider)
         }
+        keychainError = nil
+        credentialRevision += 1
     }
 
-    /// Returns whether a provider namespace currently has a non-empty key.
+    /// Checks attributes only, including migration of existing accessibility attributes.
+    func refreshKeyStatus() {
+        var present: Set<DemoAPIKeyProvider> = []
+        keychainError = nil
+        for provider in DemoAPIKeyProvider.allCases {
+            do {
+                if try keychain.contains(account: provider.account) { present.insert(provider) }
+            } catch {
+                keychainError = "Keychain status is unavailable. Unlock the device and try again."
+            }
+        }
+        savedKeyProviders = present
+    }
+
     func hasAPIKey(for provider: DemoAPIKeyProvider) -> Bool {
-        !apiKey(for: provider).isEmpty
+        savedKeyProviders.contains(provider) && !isResettingAuthorization
+    }
+
+    /// Private prompts and vocabulary last for this app session only.
+    func resetPrivateText() {
+        openAIPrompt = ""
+        openAIKeywords = ""
+        metaKeywords = ""
+        geminiCustomVocabulary = ""
+        mistralContextBias = ""
+        fishAudioRealtimeTerms = ""
+        appleContextualStrings = ""
+        DemoPrivateTextPreferences.clearSavedValues(in: defaults)
     }
 
     /// Returns whether a file provider can be used with the current keychain state.
     func hasAPIKey(for provider: DemoFileProvider) -> Bool {
         guard let apiKeyProvider = provider.apiKeyProvider else { return true }
+        if isRelayEnabled { return isRelayReady }
         return hasAPIKey(for: apiKeyProvider)
     }
 
     /// Returns whether a realtime provider can be used with the current keychain state.
     func hasAPIKey(for provider: DemoRealtimeProvider) -> Bool {
         guard let apiKeyProvider = provider.apiKeyProvider else { return true }
+        if isRelayEnabled { return isRelayReady }
         return hasAPIKey(for: apiKeyProvider)
     }
 
     /// Builds the missing-key message for file workflows.
     func missingAPIKeyMessage(for provider: DemoFileProvider) -> String {
-        "Add a \(provider.title) API key in Settings."
+        if isRelayEnabled { return "Relay authorization is unavailable or expired. Reapply Relay settings with fresh authentication." }
+        return "Add a \(provider.title) API key in Settings."
     }
 
     /// Builds the missing-key message for realtime workflows.
     func missingAPIKeyMessage(for provider: DemoRealtimeProvider) -> String {
-        "Add a \(provider.title) API key in Settings."
+        if isRelayEnabled { return "Relay authorization is unavailable or expired. Reapply Relay settings with fresh authentication." }
+        return "Add a \(provider.title) API key in Settings."
     }
 
-    /// Applies the current demo defaults to the shared `SpeechService`.
-    func apply(to speech: SpeechService) {
-        let elevenLabsKey = apiKey(for: .elevenLabs)
-        speech.elevenLabs = elevenLabsKey.isEmpty ? nil : ElevenLabsConfiguration(
-            apiKey: elevenLabsKey,
-            realtimeModelID: elevenLabsRealtimeModel,
-            fileTranscriptionModelID: elevenLabsFileModel
-        )
+    /// The only Keychain value read and SDK key construction point. Keep static-key auth.
+    func prepare(_ speech: SpeechService, for provider: DemoAPIKeyProvider?) throws {
+        guard !isResettingAuthorization else { throw CancellationError() }
+        releaseAuthorization(from: speech)
+        let key: String
+        if provider != nil, isRelayEnabled {
+            guard isRelayReady, speech === relayService else { throw SpeechFailure(.invalidCredential) }
+            key = ""
+        } else if let provider {
+            guard let value = try keychain.read(account: provider.account), !value.isEmpty else {
+                throw DemoKeychainError.missingKey
+            }
+            key = value
+        } else {
+            key = ""
+        }
+        if provider == .elevenLabs {
+            speech.elevenLabs = ElevenLabsConfiguration(
+                credential: .apiKey(key),
+                realtimeModelID: elevenLabsRealtimeModel,
+                fileTranscriptionModelID: elevenLabsFileModel
+            )
+        }
 
-        let openAIKey = apiKey(for: .openAI)
-        speech.openAI = openAIKey.isEmpty ? nil : OpenAIConfiguration(
-            apiKey: openAIKey,
-            fileTranscriptionModelID: openAIFileModel,
-            realtimeSessionModelID: openAIRealtimeSessionModel,
-            realtimeTranscriptionModelID: openAIRealtimeTranscriptionModel,
-            language: nilIfBlank(openAILanguage),
-            languages: commaSeparatedValues(openAILanguages),
-            prompt: nilIfBlank(openAIPrompt),
-            keywords: commaSeparatedValues(openAIKeywords),
-            temperature: Double(openAITemperature),
-            diarizationChunkingStrategy: openAIDiarization ? .auto : nil,
-            realtimeDelay: openAIRealtimeDelay.speechKitValue,
-            realtimeCommitInterval: 1,
-            timeoutInterval: openAITimeoutMinutes * 60
-        )
+        if provider == .openAI {
+            speech.openAI = OpenAIConfiguration(
+                credential: .apiKey(key),
+                fileTranscriptionModelID: openAIFileModel,
+                realtimeSessionModelID: openAIRealtimeSessionModel,
+                realtimeTranscriptionModelID: openAIRealtimeTranscriptionModel,
+                language: nilIfBlank(openAILanguage),
+                languages: commaSeparatedValues(openAILanguages),
+                prompt: nilIfBlank(openAIPrompt),
+                keywords: commaSeparatedValues(openAIKeywords),
+                temperature: Double(openAITemperature),
+                diarizationChunkingStrategy: openAIDiarization ? .auto : nil,
+                realtimeDelay: openAIRealtimeDelay.speechKitValue,
+                realtimeCommitInterval: 1,
+                timeoutInterval: openAITimeoutMinutes * 60
+            )
+        }
 
-        let grokKey = apiKey(for: .grok)
-        speech.grok = grokKey.isEmpty ? nil : GrokConfiguration(
-            apiKey: grokKey,
-            modelID: grokModel,
-            language: grokLanguage,
-            format: grokFormat,
-            multichannel: grokMultichannel,
-            diarize: grokDiarize,
-            realtimeOptions: GrokRealtimeOptions(
+        if provider == .grok {
+            speech.grok = GrokConfiguration(
+                credential: .apiKey(key),
+                modelID: grokModel,
                 language: grokLanguage,
-                interimResults: true,
-                multichannel: false,
-                channels: 1,
+                format: grokFormat,
+                multichannel: grokMultichannel,
                 diarize: grokDiarize,
-                fillerWords: grokRealtimeFillerWords
-            ),
-            timeoutInterval: grokTimeoutMinutes * 60
-        )
+                realtimeOptions: GrokRealtimeOptions(
+                    language: grokLanguage,
+                    interimResults: true,
+                    multichannel: false,
+                    channels: 1,
+                    diarize: grokDiarize,
+                    fillerWords: grokRealtimeFillerWords
+                ),
+                timeoutInterval: grokTimeoutMinutes * 60
+            )
+        }
 
-        let cohereKey = apiKey(for: .cohere)
-        speech.cohere = cohereKey.isEmpty ? nil : CohereConfiguration(
-            apiKey: cohereKey,
-            modelID: cohereModel,
-            language: cohereLanguage,
-            temperature: Double(cohereTemperature)
-        )
+        if provider == .cohere {
+            speech.cohere = CohereConfiguration(
+                credential: .apiKey(key),
+                modelID: cohereModel,
+                language: cohereLanguage,
+                temperature: Double(cohereTemperature)
+            )
+        }
 
-        let aquaKey = apiKey(for: .aqua)
-        speech.aqua = aquaKey.isEmpty ? nil : AquaConfiguration(
-            apiKey: aquaKey,
-            modelID: aquaModel,
-            language: aquaLanguage
-        )
+        if provider == .aqua {
+            speech.aqua = AquaConfiguration(
+                credential: .apiKey(key),
+                modelID: aquaModel,
+                language: aquaLanguage
+            )
+        }
 
-        let metaKey = apiKey(for: .meta)
-        speech.meta = metaKey.isEmpty ? nil : MetaConfiguration(
-            apiKey: metaKey,
-            modelID: metaModel,
-            mode: metaMode,
-            languageBias: metaLanguageBias,
-            keywords: commaSeparatedValues(metaKeywords),
-            realtimeOptions: MetaRealtimeOptions(
+        if provider == .meta {
+            speech.meta = MetaConfiguration(
+                credential: .apiKey(key),
                 modelID: metaModel,
                 mode: metaMode,
-                partialMode: metaRealtimePartialMode,
                 languageBias: metaLanguageBias,
-                keywords: commaSeparatedValues(metaKeywords)
+                keywords: commaSeparatedValues(metaKeywords),
+                realtimeOptions: MetaRealtimeOptions(
+                    modelID: metaModel,
+                    mode: metaMode,
+                    partialMode: metaRealtimePartialMode,
+                    languageBias: metaLanguageBias,
+                    keywords: commaSeparatedValues(metaKeywords)
+                )
             )
-        )
+        }
 
-        let geminiKey = apiKey(for: .gemini)
-        speech.gemini = geminiKey.isEmpty ? nil : GeminiConfiguration(
-            apiKey: geminiKey,
-            fileTranscriptionModelID: geminiFileModel,
-            realtimeModelID: geminiRealtimeModel,
-            languageCodes: commaSeparatedValues(geminiLanguageCodes),
-            customVocabulary: commaSeparatedValues(geminiCustomVocabulary),
-            mode: geminiMode,
-            diarize: geminiDiarize,
-            timestampGranularities: geminiTimestampGranularities,
-            processingMode: geminiProcessingMode,
-            // `realtimeModelID` above is the source of truth for the Live model;
-            // SpeechService applies it on top of these options.
-            realtimeOptions: GeminiRealtimeOptions(
+        if provider == .gemini {
+            speech.gemini = GeminiConfiguration(
+                credential: .apiKey(key),
+                fileTranscriptionModelID: geminiFileModel,
+                realtimeModelID: geminiRealtimeModel,
                 languageCodes: commaSeparatedValues(geminiLanguageCodes),
                 customVocabulary: commaSeparatedValues(geminiCustomVocabulary),
-                mode: geminiMode
+                mode: geminiMode,
+                diarize: geminiDiarize,
+                timestampGranularities: geminiTimestampGranularities,
+                processingMode: geminiProcessingMode,
+                // `realtimeModelID` above is the source of truth for the Live model;
+                // SpeechService applies it on top of these options.
+                realtimeOptions: GeminiRealtimeOptions(
+                    languageCodes: commaSeparatedValues(geminiLanguageCodes),
+                    customVocabulary: commaSeparatedValues(geminiCustomVocabulary),
+                    mode: geminiMode
+                )
             )
-        )
+        }
 
-        let mistralKey = apiKey(for: .mistral)
-        speech.mistral = mistralKey.isEmpty ? nil : MistralConfiguration(
-            apiKey: mistralKey,
-            fileTranscriptionModelID: mistralFileModel,
-            language: nilIfBlank(mistralLanguage),
-            contextBias: commaSeparatedValues(mistralContextBias),
-            diarize: mistralDiarize,
-            // Diarized sessions drop turn detection and split entries on speaker change.
-            realtimeOptions: MistralRealtimeOptions(
-                targetStreamingDelayMilliseconds: mistralRealtimeDelay.milliseconds,
+        if provider == .mistral {
+            speech.mistral = MistralConfiguration(
+                credential: .apiKey(key),
+                fileTranscriptionModelID: mistralFileModel,
                 language: nilIfBlank(mistralLanguage),
                 contextBias: commaSeparatedValues(mistralContextBias),
-                diarize: mistralDiarize
+                diarize: mistralDiarize,
+                // Diarized sessions drop turn detection and split entries on speaker change.
+                realtimeOptions: MistralRealtimeOptions(
+                    targetStreamingDelayMilliseconds: mistralRealtimeDelay.milliseconds,
+                    language: nilIfBlank(mistralLanguage),
+                    contextBias: commaSeparatedValues(mistralContextBias),
+                    diarize: mistralDiarize
+                )
             )
-        )
+        }
 
-        let fishAudioKey = apiKey(for: .fishAudio)
-        speech.fishAudio = fishAudioKey.isEmpty ? nil : FishAudioConfiguration(
-            apiKey: fishAudioKey,
-            language: nilIfBlank(fishAudioLanguage),
-            timestamps: fishAudioTimestamps,
-            diarize: fishAudioDiarize,
-            tagAudioEvents: fishAudioTagAudioEvents,
-            // Fish Audio bills realtime sessions while the socket is open, idle time included.
-            realtimeOptions: FishAudioRealtimeOptions(
-                mode: fishAudioRealtimeMode,
-                diarize: fishAudioRealtimeDiarize,
-                terms: commaSeparatedValues(fishAudioRealtimeTerms)
+        if provider == .fishAudio {
+            speech.fishAudio = FishAudioConfiguration(
+                credential: .apiKey(key),
+                language: nilIfBlank(fishAudioLanguage),
+                timestamps: fishAudioTimestamps,
+                diarize: fishAudioDiarize,
+                tagAudioEvents: fishAudioTagAudioEvents,
+                // Fish Audio bills realtime sessions while the socket is open, idle time included.
+                realtimeOptions: FishAudioRealtimeOptions(
+                    mode: fishAudioRealtimeMode,
+                    diarize: fishAudioRealtimeDiarize,
+                    terms: commaSeparatedValues(fishAudioRealtimeTerms)
+                )
             )
-        )
+        }
 
-        if #available(iOS 26.0, *) {
+        if provider == nil, #available(iOS 26.0, *) {
             speech.apple = AppleSpeechConfiguration(
                 locale: appleLocale,
                 contextualStrings: commaSeparatedValues(appleContextualStrings),
@@ -903,11 +1049,37 @@ final class DemoConfiguration {
         }
     }
 
-    /// Loads provider secrets into observable state for the current run.
-    private func loadAPIKeys() {
-        for provider in DemoAPIKeyProvider.allCases {
-            apiKeys[provider] = (try? keychain.read(account: provider.account)) ?? ""
+    /// Drops SDK configuration copies without reading credentials back.
+    func releaseAuthorization(from speech: SpeechService) {
+        speech.elevenLabs = nil
+        speech.openAI = nil
+        speech.grok = nil
+        speech.cohere = nil
+        speech.aqua = nil
+        speech.meta = nil
+        speech.gemini = nil
+        speech.mistral = nil
+        speech.fishAudio = nil
+        if #available(iOS 26.0, *) { speech.apple = nil }
+    }
+
+    func resetAuthorization(in speech: SpeechService) async {
+        authorizationResetsInProgress += 1
+        defer { authorizationResetsInProgress -= 1 }
+        releaseAuthorization(from: speech)
+        if speech.relay != nil {
+            await speech.resetSession()
+        } else {
+            await speech.clearCredentials()
         }
+        releaseAuthorization(from: speech)
+    }
+
+    func clearAuthorization(in speech: SpeechService) async {
+        authorizationResetsInProgress += 1
+        defer { authorizationResetsInProgress -= 1 }
+        await speech.clearCredentials()
+        credentialRevision += 1
     }
 
     /// Writes a persisted demo option value.
@@ -946,69 +1118,75 @@ final class DemoConfiguration {
     }
 }
 
-/// Minimal keychain storage used to keep demo API keys out of `UserDefaults`.
-struct DemoKeychainStore {
-    let service: String
+enum DemoFailure {
+    static func message(for error: Error) -> String {
+        if error is CancellationError { return "The operation was cancelled." }
+        if let failure = error as? SpeechFailure {
+            switch failure.category {
+            case .attestationUnsupported:
+                return "App Attest is unavailable on this device or Simulator. Use a supported device, or explicitly select Bearer test authentication."
+            case .invalidCredential, .credentialResolution:
+                return "Authorization is unavailable or expired. Enter fresh credentials in Settings. Relay test tokens last at most five minutes in this app."
+            case .server:
+                return statusMessage(failure.statusCode)
+            default:
+                return failure.errorDescription ?? "The speech request failed."
+            }
+        }
+        if let failure = error as? SpeechError {
+            switch failure {
+            case .uploadFailed(_, let reason), .decodingFailed(_, let reason), .providerFailure(_, let reason):
+                return reasonMessage(reason)
+            case .httpFailure(_, let status): return statusMessage(status)
+            case .providerNotConfigured, .realtimeProviderNotConfigured: return "Configure this provider or Relay in Settings."
+            case .unsupportedCapability, .invalidOptionsForProvider: return "These options are not supported by the selected provider."
+            case .invalidResponse: return "The provider returned an invalid response."
+            case .appleSpeechUnavailable, .appleSpeechNotSupportedOnWatch: return "Apple Speech is unavailable on this device."
+            case .appleSpeechUnsupportedLocale: return "Apple Speech does not support the selected language."
+            case .appleSpeechAssetsUnavailable: return "Prepare Apple Speech language assets in Settings."
+            }
+        }
+        if let failure = error as? FishAudioRealtimeError {
+            switch failure {
+            case .connectionRefused(let status): return statusMessage(status)
+            case .serverError(let code): return statusMessage(code)
+            case .sessionClosed: return "Fish Audio closed the session. Start a new session."
+            case .serverRestarting: return "Fish Audio is restarting. Start a new session."
+            case .handshakeTimedOut: return "Fish Audio did not start the session in time."
+            case .apiKeyMissing: return "Configure Fish Audio or Relay in Settings."
+            case .invalidURL: return "The Fish Audio endpoint is invalid."
+            case .disconnected: return "Fish Audio is disconnected."
+            }
+        }
+        if let failure = error as? SpeechAudioCaptureError {
+            switch failure {
+            case .permissionDenied: return "Microphone permission is required. Enable it in system Settings."
+            case .audioEngineError(let reason): return reasonMessage(reason)
+            }
+        }
+        if let failure = error as? DemoKeychainError { return failure.localizedDescription }
+        if (error as? URLError)?.code == .cancelled { return "The operation was cancelled." }
+        return "The operation failed. Check permissions, connection, and provider settings, then try again."
+    }
 
-    /// Saves a secret for a provider account.
-    func save(_ value: String, account: String) throws {
-        let data = Data(value.utf8)
-        let query = baseQuery(account: account)
-        SecItemDelete(query as CFDictionary)
-
-        var attributes = query
-        attributes[kSecValueData as String] = data
-        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-
-        let status = SecItemAdd(attributes as CFDictionary, nil)
-        guard status == errSecSuccess else {
-            throw DemoKeychainError.unhandledStatus(status)
+    private static func statusMessage(_ status: Int?) -> String {
+        switch status {
+        case 401, 403: "Authorization was rejected. Reauthenticate in Settings; Relay test tokens may have expired."
+        case 402: "The provider requires billing or available credit."
+        case 429: "The request limit was reached. Wait before starting a new request."
+        case 503: "The provider is unavailable or is not configured on the Relay."
+        default: "The server rejected the speech request."
         }
     }
 
-    /// Reads a secret for a provider account.
-    func read(account: String) throws -> String? {
-        var query = baseQuery(account: account)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecItemNotFound {
-            return nil
-        }
-        guard status == errSecSuccess, let data = result as? Data else {
-            throw DemoKeychainError.unhandledStatus(status)
-        }
-        return String(data: data, encoding: .utf8)
-    }
-
-    /// Deletes a secret for a provider account.
-    func delete(account: String) throws {
-        let status = SecItemDelete(baseQuery(account: account) as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw DemoKeychainError.unhandledStatus(status)
-        }
-    }
-
-    /// Builds the shared keychain query attributes for a provider account.
-    private func baseQuery(account: String) -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-    }
-}
-
-/// Keychain failures surfaced by the demo configuration layer.
-enum DemoKeychainError: LocalizedError {
-    case unhandledStatus(OSStatus)
-
-    var errorDescription: String? {
-        switch self {
-        case .unhandledStatus(let status):
-            return "Keychain operation failed with status \(status)."
+    private static func reasonMessage(_ reason: SpeechFailureReason) -> String {
+        switch reason {
+        case .requestFailed: "The speech request failed. Check authentication and connection."
+        case .invalidOptions: "Check the selected provider options."
+        case .invalidResponse, .decodingFailed: "The provider returned an invalid response."
+        case .uploadFailed: "The audio upload failed."
+        case .timedOut: "The speech request timed out."
+        case .sessionEnding: "The speech session is ending. Start a new session."
         }
     }
 }

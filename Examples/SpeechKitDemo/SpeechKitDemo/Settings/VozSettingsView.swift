@@ -49,8 +49,8 @@ struct VozSettingsView: View {
                 )
             case .checkingCache, .loading:
                 elapsedTimeRow
-            case .failed(let message):
-                Text(message)
+            case .failed:
+                Text("VOZ model preparation failed. Check the connection and available storage, then retry.")
                     .font(.caption)
                     .foregroundStyle(.red)
                     .textSelection(.enabled)

@@ -4,7 +4,7 @@ import SwiftUI
 
 /// The unified SpeechKit sample screen that wires shared demo state into focused workflow views.
 struct ContentView: View {
-    @Environment(\.speechService) private var speech
+    @Environment(\.speechService) private var directSpeech
 
     @State private var configuration = DemoConfiguration()
     @State private var recorder = DemoAudioRecorder()
@@ -19,6 +19,8 @@ struct ContentView: View {
     @State private var exportedAudio = RecordedAudioFileDocument()
     @State private var exportedAudioFilename = "speechkit-dictation.wav"
     @State private var audioExportError: String?
+
+    private var speech: SpeechService { configuration.relayService ?? directSpeech }
 
     var body: some View {
         NavigationStack {
@@ -99,6 +101,9 @@ struct ContentView: View {
             .sheet(item: $presentedTranscript) { transcript in
                 TranscriptSheet(transcript: transcript.text, vozResponse: transcript.vozResponse)
             }
+            .onChange(of: isAudioExporterPresented) { _, presented in
+                if !presented { clearAudioExport() }
+            }
             .fileExporter(
                 isPresented: $isAudioExporterPresented,
                 document: exportedAudio,
@@ -107,9 +112,10 @@ struct ContentView: View {
                 onCompletion: handleAudioExportResult
             )
         }
+        .environment(\.speechService, speech)
     }
 
-    /// Applies the saved provider configuration to the shared `SpeechService` and starts the idle input preview when possible.
+    /// Refreshes nonsecret key status and starts the idle input preview when possible.
     private func configureDemo() {
         applyConfiguration()
         startInputPreviewIfAvailable()
@@ -118,10 +124,9 @@ struct ContentView: View {
     /// Stops microphone work owned by the demo when the screen leaves the hierarchy.
     private func stopDemo() {
         inputPreview.stop()
-        _ = recorder.stopRecording()
-        Task {
-            await speech.stopListening()
-        }
+        recorder.discardRecording()
+        exportedAudio = RecordedAudioFileDocument()
+        Task { await configuration.resetAuthorization(in: speech) }
     }
 
     /// Reconciles audio capture state when the unified sample switches between realtime and recorded-upload modes.
@@ -132,29 +137,39 @@ struct ContentView: View {
 
         Task {
             if isRealtimeMode {
-                _ = recorder.stopRecording()
+                recorder.discardRecording()
                 startInputPreviewIfAvailable()
             } else {
                 inputPreview.stop()
-                await speech.stopListening()
+                await configuration.resetAuthorization(in: speech)
                 startInputPreviewIfAvailable()
             }
         }
     }
 
-    /// Reapplies provider settings after sheets mutate persisted configuration.
+    /// Refreshes key metadata after settings close without loading saved values.
     private func applyConfiguration() {
-        configuration.apply(to: speech)
+        configuration.refreshKeyStatus()
     }
 
     /// Opens the standalone file-import transcription workflow.
     private func showFileTranscription() {
-        isFileSheetPresented = true
+        inputPreview.stop()
+        recorder.discardRecording()
+        Task {
+            await configuration.resetAuthorization(in: speech)
+            isFileSheetPresented = true
+        }
     }
 
     /// Opens provider keys and default option controls.
     private func showSettings() {
-        isSettingsPresented = true
+        inputPreview.stop()
+        recorder.discardRecording()
+        Task {
+            await configuration.resetAuthorization(in: speech)
+            isSettingsPresented = true
+        }
     }
 
     /// Starts the passive microphone meter unless a workflow already owns the audio session.
@@ -167,8 +182,13 @@ struct ContentView: View {
     /// Restarts the realtime session after a provider change so the active WebSocket uses the selected configuration.
     private func restartRealtimeIfNeeded() async {
         guard isRealtimeMode, speech.realtimeConnectionState.isWorking else { return }
-        await speech.stopListening()
-        applyConfiguration()
+        await configuration.resetAuthorization(in: speech)
+        do {
+            try configuration.prepare(speech, for: configuration.realtimeProvider.apiKeyProvider)
+        } catch {
+            audioExportError = DemoFailure.message(for: error)
+            return
+        }
         speech.clearTranscript()
         resetRealtimeWords()
         await speech.startListening(provider: configuration.realtimeProvider.speechProvider)
@@ -196,15 +216,21 @@ struct ContentView: View {
             audioExportError = nil
             isAudioExporterPresented = true
         } catch {
-            audioExportError = "Failed to prepare recording: \(error.localizedDescription)"
+            audioExportError = "Failed to prepare recording. \(DemoFailure.message(for: error))"
         }
     }
 
     /// Routes exporter failures back into the active workflow's error surface.
     private func handleAudioExportResult(_ result: Result<URL, Error>) {
+        defer { clearAudioExport() }
         if case .failure(let error) = result {
-            audioExportError = "Failed to save recording: \(error.localizedDescription)"
+            audioExportError = "Failed to save recording. \(DemoFailure.message(for: error))"
         }
+    }
+    private func clearAudioExport() {
+        exportedAudio = RecordedAudioFileDocument()
+        speech.discardRecording()
+        recorder.discardRecording()
     }
 }
 

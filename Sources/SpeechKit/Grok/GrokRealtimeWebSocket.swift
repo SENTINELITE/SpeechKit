@@ -1,6 +1,7 @@
 import Foundation
 
 actor GrokRealtimeWebSocket {
+    private var connectionGeneration = UUID()
     private var webSocketTask: URLSessionWebSocketTask?
     private var session: URLSession?
     private var continuation: AsyncThrowingStream<GrokRealtimeMessage, Error>.Continuation?
@@ -15,8 +16,8 @@ actor GrokRealtimeWebSocket {
 
     /// Builds the WebSocket handshake request for a realtime session.
     ///
-    /// Grok accepts both a long-lived API key and a short-lived token as a
-    /// bearer token.
+    /// Grok API keys and custom proxy credentials use Bearer authorization.
+    /// Native vendor-token mode is unsupported for this capability.
     nonisolated static func makeConnectRequest(
         credential: SpeechResolvedCredential,
         options: GrokRealtimeOptions,
@@ -36,7 +37,7 @@ actor GrokRealtimeWebSocket {
         }
 
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(credential.secret)", forHTTPHeaderField: "Authorization")
+        try credential.authorize(&request, provider: .grok, capability: .realtime)
         return request
     }
 
@@ -47,28 +48,40 @@ actor GrokRealtimeWebSocket {
     ) async throws -> AsyncThrowingStream<GrokRealtimeMessage, Error> {
         let request = try Self.makeConnectRequest(credential: credential, options: options, endpoint: endpoint)
 
-        let session = URLSession(configuration: .default)
+        disconnect()
+        let generation = connectionGeneration
+        let opened = try await SpeechSocketConnection.open(request: request, credential: credential)
+        guard generation == connectionGeneration, !Task.isCancelled else {
+            opened.task.cancel(with: .goingAway, reason: nil)
+            opened.session.invalidateAndCancel()
+            throw CancellationError()
+        }
+        let session = opened.session
+        let task = opened.task
         self.session = session
-
-        let task = session.webSocketTask(with: request)
         self.webSocketTask = task
 
-        task.resume()
+
+        guard webSocketTask === task, !Task.isCancelled else {
+            disconnect(ifCurrent: task)
+            throw CancellationError()
+        }
 
         return AsyncThrowingStream { continuation in
             self.continuation = continuation
 
             continuation.onTermination = { @Sendable _ in
-                Task { await self.disconnect() }
+                Task { await self.disconnect(ifCurrent: task) }
             }
 
             Task {
-                await self.receiveMessages()
+                await self.receiveMessages(from: task)
             }
         }
     }
 
     func sendAudio(_ audioData: Data) async throws {
+        try Task.checkCancellation()
         guard let task = webSocketTask, task.state == .running else {
             throw GrokRealtimeError.disconnected
         }
@@ -81,6 +94,7 @@ actor GrokRealtimeWebSocket {
     }
 
     func disconnect() {
+        connectionGeneration = UUID()
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
         continuation?.finish()
@@ -90,6 +104,7 @@ actor GrokRealtimeWebSocket {
     }
 
     private func sendEncodable<T: Encodable & Sendable>(_ message: T) async throws {
+        try Task.checkCancellation()
         guard let task = webSocketTask, task.state == .running else {
             throw GrokRealtimeError.disconnected
         }
@@ -102,13 +117,19 @@ actor GrokRealtimeWebSocket {
         try await task.send(.string(jsonString))
     }
 
-    private func receiveMessages() async {
-        guard let task = webSocketTask else { return }
+    private func disconnect(ifCurrent task: URLSessionWebSocketTask) {
+        guard webSocketTask === task else { return }
+        disconnect()
+    }
 
-        while task.state == .running {
+    private func receiveMessages(from task: URLSessionWebSocketTask) async {
+        guard webSocketTask === task else { return }
+
+        while task.state == .running && webSocketTask === task {
             do {
                 let message = try await task.receive()
 
+                guard webSocketTask === task else { return }
                 switch message {
                 case .string(let text):
                     guard let data = text.data(using: .utf8) else { continue }
@@ -124,12 +145,13 @@ actor GrokRealtimeWebSocket {
                 if task.state != .running {
                     break
                 }
-                continuation?.finish(throwing: error)
+                guard webSocketTask === task else { return }
+                continuation?.finish(throwing: SpeechErrorBoundary.safe(error))
                 return
             }
         }
 
-        continuation?.finish()
+        if webSocketTask === task { continuation?.finish() }
     }
 
     private func yieldDecodedMessage(_ data: Data) {

@@ -32,7 +32,7 @@ extension SpeechRealtimeConnectionState {
         case .connected: "is connected."
         case .listening: "is streaming transcript text."
         case .stopping: "is stopping."
-        case .error(let message): "failed: \(message)"
+        case .error: "failed. Check the error message and Settings."
         }
     }
 }

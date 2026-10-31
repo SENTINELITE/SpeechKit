@@ -22,19 +22,17 @@ public final class ElevenLabsService {
     // MARK: - Configuration
     
     /// The credential used for realtime transcription.
-    public var credential: SpeechCredential
-    /// The ElevenLabs API key used for realtime transcription.
-    ///
-    /// Reading this property returns the key for a ``SpeechCredential/apiKey(_:)``
-    /// credential and an empty string for a ``SpeechCredential/token(_:)``
-    /// credential. Writing it replaces ``credential`` with
-    /// ``SpeechCredential/apiKey(_:)``.
-    public var apiKey: String {
-        get { credential.staticAPIKey }
-        set { credential = .apiKey(newValue) }
+    var credential: SpeechCredential { didSet { if oldValue != credential { configurationDidChange() } } }
+    /// The configured authorization mode, without exposing its value.
+    public var credentialKind: SpeechCredential.Kind { credential.kind }
+    public var hasCredential: Bool { credential.isConfigured }
+    public func setCredential(_ credential: SpeechCredential) {
+        configurationDidChange()
+        self.credential = credential
     }
+
     /// An override for the ElevenLabs realtime WebSocket endpoint, or `nil` to use the vendor default.
-    public var realtimeEndpoint: URL?
+    public var realtimeEndpoint: URL? { didSet { if oldValue != realtimeEndpoint { configurationDidChange() } } }
     /// The ElevenLabs realtime model used when listening.
     public var realtimeModelID: ElevenLabsModelID
     
@@ -43,6 +41,11 @@ public final class ElevenLabsService {
     private let audioManager = AudioCaptureManager()
     private let webSocket = ElevenLabsWebSocket()
     private var listeningTask: Task<Void, Never>?
+    private var authorizationTask: Task<SpeechResolvedCredential, Error>?
+    private var reconfigurationTask: Task<Void, Never>?
+    public var credentialPolicy: SpeechCredentialPolicy = .allowStaticKeys {
+        didSet { if oldValue != credentialPolicy { configurationDidChange() } }
+    }
     private var lifecycleRunID = UUID()
     private static let logger = Logger(subsystem: "com.sentinelite.SpeechKit", category: "ElevenLabsRealtime")
     // MARK: - Types
@@ -66,6 +69,12 @@ public final class ElevenLabsService {
         audioManager.currentLevel
     }
 
+    /// Recording retention after a session stops. The default preserves export after stop.
+    public var recordingRetention: SpeechRecordingRetention {
+        get { audioManager.recordingRetention }
+        set { audioManager.recordingRetention = newValue }
+    }
+
     /// The latest realtime microphone recording as WAV data, if capture has produced audio.
     public var realtimeRecordingData: Data? {
         audioManager.recordedWAVData
@@ -77,9 +86,11 @@ public final class ElevenLabsService {
     public init(
         apiKey: String = "",
         realtimeModelID: ElevenLabsModelID = .scribeV2Realtime,
-        realtimeEndpoint: URL? = nil
+        realtimeEndpoint: URL? = nil,
+        credentialPolicy: SpeechCredentialPolicy = .allowStaticKeys
     ) {
         self.credential = .apiKey(apiKey)
+        self.credentialPolicy = credentialPolicy
         self.realtimeModelID = realtimeModelID
         self.realtimeEndpoint = realtimeEndpoint
     }
@@ -88,9 +99,11 @@ public final class ElevenLabsService {
     public init(
         credential: SpeechCredential,
         realtimeModelID: ElevenLabsModelID = .scribeV2Realtime,
-        realtimeEndpoint: URL? = nil
+        realtimeEndpoint: URL? = nil,
+        credentialPolicy: SpeechCredentialPolicy = .allowStaticKeys
     ) {
         self.credential = credential
+        self.credentialPolicy = credentialPolicy
         self.realtimeModelID = realtimeModelID
         self.realtimeEndpoint = realtimeEndpoint
     }
@@ -101,6 +114,22 @@ public final class ElevenLabsService {
     public func startListening() async {
         guard !connectionState.isLifecycleActive else { return }
 
+        let runID = beginLifecycleRun()
+        defer {
+            if isCurrentLifecycleRun(runID) {
+                authorizationTask = nil
+                if Task.isCancelled { configurationDidChange() }
+            }
+        }
+        let credentialPolicy = credentialPolicy
+        let credential = credential
+        let realtimeModelID = realtimeModelID
+        let realtimeEndpoint = realtimeEndpoint
+        connectionState = .connecting
+        let teardown = reconfigurationTask
+        await teardown?.value
+        guard isCurrentLifecycleRun(runID), !Task.isCancelled else { return }
+
         guard credential.isConfigured else {
             connectionState = .error("API key not configured")
             lastError = ElevenLabsError.apiKeyMissing
@@ -109,28 +138,32 @@ public final class ElevenLabsService {
 
         let resolvedCredential: SpeechResolvedCredential
         do {
-            resolvedCredential = try await credential.resolved()
+            try credential.validate(provider: .elevenLabs, capability: .realtime, endpoint: realtimeEndpoint ?? ElevenLabsWebSocket.defaultURL, policy: credentialPolicy)
+            try SpeechResolvedCredential.validateSecret(credential.staticAPIKey.isEmpty && credential.kind != .apiKey ? "resolver" : credential.staticAPIKey)
+            let task = Task { try await credential.resolved(for: .elevenLabs, capability: .realtime, model: realtimeModelID.rawValue, endpoint: realtimeEndpoint ?? ElevenLabsWebSocket.defaultURL, policy: credentialPolicy) }
+            authorizationTask = task
+            resolvedCredential = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+            guard isCurrentLifecycleRun(runID), !Task.isCancelled else { return }
+            authorizationTask = nil
         } catch {
-            connectionState = .error(error.localizedDescription)
-            lastError = error
+            guard isCurrentLifecycleRun(runID), !Task.isCancelled, !(error is CancellationError) else { return }
+            connectionState = .error(SpeechErrorBoundary.safe(error).localizedDescription)
+            lastError = SpeechErrorBoundary.safe(error)
             return
         }
 
-        let runID = beginLifecycleRun()
         connectionState = .connecting
         partialTranscriptText = ""
         lastError = nil
         
         let hasPermission = await audioManager.requestPermission()
-        guard isCurrentLifecycleRun(runID) else { return }
+        guard isCurrentLifecycleRun(runID), !Task.isCancelled else { return }
         guard hasPermission else {
             connectionState = .error("Microphone permission denied")
             lastError = ElevenLabsError.permissionDenied
             return
         }
 
-        let realtimeModelID = realtimeModelID
-        let realtimeEndpoint = realtimeEndpoint
 
         listeningTask = Task {
             do {
@@ -139,7 +172,7 @@ public final class ElevenLabsService {
                     modelID: realtimeModelID,
                     endpoint: realtimeEndpoint
                 )
-                guard isCurrentLifecycleRun(runID) else {
+                guard isCurrentLifecycleRun(runID), !Task.isCancelled else {
                     await webSocket.disconnect()
                     return
                 }
@@ -148,7 +181,7 @@ public final class ElevenLabsService {
                 
                 for try await message in messageStream {
                     if Task.isCancelled { break }
-                    guard isCurrentLifecycleRun(runID) else { break }
+                    guard isCurrentLifecycleRun(runID), !Task.isCancelled else { break }
                     
                     if let startedSendTask = handleMessage(message, runID: runID, startsCapture: true) {
                         sendTask = startedSendTask
@@ -159,8 +192,8 @@ public final class ElevenLabsService {
                 
             } catch {
                 if !Task.isCancelled, isCurrentLifecycleRun(runID) {
-                    lastError = error
-                    connectionState = .error(error.localizedDescription)
+                    lastError = SpeechErrorBoundary.safe(error)
+                    connectionState = .error(SpeechErrorBoundary.safe(error).localizedDescription)
                 }
             }
             
@@ -170,6 +203,10 @@ public final class ElevenLabsService {
     
     /// Stops realtime microphone transcription and disconnects the WebSocket.
     public func stopListening() async {
+        authorizationTask?.cancel()
+        authorizationTask = nil
+        if listeningTask == nil { invalidateLifecycleRun() }
+
         guard connectionState.isLifecycleActive || listeningTask != nil || audioManager.isCapturing else {
             connectionState = .disconnected
             return
@@ -230,7 +267,7 @@ public final class ElevenLabsService {
                 }
             } catch {
                 if isCurrentLifecycleRun(runID) {
-                    lastError = error
+                    lastError = SpeechErrorBoundary.safe(error)
                     connectionState = .error("Failed to start audio capture")
                 }
                 return nil
@@ -257,8 +294,8 @@ public final class ElevenLabsService {
                 partialTranscriptText = ""
             }
 
-        case .unknown(let type):
-            Self.logger.debug("Ignoring unknown ElevenLabs realtime message type: \(type, privacy: .public)")
+        case .unknown:
+            Self.logger.debug("Ignoring unknown ElevenLabs realtime message")
         }
 
         return nil
@@ -277,7 +314,7 @@ public final class ElevenLabsService {
             } catch {
                 if !Task.isCancelled, isCurrentLifecycleRun(runID) {
                     await MainActor.run {
-                        lastError = error
+                        lastError = SpeechErrorBoundary.safe(error)
                     }
                 }
                 break
@@ -308,4 +345,44 @@ public final class ElevenLabsService {
         lifecycleRunID == runID
     }
 
+
+    private func configurationDidChange() {
+        invalidateLifecycleRun()
+        authorizationTask?.cancel()
+        authorizationTask = nil
+        listeningTask?.cancel()
+        listeningTask = nil
+        audioManager.stopCapture()
+        connectionState = .disconnected
+        lastError = nil
+        let previous = reconfigurationTask
+        reconfigurationTask = Task { [webSocket] in
+            await previous?.value
+            await webSocket.disconnect()
+        }
+    }
+
+    /// Replaces authorization and its destination together, cancelling the previous session.
+    public func reconfigure(credential: SpeechCredential, realtimeEndpoint: URL? = nil) async {
+        configurationDidChange()
+        self.credential = credential
+        self.realtimeEndpoint = realtimeEndpoint
+        await reconfigurationTask?.value
+    }
+
+    /// Cancels local work. Ordinary stop retains configured authorization and recordings.
+    public func resetSession(discardTranscript: Bool = true, discardRecording: Bool = true) async {
+        configurationDidChange()
+        await reconfigurationTask?.value
+        lastError = nil
+        if discardTranscript { clearTranscript() }
+        if discardRecording { self.discardRecording() }
+    }
+
+    public func clearCredentials() async {
+        credential = .apiKey("")
+        await resetSession()
+    }
+
+    public func discardRecording() { audioManager.discardRecording() }
 }

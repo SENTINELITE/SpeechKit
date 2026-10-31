@@ -4,7 +4,7 @@ Use security-scoped overloads for files returned by document pickers.
 
 ## Overview
 
-When a platform document picker returns a security-scoped URL, use the matching `securityScopedURL` overload. SpeechKit starts and stops access around the upload.
+When a platform document picker returns a security-scoped URL, use the matching `securityScopedURL` overload. SpeechKit starts and stops access around the upload. This grants local file access, not consent to transmit the audio; choose credentials and server retention separately in <doc:ShippingInProduction>. Reset and recording discard never delete caller-owned files.
 
 ```swift
 let text = try await speech.transcribeAudioFile(

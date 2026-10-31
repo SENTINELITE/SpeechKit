@@ -6,6 +6,9 @@ on:
       - main
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -15,16 +18,44 @@ env:
   XCODE_VERSION: "26.2"
 
 jobs:
+  secret-scan:
+    name: Redacted secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout all available history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install pinned scanner
+        env:
+          GOBIN: ${{ runner.temp }}/gitleaks-bin
+        # gitleaks v8.30.0, peeled commit from its annotated tag.
+        run: go install github.com/zricethezav/gitleaks/v8@6eaad039603a4de39fddd1cf5f727391efe9974e
+
+      - name: Verify redaction and custom-ref coverage
+        env:
+          GITLEAKS_BIN: ${{ runner.temp }}/gitleaks-bin/gitleaks
+        run: python3 Examples/SpeechKitDemo/Verification/check-secret-scan.py
+
+      - name: Scan available refs without exposing findings
+        env:
+          GITLEAKS_BIN: ${{ runner.temp }}/gitleaks-bin/gitleaks
+        run: bash Examples/SpeechKitDemo/Verification/scan-secrets.sh
+
   swift-package:
     name: SwiftPM macOS build/test
     runs-on: macos-26
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Select Xcode
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@1242409711ff5721add51979e9e11e23ebb7e5a4 # v1
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
 
@@ -33,6 +64,9 @@ jobs:
           xcodebuild -version
           xcode-select -p
           swift --version
+
+      - name: Check demo storage helpers
+        run: bash Examples/SpeechKitDemo/Verification/check-helpers.sh
 
       - name: Build with warnings as errors
         run: swift build -Xswiftc -warnings-as-errors
@@ -54,7 +88,7 @@ jobs:
             --output-dir '${{ runner.temp }}/SpeechKit.doccarchive' \
             --fallback-display-name SpeechKit \
             --fallback-bundle-identifier com.sentinelite.SpeechKit \
-            --fallback-bundle-version 2.1.0 \
+            --fallback-bundle-version 3.0.0 \
             --warnings-as-errors
 
   platform-build:
@@ -80,10 +114,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Select Xcode
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@1242409711ff5721add51979e9e11e23ebb7e5a4 # v1
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
 
@@ -108,10 +144,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Select Xcode
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@1242409711ff5721add51979e9e11e23ebb7e5a4 # v1
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
 

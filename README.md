@@ -3,7 +3,7 @@
 [![CI](https://github.com/SENTINELITE/SpeechKit/actions/workflows/ci.yml/badge.svg)](https://github.com/SENTINELITE/SpeechKit/actions/workflows/ci.yml)
 ![Swift](https://img.shields.io/badge/Swift-6.2-orange.svg)
 ![Platforms](https://img.shields.io/badge/platforms-iOS%2018%20%7C%20macOS%2015%20%7C%20watchOS%2011%20%7C%20visionOS%202-lightgrey.svg)
-![Status](https://img.shields.io/badge/status-2.1.0-blue.svg)
+![Status](https://img.shields.io/badge/status-3.0.0-blue.svg)
 
 SpeechKit is a Swift package for adding speech-to-text to Swift and SwiftUI apps with a small async/await API.
 
@@ -27,7 +27,7 @@ It supports two workflows:
 
 ## Status
 
-SpeechKit `2.1.0` is the current stable release. 2.1 adds the Mistral and Fish Audio providers. It is a minor release: the provider enums gained `mistral` and `fishAudio` cases, which affects exhaustive switches in adopting code, and every other change is additive. The 2.0 line added Meta and Gemini providers, short-lived credentials, and endpoint overrides. Future source-breaking API changes will ship in a new major version.
+SpeechKit `3.0.0` is the release documented here. It includes the never-published 2.1.0 Mistral and Fish Audio work, opaque credentials, explicit auth modes, and the relay client. The last published version is 2.0.1. See [the changelog](CHANGELOG.md) for source breaks and migration steps.
 
 ## Sponsor the project
 > <img width="1500" height="500" alt="SpeechKit" src="https://github.com/user-attachments/assets/3f3b68e7-37fb-46c7-a139-2b513b2e184c" />
@@ -68,7 +68,13 @@ Add SpeechKit as a Swift Package dependency in Xcode:
 1. Open your app project.
 2. Select `File > Add Package Dependencies...`.
 3. Enter `https://github.com/SENTINELITE/SpeechKit.git`.
-4. Add the `SpeechKit` library to your app target.
+4. Select version `3.0.0` or later within the 3.x line, then add the `SpeechKit` library to your app target.
+
+For a package manifest:
+
+```swift
+.package(url: "https://github.com/SENTINELITE/SpeechKit.git", from: "3.0.0")
+```
 
 Then import it where you need speech features:
 
@@ -102,70 +108,227 @@ If your app uses SpeechKit, open a pull request adding it here with a short desc
 
 ## API Key Safety
 
-The examples below use placeholder API keys so the setup is easy to follow. Do not ship provider API keys directly in a client app, especially for apps distributed through the App Store or outside your team. Use your own backend proxy, a short-lived token service when the provider supports it, or another server-side credential boundary.
+Choose who owns the vendor account before choosing an auth mode:
 
-Provider references:
+- **Bring your own key:** the user supplies a key for their own vendor account. Use `.apiKey(...)`, keep it out of logs, and store it in Keychain if it must persist. Never bundle your app's vendor key.
+- **Native vendor token:** your authenticated backend mints a short-lived token for a documented provider, capability, and model. Use `.vendorToken(SpeechTokenResolver { ... })` only for supported rows below.
+- **SpeechKit Relay:** your app pays for transcription, or the provider has no suitable native token. Keep vendor keys on a relay you deploy and enforce authorization, quotas, model allowlists, and retention there. Fetching a permanent vendor key from a backend does not make shipping it to clients safe.
 
-- xAI warns not to expose API keys in client-side code in its [Speech to Text documentation](https://docs.x.ai/developers/model-capabilities/audio/speech-to-text).
-- OpenAI documents speech-to-text authentication and request patterns in its [Speech to text guide](https://platform.openai.com/docs/guides/speech-to-text).
-- Meta documents Muse Voice Transcribe authentication in its [speech-to-text documentation](https://dev.meta.ai/docs/speech-to-text/).
-- Google documents API key handling and ephemeral tokens in its [Gemini API key guide](https://ai.google.dev/gemini-api/docs/api-key).
-- Mistral documents Voxtral transcription and its API key header in its [speech-to-text documentation](https://docs.mistral.ai/studio/audio/speech-to-text/overview).
-- Fish Audio documents bearer authentication for file transcription in its [Speech to Text API reference](https://docs.fish.audio/api-reference/endpoint/openapi-v1/speech-to-text) and for realtime sessions in its [Realtime STT WebSocket reference](https://docs.fish.audio/api-reference/endpoint/websocket/asr-realtime).
+### Start with a relay
 
-The Gemini Live WebSocket carries the API key in the URL query string, so a backend proxy or Google's ephemeral tokens are the safer production path for realtime Gemini sessions. When you pass a Google ephemeral token, SpeechKit sends it in an `Authorization: Token` header instead and keeps it out of the URL.
-
-Fish Audio has no short-lived tokens. A Fish Audio key in a shipped app can be extracted and used to run transcription on your account, so route Fish Audio traffic through your own proxy. A `.token` credential works, but SpeechKit sends its value as the same bearer secret as an API key.
-
-### Short-Lived Tokens
-
-Every keyed provider accepts a `SpeechCredential` instead of a raw key. A `SpeechTokenProvider` is called once per file transcription request and once per realtime session, so your app never keeps a long-lived key in memory.
+In a SwiftUI app, one modifier creates the service and places it in the environment:
 
 ```swift
-let speech = SpeechService(
-    elevenLabs: ElevenLabsConfiguration(
-        credential: .token(SpeechTokenProvider { try await backend.fetchElevenLabsToken() })
-    ),
-    openAI: OpenAIConfiguration(
-        credential: .token(SpeechTokenProvider { try await backend.fetchOpenAIClientSecret() })
-    )
-)
+import SpeechKit
+import SwiftUI
+
+@main
+struct MyApp: App {
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .speechKit(relay: SpeechRelay(url: URL(string: "https://speech.example.workers.dev")!))
+        }
+    }
+}
+
+struct ContentView: View {
+    @Environment(\.speechTranscriber) private var speech
+
+    var body: some View {
+        Button("Listen") { Task { await speech.startListening(provider: .openAI) } }
+    }
+}
 ```
 
-`apiKey` still works everywhere it worked before. Reading it returns the key for an API-key credential and an empty string for a token credential; writing it replaces the credential with an API key.
-
-First-party short-lived tokens:
-
-| Provider | Short-lived token |
-| --- | --- |
-| ElevenLabs | Single-use token for realtime Scribe |
-| OpenAI | Ephemeral client secret for Realtime |
-| Google Gemini | Ephemeral token for Live (Live only, not REST) |
-| Aqua, Cohere, Grok, Meta, Mistral, Fish Audio | No first-party token: use your own proxy |
-
-Google ephemeral tokens only authorize Gemini Live. A token used for Gemini file transcription must be an OAuth access token or a credential your own proxy accepts, because SpeechKit sends it as `Authorization: Bearer`.
-
-### Proxy Endpoints
-
-When a provider has no short-lived token, route the traffic through your own proxy and let the proxy inject the vendor key. Every keyed configuration takes a `fileEndpoint`, providers with realtime take a `realtimeEndpoint`, and Gemini also takes a `filesEndpoint` for the Files API upload URL. SpeechKit still appends the query items it needs, so an override may carry its own query string.
+`.speechKit(...)` creates the service once and keeps it for the life of that view, like `@State`; later argument changes are ignored. It also accepts direct provider configurations, such as `.speechKit(openAI: OpenAIConfiguration(credential: .apiKey(savedKey)))`, or an existing service with `.speechKit(service)`. Settings screens can read `@Environment(\.speechService)` to change configuration. Outside SwiftUI, create the service directly:
 
 ```swift
-let speech = SpeechService(
-    grok: GrokConfiguration(
-        credential: .token(SpeechTokenProvider { try await backend.fetchProxyToken() }),
-        fileEndpoint: URL(string: "https://api.example.com/grok/stt"),
-        realtimeEndpoint: URL(string: "wss://api.example.com/grok/stt")
-    ),
-    gemini: GeminiConfiguration(
-        credential: .token(SpeechTokenProvider { try await backend.fetchProxyToken() }),
-        fileEndpoint: URL(string: "https://api.example.com/gemini/v1beta/interactions"),
-        filesEndpoint: URL(string: "https://api.example.com/gemini/upload/v1beta/files"),
-        realtimeEndpoint: URL(string: "wss://api.example.com/gemini/live")
-    )
-)
+let speech = SpeechService(relay: SpeechRelay(url: URL(string: "https://speech.example.workers.dev")!))
 ```
 
-A `nil` endpoint keeps the vendor default.
+The sibling [speechkit-relay repository](https://github.com/SENTINELITE/speechkit-relay) is a self-hosted Cloudflare Worker template, **not yet published**. Until publication, use the local `../speechkit-relay` checkout. Its [README](../speechkit-relay/README.md) covers deployment and login configuration; its [contract](../speechkit-relay/docs/CONTRACT.md) defines routes and request proofs. This snippet does not deploy or validate a server.
+
+App Attest and `.proxyAll` are the defaults. SpeechKit registers the device key, obtains a short-lived relay ticket, and adds fresh proofs to protected requests and WebSocket upgrades. Enable the entitlement and configure your app identity on the server. Unsupported devices fail closed; explicitly choose bearer authentication if your product allows that fallback. `.none` is for loopback development only, with the template's `none-dev` mode and explicit insecure-development setting. Do not expose it publicly.
+
+Relay file uploads must contain PCM/IEEE-float WAV, FLAC, Ogg Opus/Vorbis, MP3, or the relay's restricted AAC M4A/MP4 subset, and the target provider must accept the format. SpeechKit detects containers from bytes. `SpeechRelay(url: relayURL, optimizedUploads: .on)` is the default. Supported compressed audio and mono WAV at 16 kHz or lower pass through unchanged. AAC requires one audio track and a `moov` header before `mdat`. Local MP4 checks mirror the Worker's structural rules, including box allowlists, aligned `ftyp`, codec descriptors, sample tables, nonoverlapping byte ranges, at most 64 all-zero unreferenced bytes, and an optional single nonnegative unit-rate edit contained within the media timeline. AAC needing layout or track changes is repackaged using AVFoundation passthrough, keeping only the first audio track and moving the header ahead of audio. Repackaged output must pass that validator or conversion takes over. Server-configured limits still apply independently.
+
+Each MP4 sample must contain exactly one AAC-LC access unit (`raw_data_block`), checked by an AAC syntax walker before the sample is accepted locally or forwarded by the Worker. Duration is billed as 1,024 samples per access unit at the core rate. This is syntax validation, not full decoding: SBR/PS extension payloads are skipped by length, 960-sample configurations are rejected, and samples over 8,192 bytes are rejected. Files that fail convert on-device when optimization is on, or fail with `unsupportedMediaType` before any network request when it is off.
+
+ALAC, CAF, AIFF, WebM and other unmeterable or unaccepted formats, failed AAC repackaging, and PCM WAV above 16 kHz or with multiple channels convert to 16 kHz mono FLAC when the provider and local encoder support it, otherwise PCM16 WAV. OpenAI, Meta, and explicit raw PCM imports use WAV for conversion. Provider upload-size limits apply to the prepared output, not a larger source that needs conversion. Local imports have a separate 512 MiB source-byte ceiling; conversion and repackaging are bounded to one hour and 128 MiB of output. Mislabeled supported audio receives a correctly named temporary copy only when optimization is on. Originals are never modified. Temporary files retain owner-only permissions, platform file protection, and cleanup after success, failure or cancellation.
+
+AAC/M4A acceptance was checked against official documentation on October 30, 2026. Unverified providers convert rather than assuming support. Multipart uploads use `audio.m4a` and `audio/mp4`; Gemini uses its documented `audio/m4a` MIME type.
+
+| Provider | AAC/M4A uploads | Official documentation |
+| --- | --- | --- |
+| OpenAI | Verified | [Speech to text](https://developers.openai.com/api/docs/guides/speech-to-text) |
+| ElevenLabs | Verified | [Transcription formats](https://elevenlabs.io/docs/overview/capabilities/speech-to-text) |
+| Grok | Verified | [Speech to text formats](https://docs.x.ai/developers/model-capabilities/audio/speech-to-text) |
+| Aqua | Verified | [Transcription API](https://aquavoice.com/docs/api) |
+| Gemini | Verified, `audio/m4a` | [Audio understanding](https://ai.google.dev/gemini-api/docs/audio) |
+| Fish Audio | Verified | [Input audio](https://docs.fish.audio/features/speech-to-text#input-audio) |
+| Mistral | Not verified; converts | [Audio formats](https://docs.mistral.ai/studio/audio/specs-and-limits/audio-formats) |
+| Cohere | Not verified; converts | [Transcription API](https://docs.cohere.com/reference/create-audio-transcription) |
+| Meta | WAV-only | [Speech to text](https://dev.meta.ai/docs/speech-to-text/) |
+
+Meta `PCM_16KHZ`/`PCM_24KHZ` and Grok mono 16-bit little-endian PCM imports become WAV, with raw-decoder request options removed. Grok mu-law, A-law, and multichannel raw modes are refused. Set `SpeechRelay(url: relayURL, optimizedUploads: .off)` to upload original bytes only, or reject unsupported content before credential resolution or network I/O with `SpeechFailure.Category.unsupportedMediaType`. This also refuses AAC requiring repackaging and video-bearing files. Meterable high-rate or stereo WAV remains unchanged with optimization off. A relay HTTP 415 with error code `unsupported_media_type` has the same category and is not retried. Direct provider uploads are unaffected.
+
+Conversion runs off the main actor, supports cancellation, and removes protected temporary files after success or error. It never changes or removes the source file. WAV conversion writes a canonical 44-byte PCM16 header with only `fmt ` and `data` chunks, without Apple's `FLLR` padding. Generated and pass-through WAV files are checked against the relay's strict RIFF grammar locally before upload, not just reopened with AVFoundation.
+
+Every relay import has an unconditional 57,600,000-output-frame ceiling at 16 kHz, equivalent to 60 minutes, and a 128 MiB output-file and decoded-PCM byte ceiling. Conversion checks actual input/output frames and output bytes incrementally; provider limits can be tighter. These checks run before whole-file upload reads. OpenAI retains its 25 MiB upload limit; Meta retains 32 MiB and ten minutes. Mistral now enforces 500,000,000 bytes and 60 minutes for direct and relay uploads, based on its published known limitations. `audioTooLarge`, `audioTooLong`, and `audioNormalizationFailed` are safe relay `SpeechFailure` categories. Only formats AVFoundation can decode locally can be normalized. Relay quotas, multipart/base64 overhead, and independent server validation can impose tighter limits. Other direct credentials, including native vendor-token uploads, keep their previous behavior.
+
+Use an existing login with App Attest when you need per-user quotas. The closure is your adapter to a Convex Auth, Clerk, or other login client, not an API supplied by SpeechKit:
+
+```swift
+@MainActor
+func makeAuthenticatedSpeechService(
+    accountID: String,
+    fetchLoginJWT: @escaping @Sendable () async throws -> String
+) -> SpeechService {
+    SpeechService(
+        relay: SpeechRelay(
+            url: URL(string: "https://speech.example.workers.dev")!,
+            authentication: .appAttestAndBearer(SpeechTokenResolver { _ in
+                try await fetchLoginJWT()
+            }),
+            appAttestAccountID: accountID
+        ),
+        credentialPolicy: .relayOnly
+    )
+}
+```
+
+For bearer-only login, use `.bearer(resolver)` on `SpeechRelay` and `AUTH_MODE=bearer` on the server. Combined login uses `AUTH_MODE=both`. Validate JWT signature, issuer, audience, expiry, and subject. Clerk may require a JWT template with an explicit audience; match Convex Auth's actual issuer and JWKS settings rather than copying placeholders blindly.
+
+Use a stable, nonsecret account ID, scoped to your login issuer, and rebuild the service when switching accounts. The Keychain lookup hashes that ID together with the relay URL. The relay permanently binds each key to its first subject. `clearCredentials()` preserves local attestation identity so signing back into the same account can reuse it. With no account ID, stop operations and call `try await relay.resetAppAttestKey()` before switching accounts. Reset forgets the local identifier, waits for outstanding assertions, and registers a new key on next use. It does not revoke server keys, tickets, or active sessions. Apple invalid-key errors and explicit `/session` attestation rejections allow one automatic re-registration per operation. Uploaded audio and uncertain requests are never replayed for this recovery.
+
+### Give views only transcription access
+
+Keep the `SpeechService` and credential configuration at your composition root. New views can receive only `SpeechTranscription`:
+
+```swift
+import SwiftUI
+import SpeechKit
+
+@MainActor
+struct TranscriptionView: View {
+    @Environment(\.speechTranscriber) private var transcriber
+
+    var body: some View {
+        VStack {
+            Text(transcriber.transcriptText)
+            Text(transcriber.partialTranscriptText)
+            Button("Listen") {
+                Task { await transcriber.startListening(provider: .openAI) }
+            }
+            Button("Stop") {
+                Task { await transcriber.stopListening() }
+            }
+        }
+    }
+}
+
+@MainActor
+func transcriptionContent(speech: SpeechService) -> some View {
+    TranscriptionView().environment(\.speechTranscriber, speech.transcriber)
+}
+```
+
+`SpeechTranscription` also exposes read-only `connectionState`, `transcriptEntries`, and `lastError`, plus `transcribeAudioFile(provider:file:options:)` and its `securityScopedURL:` overload, returning text. It exposes no service, credential, relay, or configuration setters. Observed reads still update SwiftUI. Existing `@Environment(\.speechService)` behavior is unchanged; without explicit narrow injection, `speechTranscriber` uses that service's capability.
+
+### Verified auth matrix
+
+Provider contracts reviewed on **2026-10-29**; SDK placement checked against the local 3.0 source on **2026-10-30**. This is documentation and request-builder evidence, not an authenticated vendor canary or proof of a deployed relay. "None documented" applies to the named STT route, not every product from that vendor.
+
+| Provider / capability | Native token and lifetime | SpeechKit 3.0 placement |
+| --- | --- | --- |
+| ElevenLabs file | `POST /v1/single-use-token/batch_scribe`; 15 minutes, single use | `.vendorToken`, `?token=<token>` on `/v1/speech-to-text` |
+| ElevenLabs realtime | `POST /v1/single-use-token/realtime_scribe`; 15 minutes, single use | `.vendorToken`, `?token=<token>` on `/v1/speech-to-text/realtime`; reconnect needs a fresh token |
+| OpenAI file | None documented for `/v1/audio/transcriptions` | `.apiKey`, `Authorization: Bearer`; Realtime secrets do not authorize files |
+| OpenAI realtime transcription | `POST /v1/realtime/client_secrets` with `session.type: "transcription"`; default 600 seconds, configurable 10–7200, reusable until expiry | `.vendorToken`, `Authorization: Bearer` on `/v1/realtime?intent=transcription`, without a model query |
+| Gemini file / Files API | Live tokens are unsupported; Google OAuth is a separate IAM contract | `.apiKey`, `x-goog-api-key`; `.bearer` for separately authorized Google OAuth, `Authorization: Bearer` |
+| Gemini Live | `POST /v1beta/auth_tokens`; default 60 seconds to start, 30 minutes for messages, one use; constraints can lock setup fields | `.vendorToken`, `Authorization: Token` on `v1beta/...GenerativeService.BidiGenerateContentConstrained` |
+| Mistral file | None documented for `/v1/audio/transcriptions` | `.apiKey`, `Authorization: Bearer` |
+| Mistral realtime | `POST /v1/client/sessions`, realtime purpose and model; about 900 seconds, reusable, model-scoped | `.vendorToken`, `Sec-WebSocket-Protocol: realtime, <token>`; SDK allows only `.voxtralMiniTranscribeRealtime2602`, not Voxtral 3 |
+| Grok file / streaming STT | None documented for HTTP or WebSocket `/v1/stt`; voice `/v1/realtime` client secrets are a different contract | `.apiKey`, `Authorization: Bearer`; use a relay for app-owned authority |
+| Fish Audio file / realtime | None documented for `/v1/asr` or `/v1/asr/realtime`; agent-session tokens are unrelated | `.apiKey`, `Authorization: Bearer`; use a relay for app-owned authority |
+| Meta file | None documented for `/v1/asr/transcribe` | `.apiKey`, `Authorization: Bearer` |
+| Meta realtime | None documented for `/v1/asr/realtime` | `.apiKey`, first JSON frame `authorization.accessToken = "Bearer <key>"`; relay replaces that field, HTTP auth alone is insufficient |
+| Cohere file | None documented for `/v2/audio/transcriptions` | `.apiKey`, `Authorization: Bearer`; no realtime client |
+| Aqua file | None documented for Avalon transcription | `.apiKey`, `Authorization: Bearer`; SDK and relay use `/v1/audio/transcriptions`; no realtime client |
+| Apple local Speech | No credential | On-device transcription on supported OS versions |
+
+ElevenLabs static keys use `xi-api-key`. Gemini Live static keys use the `key` query on the non-constrained method; a native token uses the header and constrained method instead. TLS protects query strings in transit, but request URLs can still reach client, proxy, or server logs. Never log credential-bearing URLs.
+
+Mint native tokens on an authenticated backend with the vendor key held there. Check provider, capability, model, and permitted destinations before issuing a token. Expiry is not a session-duration limit: an established session may outlive the token. OpenAI session settings remain client-overridable; a token is not an immutable spend cap. Gemini's configurable timestamps must each be less than 20 hours ahead; `uses: 0` permits unlimited uses, and session resumption does not consume another use. Mistral's documented native-token contract covers the legacy 2602 model; keep Voxtral 3 on the relay until that contract is verified.
+
+References for the dated review: [ElevenLabs tokens](https://elevenlabs.io/docs/api-reference/tokens/create), [OpenAI Realtime transcription](https://developers.openai.com/api/docs/guides/realtime-transcription), [Gemini ephemeral tokens](https://ai.google.dev/gemini-api/docs/live-api/ephemeral-tokens), [Mistral realtime authentication](https://docs.mistral.ai/studio/audio/speech_to_text/realtime_transcription/client_auth), [xAI STT](https://docs.x.ai/developers/model-capabilities/audio/speech-to-text), [Fish Audio STT](https://docs.fish.audio/api-reference/endpoint/openapi-v1/speech-to-text), [Meta STT](https://dev.meta.ai/docs/speech-to-text/), [Cohere transcription](https://docs.cohere.com/reference/create-audio-transcription), and [Aqua API](https://aquavoice.com/docs/api).
+
+### Native tokens and credential replacement
+
+Provide separate file and realtime credentials when only one capability accepts a native token. This example accepts an application-owned token-fetching function so it does not assume a particular backend SDK:
+
+```swift
+@MainActor
+func makeOpenAIRealtimeService(
+    fetchTranscriptionSecret: @escaping @Sendable (SpeechTokenContext) async throws -> SpeechAccessToken
+) -> SpeechService {
+    var configuration = OpenAIConfiguration()
+    configuration.setCredential(
+        .vendorToken(SpeechTokenResolver { context in
+            try await fetchTranscriptionSecret(context)
+        }),
+        for: .realtime
+    )
+    return SpeechService(openAI: configuration, credentialPolicy: .disallowStaticKeys)
+}
+```
+
+The file credential above is empty, so it cannot upload a file. Use a relay for OpenAI files. Resolvers receive provider, capability, model, operation ID, attempt, auth mode, and approved destinations. Return `SpeechAccessToken(value:expiresAt:isReusable:)` when you know expiry and reuse metadata, or return a `String`. Metadata does not enforce server-side reuse, and SpeechKit provides no public token readback or resolver invocation. Keep captured login/session objects alive only as long as needed; clearing the SDK's credentials cannot release copies held by your app.
+
+For a configuration value, use `setCredential(_:)` to replace the base credential and clear both capability overrides. Use `setCredential(_:for:)` to replace only one capability. Inspect `credentialKind`, `hasCredential`, or their `for:` variants, never a secret getter.
+
+### Custom proxy routes and local policy
+
+Use `.bearer(SpeechTokenResolver { ... })` for your own proxy, not `.vendorToken` or `.apiKey` carrying a proxy ticket. Set every endpoint used by that capability. `GeminiRoute` validates the complete Interactions, Files API, and Live route:
+
+```swift
+@MainActor
+func makeProxyService(
+    fetchProxyToken: @escaping @Sendable () async throws -> String
+) throws -> SpeechService {
+    var gemini = GeminiConfiguration(
+        credential: .bearer(SpeechTokenResolver { _ in try await fetchProxyToken() })
+    )
+    try gemini.setRoute(GeminiRoute(
+        interactions: URL(string: "https://api.example.com/gemini/v1beta/interactions")!,
+        files: URL(string: "https://api.example.com/gemini/upload/v1beta/files")!,
+        realtime: URL(string: "wss://api.example.com/gemini/live")!
+    ))
+    return SpeechService(gemini: gemini, credentialPolicy: .disallowStaticKeys)
+}
+```
+
+A custom proxy must also keep returned upload-session URLs, file polling, and interaction polling on approved destinations, bind resources to their user, and replace Meta's first-frame authorization. Partial Gemini overrides fail validation. `GeminiRoute.OriginPolicy.explicitMixedOrigins` is an explicit exception for reviewed direct integrations, not for relay tickets. SpeechKit validates HTTPS/WSS endpoints before resolving credentials and refuses redirects; only loopback HTTP/WS is allowed for development.
+
+With a relay, an empty provider credential inherits the relay. A configured direct credential requires that capability's explicit endpoint and wins over the relay; a missing endpoint fails instead of sending the credential elsewhere. `.disallowStaticKeys` rejects static-key operations, while `.relayOnly` rejects direct credentials and keeps traffic on proxy routes even if native-token strategy was selected. These are local guardrails, not protection against a modified client. The default remains `.allowStaticKeys` for BYOK compatibility.
+
+`tokenStrategy: .vendorTokensWhenAvailable` asks the relay to mint a native token for supported combinations; unsupported combinations or a 404 use the proxy. Other mint failures do not silently downgrade to a vendor key. Keep `.proxyAll` for central quota/retention control. No audio is automatically replayed after sending it or after an uncertain outcome.
+
+### Reset, revocation, and privacy
+
+```swift
+speech.recordingRetention = .discardOnStop
+await speech.resetSession()
+speech.discardRecording()
+await speech.clearCredentials()
+```
+
+`stopListening()` ends capture but can retain results. `resetSession()` cancels local work, clears cached relay tickets, and discards transcript and recording by default; it keeps configuration and resolver captures. `discardRecording()` drops SDK-owned audio, not caller-owned files. `clearCredentials()` also releases configured credentials and resolver captures and removes the relay. None revokes a vendor key, JWT, issued relay ticket, or App Attest registration, deletes vendor/relay data, or guarantees zeroing all copies in memory. Revoke and rotate on the server, sign out the login client, and delete application-owned files separately.
+
+Keychain helps protect data at rest; it cannot hide a key from a process allowed to read it. App Attest gives the relay an app/device authenticity signal and request proofs, not user identity, consent, immunity to runtime hooks, or a hard spend limit. Configure server-side replay checks, quotas, concurrency/duration limits, redacted logging, and retention/deletion policy. Review device behavior and run authorized vendor canaries before release; compiling these examples does not prove either.
+
+See [Shipping SpeechKit in production](Sources/SpeechKit/SpeechKit.docc/ShippingInProduction.md) and [Migrating to 3.0](Sources/SpeechKit/SpeechKit.docc/MigratingTo3.md) for deployment and source migration details. Provider-key examples below are for BYOK or local testing only.
 
 ## Chapter 1: Create a Speech Service
 
@@ -178,9 +341,9 @@ import SwiftUI
 @main
 struct DemoApp: App {
     @State private var speech = SpeechService(
-        elevenLabs: ElevenLabsConfiguration(apiKey: "<ELEVENLABS_API_KEY>"),
-        openAI: OpenAIConfiguration(apiKey: "<OPENAI_API_KEY>"),
-        grok: GrokConfiguration(apiKey: "<XAI_API_KEY>")
+        elevenLabs: ElevenLabsConfiguration(credential: .apiKey("<ELEVENLABS_API_KEY>")),
+        grok: GrokConfiguration(credential: .apiKey("<XAI_API_KEY>")),
+        openAI: OpenAIConfiguration(credential: .apiKey("<OPENAI_API_KEY>"))
     )
 
     var body: some Scene {
@@ -199,8 +362,8 @@ if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
     let speech = SpeechService(
         apple: AppleSpeechConfiguration(
             locale: .current,
-            contextualStrings: ["SpeechKit"],
-            preparesAssetsAutomatically: true
+            preparesAssetsAutomatically: true,
+            contextualStrings: ["SpeechKit"]
         )
     )
 }
@@ -253,7 +416,7 @@ Configure ElevenLabs and call `startListening(provider: .elevenLabs)`. Calling `
 ```swift
 let speech = SpeechService(
     elevenLabs: ElevenLabsConfiguration(
-        apiKey: "<ELEVENLABS_API_KEY>",
+        credential: .apiKey("<ELEVENLABS_API_KEY>"),
         realtimeModelID: .scribeV2Realtime
     )
 )
@@ -268,7 +431,7 @@ OpenAI defaults to `gpt-live-transcribe` for low-latency microphone transcriptio
 ```swift
 let speech = SpeechService(
     openAI: OpenAIConfiguration(
-        apiKey: "<OPENAI_API_KEY>",
+        credential: .apiKey("<OPENAI_API_KEY>"),
         realtimeSessionModelID: .gptRealtime,
         realtimeTranscriptionModelID: .gptLiveTranscribe,
         languages: ["en", "fr"],
@@ -289,7 +452,7 @@ Grok realtime options live in `GrokRealtimeOptions`. Use them for language hints
 ```swift
 let speech = SpeechService(
     grok: GrokConfiguration(
-        apiKey: "<XAI_API_KEY>",
+        credential: .apiKey("<XAI_API_KEY>"),
         realtimeOptions: GrokRealtimeOptions(
             language: .english,
             sampleRate: 16000,
@@ -310,7 +473,7 @@ Meta Muse Voice Transcribe streams raw PCM. `MetaRealtimeOptions` sets the mode,
 ```swift
 let speech = SpeechService(
     meta: MetaConfiguration(
-        apiKey: "<META_API_KEY>",
+        credential: .apiKey("<META_API_KEY>"),
         realtimeOptions: MetaRealtimeOptions(
             mode: .diarization,
             audioEncoding: .pcm24kHz,
@@ -333,7 +496,7 @@ Gemini 3.5 Transcribe Live streams 16 kHz mono PCM through the Gemini Live API. 
 ```swift
 let speech = SpeechService(
     gemini: GeminiConfiguration(
-        apiKey: "<GOOGLE_API_KEY>",
+        credential: .apiKey("<GOOGLE_API_KEY>"),
         realtimeOptions: GeminiRealtimeOptions(
             languageCodes: ["en-US"],
             customVocabulary: ["SpeechKit"],
@@ -354,7 +517,7 @@ Mistral Voxtral Mini Transcribe Realtime 3 streams 16-bit mono PCM. `MistralReal
 ```swift
 let speech = SpeechService(
     mistral: MistralConfiguration(
-        apiKey: "<MISTRAL_API_KEY>",
+        credential: .apiKey("<MISTRAL_API_KEY>"),
         realtimeOptions: MistralRealtimeOptions(
             targetStreamingDelayMilliseconds: 480,
             language: "en",
@@ -367,6 +530,8 @@ await speech.startListening(provider: .mistral)
 ```
 
 By default, Mistral detects the end of each turn and SpeechKit commits one transcript entry per turn. Set `diarize` to label each entry with its speaker:
+
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
 
 ```swift
 speech.mistral?.realtimeOptions.diarize = true
@@ -383,10 +548,12 @@ Mistral cannot combine diarization with turn detection, so with `diarize` on Spe
 
 Fish Audio Transcribe Stream 1 streams 16-bit mono PCM, 16 kHz by default. The realtime model is in preview, so its behavior may change. `FishAudioRealtimeOptions` sets turn detection, live drafts, word timings, diarization, and recognition terms.
 
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
+
 ```swift
 let speech = SpeechService(
     fishAudio: FishAudioConfiguration(
-        apiKey: "<FISH_AUDIO_API_KEY>",
+        credential: .apiKey("<FISH_AUDIO_API_KEY>"),
         realtimeOptions: FishAudioRealtimeOptions(
             mode: .auto,
             terms: ["SpeechKit", "Northwind"]
@@ -420,7 +587,7 @@ if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
         )
     )
 
-    await speech.prepareAppleSpeechAssets()
+    try await speech.prepareAppleSpeechAssets()
     await speech.startListening(provider: .apple)
 }
 ```
@@ -455,7 +622,7 @@ Use ElevenLabs Scribe for straightforward file transcription.
 ```swift
 let speech = SpeechService(
     elevenLabs: ElevenLabsConfiguration(
-        apiKey: "<ELEVENLABS_API_KEY>",
+        credential: .apiKey("<ELEVENLABS_API_KEY>"),
         fileTranscriptionModelID: .scribeV2
     )
 )
@@ -472,10 +639,12 @@ Call `transcribeElevenLabsAudioFile(file:modelID:)` instead when you need the de
 
 Use Aqua when you want Avalon file transcription with a typed language hint.
 
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
+
 ```swift
 let speech = SpeechService(
     aqua: AquaConfiguration(
-        apiKey: "<AQUA_API_KEY>",
+        credential: .apiKey("<AQUA_API_KEY>"),
         modelID: .avalonV15,
         language: .english
     )
@@ -492,7 +661,7 @@ Cohere file transcription keeps its own model, language, and temperature default
 ```swift
 let speech = SpeechService(
     cohere: CohereConfiguration(
-        apiKey: "<COHERE_API_KEY>",
+        credential: .apiKey("<COHERE_API_KEY>"),
         modelID: .transcribe032026,
         language: .english,
         temperature: 0.2
@@ -509,10 +678,12 @@ let text = try await speech.transcribeAudioFile(
 
 Use Grok for file transcription when you want formatting, diarization, timestamps, or detailed response metadata.
 
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
+
 ```swift
 let speech = SpeechService(
     grok: GrokConfiguration(
-        apiKey: "<XAI_API_KEY>",
+        credential: .apiKey("<XAI_API_KEY>"),
         language: .english,
         format: true,
         diarize: true,
@@ -529,10 +700,12 @@ print(response.words ?? [])
 
 OpenAI file transcription defaults to `gpt-transcribe`, which supports prompts, keyword hints, multiple expected input languages, and detected-language output. Whisper remains available for timestamps, and `gpt-4o-transcribe-diarize` remains available for speaker labels, but both are deprecated because OpenAI shuts them down on February 26, 2027.
 
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
+
 ```swift
 let speech = SpeechService(
     openAI: OpenAIConfiguration(
-        apiKey: "<OPENAI_API_KEY>",
+        credential: .apiKey("<OPENAI_API_KEY>"),
         fileTranscriptionModelID: .gptTranscribe,
         languages: ["en", "fr"],
         prompt: "Use product names exactly.",
@@ -547,6 +720,8 @@ print(response.usage?.seconds ?? 0)
 ```
 
 For diarization, use the diarize model. SpeechKit requests `diarized_json` and defaults chunking to `.auto`; you can also provide server VAD settings and up to four known speaker reference data URLs.
+
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
 
 ```swift
 let response = try await speech.transcribeOpenAIAudioFile(
@@ -586,10 +761,12 @@ let text = try await speech.transcribeAudioFile(
 
 Use the detailed call when you want per-turn timings and speaker labels.
 
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
+
 ```swift
 let speech = SpeechService(
     meta: MetaConfiguration(
-        apiKey: "<META_API_KEY>",
+        credential: .apiKey("<META_API_KEY>"),
         mode: .diarization,
         languageBias: [.english],
         keywords: ["SpeechKit", "AC-42"]
@@ -619,10 +796,12 @@ let text = try await speech.transcribeAudioFile(
 
 Use the detailed call when you want speaker labels and word timestamps.
 
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
+
 ```swift
 let speech = SpeechService(
     gemini: GeminiConfiguration(
-        apiKey: "<GOOGLE_API_KEY>",
+        credential: .apiKey("<GOOGLE_API_KEY>"),
         languageCodes: ["en-US"],
         mode: .verbatim,
         diarize: true,
@@ -667,10 +846,12 @@ let text = try await speech.transcribeAudioFile(
 
 Use the detailed call when you want speaker labels and segment timestamps. Diarization is off by default; set `diarize` on the configuration or per request:
 
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
+
 ```swift
 let speech = SpeechService(
     mistral: MistralConfiguration(
-        apiKey: "<MISTRAL_API_KEY>",
+        credential: .apiKey("<MISTRAL_API_KEY>"),
         contextBias: ["Northwind", "Alder Creek Design"],
         diarize: true
     )
@@ -699,10 +880,12 @@ let text = try await speech.transcribeAudioFile(
 
 Use the detailed call when you want speaker labels and word timings:
 
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
+
 ```swift
 let speech = SpeechService(
     fishAudio: FishAudioConfiguration(
-        apiKey: "<FISH_AUDIO_API_KEY>",
+        credential: .apiKey("<FISH_AUDIO_API_KEY>"),
         diarize: .on,
         speakerCount: .range(min: 2, max: 4)
     )
@@ -743,6 +926,8 @@ if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
 
 Use the Apple-specific helper when you need normalized entries and timing metadata:
 
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
+
 ```swift
 if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
     let speech = SpeechService(
@@ -775,6 +960,8 @@ let text = try await speech.transcribeAudioFile(
 ## Chapter 5: Errors and Provider Matching
 
 File transcription throws `SpeechError`. Realtime failures are exposed through `realtimeConnectionState` and `lastError`.
+
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
 
 ```swift
 do {

@@ -65,21 +65,21 @@ extension OpenAIRealtimeSessionOptions {
     func validate() throws {
         if transcriptionModelID.usesLanguageList {
             if language != nil, !languages.isEmpty {
-                throw OpenAIError.invalidOptions("Use either language or languages with \(transcriptionModelID.rawValue), not both.")
+                throw OpenAIError.invalidOptions(.invalidOptions)
             }
         } else if !languages.isEmpty {
-            throw OpenAIError.invalidOptions("languages is only supported with gpt-live-transcribe and gpt-transcribe.")
+            throw OpenAIError.invalidOptions(.invalidOptions)
         }
 
         for language in languages where language.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            throw OpenAIError.invalidOptions("languages cannot contain empty values.")
+            throw OpenAIError.invalidOptions(.invalidOptions)
         }
         for keyword in keywords {
             if keyword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                throw OpenAIError.invalidOptions("keywords cannot contain empty values.")
+                throw OpenAIError.invalidOptions(.invalidOptions)
             }
             if keyword.contains("<") || keyword.contains(">") || keyword.contains("\r") || keyword.contains("\n") {
-                throw OpenAIError.invalidOptions("keywords cannot contain <, >, carriage returns, or line feeds.")
+                throw OpenAIError.invalidOptions(.invalidOptions)
             }
         }
 
@@ -88,7 +88,7 @@ extension OpenAIRealtimeSessionOptions {
             break
         case .minimal, .low, .medium, .high, .xhigh:
             guard transcriptionModelID.usesLanguageList else {
-                throw OpenAIError.invalidOptions("Named delay tiers require gpt-live-transcribe or gpt-transcribe.")
+                throw OpenAIError.invalidOptions(.invalidOptions)
             }
         }
     }
@@ -334,7 +334,7 @@ public enum OpenAIError: Error, LocalizedError, Sendable, Equatable {
     /// SpeechKit could not construct a valid OpenAI URL.
     case invalidURL
     /// The realtime connection failed.
-    case connectionFailed(String)
+    case connectionFailed(SpeechFailureReason)
     /// SpeechKit could not encode an outgoing realtime message.
     case encodingFailed
     /// The realtime WebSocket disconnected.
@@ -344,7 +344,7 @@ public enum OpenAIError: Error, LocalizedError, Sendable, Equatable {
     /// The OpenAI API key is empty.
     case apiKeyMissing
     /// The supplied OpenAI options are incompatible with the selected model.
-    case invalidOptions(String)
+    case invalidOptions(SpeechFailureReason)
 
     /// A localized description of the error.
     public var errorDescription: String? {
@@ -362,7 +362,7 @@ public enum OpenAIError: Error, LocalizedError, Sendable, Equatable {
         case .apiKeyMissing:
             return "API key not configured"
         case .invalidOptions(let message):
-            return message
+            return message.description
         }
     }
 }

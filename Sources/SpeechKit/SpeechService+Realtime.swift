@@ -225,14 +225,22 @@ extension SpeechService {
 
     /// Starts realtime microphone transcription with a configured provider.
     public func startListening(provider: SpeechRealtimeProvider) async {
-        if provider == activeRealtimeProvider, realtimeConnectionState.isLifecycleActive {
-            return
-        }
-
-        if provider != activeRealtimeProvider, realtimeConnectionState.isLifecycleActive {
-            await stopListening()
-        }
+        if (pendingRealtimeProvider == provider || (provider == activeRealtimeProvider && realtimeConnectionState.isLifecycleActive)) { return }
+        if pendingRealtimeProvider != nil || realtimeConnectionState.isLifecycleActive { await stopListening() }
+        let generation = UUID()
+        realtimeStartGeneration = generation
         activeRealtimeProvider = provider
+        pendingRealtimeProvider = provider
+        let task = Task { [self] in await startRealtimeProvider(provider) }
+        realtimeStartTask = task
+        await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        if generation == realtimeStartGeneration {
+            pendingRealtimeProvider = nil
+            realtimeStartTask = nil
+        }
+    }
+
+    private func startRealtimeProvider(_ provider: SpeechRealtimeProvider) async {
         switch provider {
         case .elevenLabs:
             await startElevenLabsListening()
@@ -261,7 +269,17 @@ extension SpeechService {
     }
 
     func startElevenLabsListening() async {
-        guard let elevenLabs else {
+        let generation = realtimeStartGeneration
+        let resolved: ElevenLabsConfiguration?
+        do { resolved = try await resolvedElevenLabsConfiguration(capability: .realtime) }
+        catch {
+            guard generation == realtimeStartGeneration, !Task.isCancelled else { return }
+            fallbackLastError = SpeechErrorBoundary.safe(error)
+            fallbackConnectionState = .error(SpeechErrorBoundary.safe(error).localizedDescription)
+            return
+        }
+        guard generation == realtimeStartGeneration, !Task.isCancelled else { return }
+        guard let elevenLabs = resolved else {
             fallbackConnectionState = .error("ElevenLabs is not configured")
             fallbackLastError = SpeechError.realtimeProviderNotConfigured(.elevenLabs)
             return
@@ -276,7 +294,17 @@ extension SpeechService {
     }
 
     func startOpenAIListening() async {
-        guard let openAI else {
+        let generation = realtimeStartGeneration
+        let resolved: OpenAIConfiguration?
+        do { resolved = try await resolvedOpenAIConfiguration(capability: .realtime) }
+        catch {
+            guard generation == realtimeStartGeneration, !Task.isCancelled else { return }
+            fallbackLastError = SpeechErrorBoundary.safe(error)
+            fallbackConnectionState = .error(SpeechErrorBoundary.safe(error).localizedDescription)
+            return
+        }
+        guard generation == realtimeStartGeneration, !Task.isCancelled else { return }
+        guard let openAI = resolved else {
             fallbackConnectionState = .error("OpenAI is not configured")
             fallbackLastError = SpeechError.realtimeProviderNotConfigured(.openAI)
             return
@@ -291,7 +319,17 @@ extension SpeechService {
     }
 
     func startGrokListening() async {
-        guard let grok else {
+        let generation = realtimeStartGeneration
+        let resolved: GrokConfiguration?
+        do { resolved = try await resolvedGrokConfiguration(capability: .realtime) }
+        catch {
+            guard generation == realtimeStartGeneration, !Task.isCancelled else { return }
+            fallbackLastError = SpeechErrorBoundary.safe(error)
+            fallbackConnectionState = .error(SpeechErrorBoundary.safe(error).localizedDescription)
+            return
+        }
+        guard generation == realtimeStartGeneration, !Task.isCancelled else { return }
+        guard let grok = resolved else {
             fallbackConnectionState = .error("Grok is not configured")
             fallbackLastError = SpeechError.realtimeProviderNotConfigured(.grok)
             return
@@ -306,7 +344,17 @@ extension SpeechService {
     }
 
     func startMetaListening() async {
-        guard let meta else {
+        let generation = realtimeStartGeneration
+        let resolved: MetaConfiguration?
+        do { resolved = try await resolvedMetaConfiguration(capability: .realtime) }
+        catch {
+            guard generation == realtimeStartGeneration, !Task.isCancelled else { return }
+            fallbackLastError = SpeechErrorBoundary.safe(error)
+            fallbackConnectionState = .error(SpeechErrorBoundary.safe(error).localizedDescription)
+            return
+        }
+        guard generation == realtimeStartGeneration, !Task.isCancelled else { return }
+        guard let meta = resolved else {
             fallbackConnectionState = .error("Meta is not configured")
             fallbackLastError = SpeechError.realtimeProviderNotConfigured(.meta)
             return
@@ -321,7 +369,17 @@ extension SpeechService {
     }
 
     func startGeminiListening() async {
-        guard let gemini else {
+        let generation = realtimeStartGeneration
+        let resolved: GeminiConfiguration?
+        do { resolved = try await resolvedGeminiConfiguration(capability: .realtime) }
+        catch {
+            guard generation == realtimeStartGeneration, !Task.isCancelled else { return }
+            fallbackLastError = SpeechErrorBoundary.safe(error)
+            fallbackConnectionState = .error(SpeechErrorBoundary.safe(error).localizedDescription)
+            return
+        }
+        guard generation == realtimeStartGeneration, !Task.isCancelled else { return }
+        guard let gemini = resolved else {
             fallbackConnectionState = .error("Gemini is not configured")
             fallbackLastError = SpeechError.realtimeProviderNotConfigured(.gemini)
             return
@@ -336,7 +394,17 @@ extension SpeechService {
     }
 
     func startMistralListening() async {
-        guard let mistral else {
+        let generation = realtimeStartGeneration
+        let resolved: MistralConfiguration?
+        do { resolved = try await resolvedMistralConfiguration(capability: .realtime) }
+        catch {
+            guard generation == realtimeStartGeneration, !Task.isCancelled else { return }
+            fallbackLastError = SpeechErrorBoundary.safe(error)
+            fallbackConnectionState = .error(SpeechErrorBoundary.safe(error).localizedDescription)
+            return
+        }
+        guard generation == realtimeStartGeneration, !Task.isCancelled else { return }
+        guard let mistral = resolved else {
             fallbackConnectionState = .error("Mistral is not configured")
             fallbackLastError = SpeechError.realtimeProviderNotConfigured(.mistral)
             return
@@ -351,7 +419,17 @@ extension SpeechService {
     }
 
     func startFishAudioListening() async {
-        guard let fishAudio else {
+        let generation = realtimeStartGeneration
+        let resolved: FishAudioConfiguration?
+        do { resolved = try await resolvedFishAudioConfiguration(capability: .realtime) }
+        catch {
+            guard generation == realtimeStartGeneration, !Task.isCancelled else { return }
+            fallbackLastError = SpeechErrorBoundary.safe(error)
+            fallbackConnectionState = .error(SpeechErrorBoundary.safe(error).localizedDescription)
+            return
+        }
+        guard generation == realtimeStartGeneration, !Task.isCancelled else { return }
+        guard let fishAudio = resolved else {
             fallbackConnectionState = .error("Fish Audio is not configured")
             fallbackLastError = SpeechError.realtimeProviderNotConfigured(.fishAudio)
             return
@@ -367,11 +445,12 @@ extension SpeechService {
 
     /// Stops realtime microphone transcription and disconnects from the active provider.
     public func stopListening() async {
+        realtimeStartGeneration = UUID()
+        realtimeStartTask?.cancel()
+        realtimeStartTask = nil
+        pendingRealtimeProvider = nil
         fallbackConnectionState = nil
         fallbackLastError = nil
-        guard realtimeConnectionState.isLifecycleActive else {
-            return
-        }
 
         switch activeRealtimeProvider {
         case .elevenLabs:

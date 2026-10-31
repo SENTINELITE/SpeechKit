@@ -62,19 +62,19 @@ public struct GrokRealtimeOptions: Sendable, Equatable {
 
     func validate() throws {
         if ![8000, 16000, 22050, 24000, 44100, 48000].contains(sampleRate) {
-            throw SpeechError.providerFailure(provider: .grok, reason: "Unsupported realtime sample_rate: \(sampleRate).")
+            throw SpeechError.providerFailure(provider: .grok, reason: .requestFailed)
         }
         if !(0...5000).contains(endpointingMilliseconds) {
-            throw SpeechError.providerFailure(provider: .grok, reason: "endpointingMilliseconds must be between 0 and 5000.")
+            throw SpeechError.providerFailure(provider: .grok, reason: .requestFailed)
         }
         if !(1...8).contains(channels) {
-            throw SpeechError.providerFailure(provider: .grok, reason: "channels must be between 1 and 8.")
+            throw SpeechError.providerFailure(provider: .grok, reason: .requestFailed)
         }
         if keyTerms.count > 100 {
-            throw SpeechError.providerFailure(provider: .grok, reason: "keyTerms cannot contain more than 100 items.")
+            throw SpeechError.providerFailure(provider: .grok, reason: .requestFailed)
         }
-        if let keyTerm = keyTerms.first(where: { $0.count > 50 }) {
-            throw SpeechError.providerFailure(provider: .grok, reason: "keyTerm exceeds 50 characters: \(keyTerm).")
+        if keyTerms.contains(where: { $0.count > 50 }) {
+            throw SpeechError.providerFailure(provider: .grok, reason: .requestFailed)
         }
     }
 
@@ -205,7 +205,7 @@ public enum GrokRealtimeError: Error, LocalizedError, Sendable, Equatable {
     /// SpeechKit could not construct a valid Grok realtime URL.
     case invalidURL
     /// The realtime connection failed.
-    case connectionFailed(String)
+    case connectionFailed(SpeechFailureReason)
     /// SpeechKit could not encode an outgoing realtime message.
     case encodingFailed
     /// The realtime WebSocket disconnected.

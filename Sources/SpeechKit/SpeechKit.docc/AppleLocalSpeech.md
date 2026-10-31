@@ -60,6 +60,8 @@ if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
 
 Use ``SpeechService/transcribeAppleAudioFile(file:options:)`` when your app needs detailed normalized entries.
 
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
+
 ```swift
 if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
     let response = try await speech.transcribeAppleAudioFile(

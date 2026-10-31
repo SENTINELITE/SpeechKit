@@ -2,6 +2,8 @@
 
 Choose a workflow first, then configure the provider that matches that workflow.
 
+Provider-key examples are for BYOK or local testing, not bundled app-owned keys. A relay can supply credentials without those configurations. See <doc:ShippingInProduction> for the decision rule and native-token support.
+
 ## File-Based Providers
 
 File transcription uploads an audio file and returns text or provider-specific metadata.
@@ -11,7 +13,7 @@ File transcription uploads an audio file and returns text or provider-specific m
 ```swift
 let speech = SpeechService(
     elevenLabs: ElevenLabsConfiguration(
-        apiKey: "<ELEVENLABS_API_KEY>",
+        credential: .apiKey("<ELEVENLABS_API_KEY>"),
         fileTranscriptionModelID: .scribeV2
     )
 )
@@ -27,7 +29,7 @@ let text = try await speech.transcribeAudioFile(
 ```swift
 let speech = SpeechService(
     aqua: AquaConfiguration(
-        apiKey: "<AQUA_API_KEY>",
+        credential: .apiKey("<AQUA_API_KEY>"),
         modelID: .avalonV15,
         language: .english
     )
@@ -41,7 +43,7 @@ let response = try await speech.transcribeAquaAudioFile(file: audioFileURL)
 ```swift
 let speech = SpeechService(
     cohere: CohereConfiguration(
-        apiKey: "<COHERE_API_KEY>",
+        credential: .apiKey("<COHERE_API_KEY>"),
         modelID: .transcribe032026,
         language: .english,
         temperature: 0.2
@@ -59,7 +61,7 @@ let text = try await speech.transcribeAudioFile(
 ```swift
 let speech = SpeechService(
     grok: GrokConfiguration(
-        apiKey: "<XAI_API_KEY>",
+        credential: .apiKey("<XAI_API_KEY>"),
         format: true,
         diarize: true,
         timestampGranularities: [.word]
@@ -74,11 +76,11 @@ let response = try await speech.transcribeGrokAudioFile(file: audioFileURL)
 ```swift
 let speech = SpeechService(
     openAI: OpenAIConfiguration(
-        apiKey: "<OPENAI_API_KEY>",
+        credential: .apiKey("<OPENAI_API_KEY>"),
         fileTranscriptionModelID: .gptTranscribe,
         languages: ["en", "fr"],
-        keywords: ["SpeechKit", "AC-42"],
-        prompt: "Use product names exactly."
+        prompt: "Use product names exactly.",
+        keywords: ["SpeechKit", "AC-42"]
     )
 )
 
@@ -86,6 +88,8 @@ let response = try await speech.transcribeOpenAIAudioFile(file: audioFileURL)
 ```
 
 For speaker labels, use the diarization model. SpeechKit sends `diarized_json`, uses automatic chunking by default, and supports optional VAD tuning plus known speaker references.
+
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
 
 ```swift
 let diarized = try await speech.transcribeOpenAIAudioFile(
@@ -109,10 +113,12 @@ print(diarized.diarizedSegments ?? [])
 
 Meta accepts WAV uploads up to 32 MB and 10 minutes. Use `.diarization` mode for speaker labels on each turn.
 
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
+
 ```swift
 let speech = SpeechService(
     meta: MetaConfiguration(
-        apiKey: "<META_API_KEY>",
+        credential: .apiKey("<META_API_KEY>"),
         mode: .diarization,
         languageBias: [.english],
         keywords: ["SpeechKit"]
@@ -128,10 +134,12 @@ print(response.turns ?? [])
 
 Gemini accepts up to one hour of audio, or 30 minutes when diarization or word timestamps are on.
 
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
+
 ```swift
 let speech = SpeechService(
     gemini: GeminiConfiguration(
-        apiKey: "<GOOGLE_API_KEY>",
+        credential: .apiKey("<GOOGLE_API_KEY>"),
         languageCodes: ["en-US"],
         mode: .verbatim,
         diarize: true,
@@ -162,10 +170,12 @@ SpeechKit sends audio inline below the 20 MB default threshold and uploads large
 
 Mistral offers Voxtral Mini Transcribe 3, the default, and Voxtral Small Transcribe 3 for higher accuracy. Turn on diarization to label each segment with its speaker.
 
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
+
 ```swift
 let speech = SpeechService(
     mistral: MistralConfiguration(
-        apiKey: "<MISTRAL_API_KEY>",
+        credential: .apiKey("<MISTRAL_API_KEY>"),
         fileTranscriptionModelID: .voxtralSmallTranscribe3,
         language: "en",
         contextBias: ["Northwind", "Alder Creek Design"],
@@ -185,10 +195,12 @@ Mistral returns timestamps per segment only, and requires them for diarization, 
 
 Fish Audio file transcription uses Transcribe 1 Pro. Timestamps are on by default, so the response carries words with speakers.
 
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
+
 ```swift
 let speech = SpeechService(
     fishAudio: FishAudioConfiguration(
-        apiKey: "<FISH_AUDIO_API_KEY>",
+        credential: .apiKey("<FISH_AUDIO_API_KEY>"),
         language: "en",
         diarize: .on,
         speakerCount: .range(min: 2, max: 4)
@@ -206,6 +218,8 @@ Fish Audio accepts up to 60 minutes of audio and rejects AIFF and CAF files. Spe
 ### Apple Local Files
 
 Apple local Speech runs on device and requires iOS 26, macOS 26, or visionOS 26. It is unavailable on watchOS and may need local speech assets for the selected locale.
+
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
 
 ```swift
 if #available(iOS 26.0, macOS 26.0, visionOS 26.0, *) {
@@ -227,7 +241,7 @@ Realtime transcription streams microphone audio and updates observable transcrip
 ```swift
 let speech = SpeechService(
     elevenLabs: ElevenLabsConfiguration(
-        apiKey: "<ELEVENLABS_API_KEY>",
+        credential: .apiKey("<ELEVENLABS_API_KEY>"),
         realtimeModelID: .scribeV2Realtime
     )
 )
@@ -240,7 +254,7 @@ await speech.startListening(provider: .elevenLabs)
 ```swift
 let speech = SpeechService(
     openAI: OpenAIConfiguration(
-        apiKey: "<OPENAI_API_KEY>",
+        credential: .apiKey("<OPENAI_API_KEY>"),
         realtimeSessionModelID: .gptRealtime,
         realtimeTranscriptionModelID: .gptLiveTranscribe,
         languages: ["en", "fr"],
@@ -258,7 +272,7 @@ await speech.startListening(provider: .openAI)
 ```swift
 let speech = SpeechService(
     grok: GrokConfiguration(
-        apiKey: "<XAI_API_KEY>",
+        credential: .apiKey("<XAI_API_KEY>"),
         realtimeOptions: GrokRealtimeOptions(
             language: .english,
             endpointingMilliseconds: 250,
@@ -278,7 +292,7 @@ Meta realtime sessions accept 24 kHz or 16 kHz mono PCM only.
 ```swift
 let speech = SpeechService(
     meta: MetaConfiguration(
-        apiKey: "<META_API_KEY>",
+        credential: .apiKey("<META_API_KEY>"),
         realtimeOptions: MetaRealtimeOptions(
             mode: .diarization,
             audioEncoding: .pcm24kHz,
@@ -299,7 +313,7 @@ Gemini Live sessions stream 16 kHz mono PCM, last up to 10 minutes, and do not r
 ```swift
 let speech = SpeechService(
     gemini: GeminiConfiguration(
-        apiKey: "<GOOGLE_API_KEY>",
+        credential: .apiKey("<GOOGLE_API_KEY>"),
         realtimeOptions: GeminiRealtimeOptions(
             languageCodes: ["en-US"],
             customVocabulary: ["SpeechKit"],
@@ -318,7 +332,7 @@ Mistral realtime sessions stream 16 kHz mono PCM by default. Lower ``MistralReal
 ```swift
 let speech = SpeechService(
     mistral: MistralConfiguration(
-        apiKey: "<MISTRAL_API_KEY>",
+        credential: .apiKey("<MISTRAL_API_KEY>"),
         realtimeOptions: MistralRealtimeOptions(
             targetStreamingDelayMilliseconds: 480,
             language: "en",
@@ -340,7 +354,7 @@ Fish Audio's realtime model, `transcribe-stream-1`, is in preview. Sessions stre
 ```swift
 let speech = SpeechService(
     fishAudio: FishAudioConfiguration(
-        apiKey: "<FISH_AUDIO_API_KEY>",
+        credential: .apiKey("<FISH_AUDIO_API_KEY>"),
         realtimeOptions: FishAudioRealtimeOptions(
             mode: .auto,
             terms: ["SpeechKit", "Northwind"]

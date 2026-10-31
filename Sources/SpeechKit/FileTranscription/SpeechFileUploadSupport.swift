@@ -17,8 +17,7 @@ enum SpeechFileUploadSupport {
         guard allowedExtensions.contains(fileExtension) else {
             throw SpeechError.providerFailure(
                 provider: provider,
-                reason: "Unsupported file extension: \(fileExtension.isEmpty ? "(none)" : fileExtension)."
-            )
+                reason: .requestFailed)
         }
     }
 
@@ -31,12 +30,12 @@ enum SpeechFileUploadSupport {
             let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
             if let fileSize = attributes[.size] as? NSNumber,
                fileSize.int64Value > maxUploadBytes {
-                throw SpeechError.uploadFailed(provider: provider, reason: "Audio file exceeds \(maxUploadBytes) byte limit.")
+                throw SpeechError.uploadFailed(provider: provider, reason: .uploadFailed)
             }
         } catch let error as SpeechError {
             throw error
         } catch {
-            throw SpeechError.providerFailure(provider: provider, reason: error.localizedDescription)
+            throw SpeechError.providerFailure(provider: provider, reason: .requestFailed)
         }
     }
 
@@ -54,8 +53,7 @@ enum SpeechFileUploadSupport {
         if seconds.isFinite, seconds > maxDuration {
             throw SpeechError.uploadFailed(
                 provider: provider,
-                reason: "Audio exceeds the \(Int(maxDuration)) second limit."
-            )
+                reason: .uploadFailed)
         }
     }
 
@@ -79,7 +77,7 @@ enum SpeechFileUploadSupport {
             guard let fileSize = attributes[.size] as? NSNumber else { return }
             byteCount = fileSize.int64Value
         } catch {
-            throw SpeechError.providerFailure(provider: provider, reason: error.localizedDescription)
+            throw SpeechError.providerFailure(provider: provider, reason: .requestFailed)
         }
 
         // 16-bit mono little-endian PCM: two bytes per frame, one frame per sample.
@@ -88,8 +86,7 @@ enum SpeechFileUploadSupport {
         if seconds > maxDuration {
             throw SpeechError.uploadFailed(
                 provider: provider,
-                reason: "Audio exceeds the \(Int(maxDuration)) second limit."
-            )
+                reason: .uploadFailed)
         }
     }
 

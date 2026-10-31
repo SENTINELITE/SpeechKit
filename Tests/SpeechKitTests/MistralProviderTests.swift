@@ -85,16 +85,15 @@ struct MistralProviderTests {
 
         await #expect(throws: SpeechError.providerFailure(
             provider: .mistral,
-            reason: "language must be a two-letter ISO 639-1 code: \"en-US\"."
-        )) {
+            reason: .requestFailed)) {
             _ = try await client.makeRequest(file: fileURL, options: MistralFileTranscriptionOptions(language: "en-US"))
         }
 
-        await #expect(throws: SpeechError.providerFailure(provider: .mistral, reason: "contextBias entries cannot be empty: \" \".")) {
+        await #expect(throws: SpeechError.providerFailure(provider: .mistral, reason: .requestFailed)) {
             _ = try await client.makeRequest(file: fileURL, options: MistralFileTranscriptionOptions(contextBias: [" "]))
         }
 
-        await #expect(throws: SpeechError.providerFailure(provider: .mistral, reason: "timeoutInterval must be greater than 0.")) {
+        await #expect(throws: SpeechError.providerFailure(provider: .mistral, reason: .requestFailed)) {
             _ = try await client.makeRequest(file: fileURL, options: MistralFileTranscriptionOptions(timeoutInterval: 0))
         }
     }
@@ -111,7 +110,7 @@ struct MistralProviderTests {
 
     @Test("Mistral file transcription sends a resolved token as a bearer token")
     func mistralSendsResolvedTokenAsBearer() async throws {
-        let client = MistralFileTranscriptionClient(credential: .token(SpeechTokenProvider { "mistral-token" }))
+        let client = MistralFileTranscriptionClient(credential: .bearer(SpeechTokenResolver { _ in "mistral-token" }), endpoint: URL(string: "https://proxy.example.com/mistral"))
         let fileURL = mistralTemporaryAudioFileURL(named: "call.wav")
 
         let request = try await client.makeRequest(file: fileURL)
@@ -253,7 +252,7 @@ struct MistralProviderTests {
         let realtimeOptions = MistralRealtimeOptions(targetStreamingDelayMilliseconds: 240, diarize: true)
         let service = SpeechService(mistral: MistralConfiguration(apiKey: "mistral", realtimeOptions: realtimeOptions))
 
-        #expect(service.mistralRealtimeService.apiKey == "mistral")
+        #expect(service.mistralRealtimeService.credentialKind == .apiKey)
         #expect(service.mistralRealtimeService.options == realtimeOptions)
         #expect(SpeechRealtimeProvider.allCases.contains(.mistral))
         #expect(SpeechFileTranscriptionProvider.allCases.contains(.mistral))
@@ -276,7 +275,7 @@ struct MistralProviderTests {
     func mistralRealtimeHonorsEndpointOverride() throws {
         let endpoint = try #require(URL(string: "wss://proxy.example.com/mistral/realtime?region=eu"))
         let request = try MistralRealtimeWebSocket.makeConnectRequest(
-            credential: .token("mistral-token"),
+            credential: .bearer("mistral-token"),
             options: MistralRealtimeOptions(),
             endpoint: endpoint
         )
@@ -364,27 +363,25 @@ struct MistralProviderTests {
 
         #expect(throws: SpeechError.providerFailure(
             provider: .mistral,
-            reason: "targetStreamingDelayMilliseconds must be between 80 and 1200, or 2400."
-        )) {
+            reason: .requestFailed)) {
             try MistralRealtimeOptions(targetStreamingDelayMilliseconds: 1300).validate()
         }
-        #expect(throws: SpeechError.providerFailure(provider: .mistral, reason: "Unsupported realtime sampleRate: 4000.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .mistral, reason: .requestFailed)) {
             try MistralRealtimeOptions(sampleRate: 4000).validate()
         }
         #expect(throws: SpeechError.providerFailure(
             provider: .mistral,
-            reason: "language must be a two-letter ISO 639-1 code: \"eng\"."
-        )) {
+            reason: .requestFailed)) {
             try MistralRealtimeOptions(language: "eng").validate()
         }
-        #expect(throws: SpeechError.providerFailure(provider: .mistral, reason: "speakerReferences require diarize.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .mistral, reason: .requestFailed)) {
             try MistralRealtimeOptions(speakerReferences: [MistralSpeakerReference(name: "a", audio: Data([1]))]).validate()
         }
-        #expect(throws: SpeechError.providerFailure(provider: .mistral, reason: "speakerReferences cannot contain more than 8 clips.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .mistral, reason: .requestFailed)) {
             let references = (0..<9).map { MistralSpeakerReference(name: "speaker-\($0)", audio: Data([1])) }
             try MistralRealtimeOptions(diarize: true, speakerReferences: references).validate()
         }
-        #expect(throws: SpeechError.providerFailure(provider: .mistral, reason: "speakerReferences names must be unique.")) {
+        #expect(throws: SpeechError.providerFailure(provider: .mistral, reason: .requestFailed)) {
             let references = [MistralSpeakerReference(name: "a", audio: Data([1])), MistralSpeakerReference(name: "a", audio: Data([2]))]
             try MistralRealtimeOptions(diarize: true, speakerReferences: references).validate()
         }
@@ -516,8 +513,8 @@ struct MistralProviderTests {
 
         service.handleMessageForTesting(.error("Diarization is not compatible with turn detection."))
 
-        #expect(service.connectionState == .error("Diarization is not compatible with turn detection."))
-        #expect(service.lastError as? MistralRealtimeError == .connectionFailed("Diarization is not compatible with turn detection."))
+        #expect(service.connectionState == .error("The realtime session failed."))
+        #expect(service.lastError as? SpeechFailure == SpeechFailure(.server))
     }
 
     @MainActor
@@ -564,8 +561,7 @@ struct MistralProviderTests {
         await invalid.startListening()
         #expect(invalid.lastError as? SpeechError == .providerFailure(
             provider: .mistral,
-            reason: "targetStreamingDelayMilliseconds must be between 80 and 1200, or 2400."
-        ))
+            reason: .requestFailed))
         #expect(invalid.connectionState.isLifecycleActive == false)
     }
 }

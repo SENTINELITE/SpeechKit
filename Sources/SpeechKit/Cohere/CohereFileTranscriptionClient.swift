@@ -51,13 +51,13 @@ struct CohereFileTranscriptionClient {
     private let maxUploadBytes: Int64 = 25 * 1024 * 1024
     private let allowedExtensions: Set<String> = ["flac", "mp3", "mpeg", "mpga", "ogg", "wav"]
 
-    init(apiKey: String, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+    init(apiKey: String, endpoint: URL? = nil, urlSession: URLSession = SpeechTransport.session()) {
         self.init(credential: .apiKey(apiKey), endpoint: endpoint, urlSession: urlSession)
     }
 
-    init(credential: SpeechCredential, endpoint: URL? = nil, urlSession: URLSession = .shared) {
+    init(credential: SpeechCredential, endpoint: URL? = nil, urlSession: URLSession = SpeechTransport.session()) {
         self.credential = credential
-        self.urlSession = urlSession
+        self.urlSession = SpeechTransport.session(copying: urlSession, pinnedPublicKeyHashes: credential.pinnedPublicKeyHashes)
         self.uploadURL = endpoint ?? Self.defaultUploadURL
     }
 
@@ -67,21 +67,24 @@ struct CohereFileTranscriptionClient {
         language: CohereLanguage,
         temperature: Double?
     ) async throws -> String {
+        let prepared = try await SpeechRelayAudioImport.prepare(file: file, provider: .cohere,
+            optimizeUploads: credential.optimizeUploads, maxUploadBytes: maxUploadBytes)
+        defer { prepared.remove() }
+        let file = prepared.file
         let request = try await makeRequest(file: file, modelID: modelID, language: language, temperature: temperature)
-        let (data, response) = try await urlSession.data(for: request)
+        let (data, response) = try await SpeechTransport.data(for: request, session: urlSession, prepare: self.credential.relayRequestPreparation)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw SpeechError.invalidResponse(provider: .cohere)
         }
         guard (200...299).contains(httpResponse.statusCode) else {
-            let message = String(data: data, encoding: .utf8) ?? "HTTP \(httpResponse.statusCode)"
-            throw SpeechError.uploadFailed(provider: .cohere, reason: message)
+            throw SpeechFailure(.server, statusCode: httpResponse.statusCode)
         }
 
         do {
             let decoded = try JSONDecoder().decode(Response.self, from: data)
             return decoded.text
         } catch {
-            throw SpeechError.decodingFailed(provider: .cohere, reason: error.localizedDescription)
+            throw SpeechError.decodingFailed(provider: .cohere, reason: .decodingFailed)
         }
     }
 
@@ -94,7 +97,7 @@ struct CohereFileTranscriptionClient {
         guard credential.isConfigured else {
             throw SpeechError.providerNotConfigured(.cohere)
         }
-        let resolved = try await credential.resolved(for: .cohere)
+        let resolved = try await credential.resolved(for: .cohere, model: modelID.rawValue, endpoint: uploadURL)
         return try makeRequest(
             file: file,
             modelID: modelID,
@@ -106,8 +109,8 @@ struct CohereFileTranscriptionClient {
 
     /// Builds an upload request from an already-resolved secret.
     ///
-    /// Cohere accepts both a long-lived API key and a short-lived token as a
-    /// bearer token.
+    /// Cohere API keys and custom proxy credentials use Bearer authorization.
+    /// Native vendor-token mode is unsupported for this capability.
     func makeRequest(
         file: URL,
         modelID: CohereModelID,
@@ -115,7 +118,7 @@ struct CohereFileTranscriptionClient {
         temperature: Double?,
         secret: String
     ) throws -> URLRequest {
-        guard !secret.isEmpty else {
+        guard !secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw SpeechError.providerNotConfigured(.cohere)
         }
         guard let uploadURL else {
@@ -131,9 +134,9 @@ struct CohereFileTranscriptionClient {
             .text(name: "language", value: language.rawValue),
             .file(
                 name: "file",
-                fileURL: file,
+                fileURL: credential.uploadFileURL(file),
                 fileData: audioData,
-                contentType: SpeechFileUploadSupport.mimeType(for: file)
+                contentType: SpeechFileUploadSupport.mimeType(for: credential.uploadFileURL(file))
             )
         ]
 
@@ -153,7 +156,7 @@ struct CohereFileTranscriptionClient {
         do {
             return try Data(contentsOf: fileURL)
         } catch {
-            throw SpeechError.providerFailure(provider: .cohere, reason: error.localizedDescription)
+            throw SpeechError.providerFailure(provider: .cohere, reason: .requestFailed)
         }
     }
 }

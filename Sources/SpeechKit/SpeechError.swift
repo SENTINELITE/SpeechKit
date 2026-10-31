@@ -1,5 +1,11 @@
 import Foundation
 
+/// A bounded reason suitable for public diagnostics and exhaustive switching.
+public enum SpeechFailureReason: String, Sendable, CustomStringConvertible {
+    case requestFailed, invalidOptions, invalidResponse, uploadFailed, decodingFailed, timedOut, sessionEnding
+    public var description: String { rawValue }
+}
+
 /// Errors returned by provider-neutral SpeechKit APIs.
 public enum SpeechError: Error, LocalizedError, Sendable, Equatable {
     /// The requested provider has no configuration on the service.
@@ -13,11 +19,12 @@ public enum SpeechError: Error, LocalizedError, Sendable, Equatable {
     /// The provider returned a response that SpeechKit could not interpret.
     case invalidResponse(provider: SpeechFileTranscriptionProvider)
     /// The provider rejected or failed a file upload.
-    case uploadFailed(provider: SpeechFileTranscriptionProvider, reason: String)
+    case uploadFailed(provider: SpeechFileTranscriptionProvider, reason: SpeechFailureReason)
     /// SpeechKit could not decode the provider response.
-    case decodingFailed(provider: SpeechFileTranscriptionProvider, reason: String)
+    case decodingFailed(provider: SpeechFileTranscriptionProvider, reason: SpeechFailureReason)
     /// The provider request failed for a reason that does not fit a narrower case.
-    case providerFailure(provider: SpeechFileTranscriptionProvider, reason: String)
+    case providerFailure(provider: SpeechFileTranscriptionProvider, reason: SpeechFailureReason)
+    case httpFailure(provider: SpeechFileTranscriptionProvider, statusCode: Int)
     /// Apple's local speech transcription APIs are not available on this OS.
     case appleSpeechUnavailable
     /// Apple's local speech transcription APIs are unavailable on watchOS.
@@ -46,6 +53,8 @@ public enum SpeechError: Error, LocalizedError, Sendable, Equatable {
             return "Failed to decode \(provider.rawValue) response: \(reason)"
         case .providerFailure(let provider, let reason):
             return "\(provider.rawValue) request failed: \(reason)"
+        case .httpFailure(let provider, let statusCode):
+            return "\(provider.rawValue) request failed (HTTP \(statusCode))."
         case .appleSpeechUnavailable:
             return "Apple local speech transcription requires iOS 26, macOS 26, or visionOS 26."
         case .appleSpeechNotSupportedOnWatch:

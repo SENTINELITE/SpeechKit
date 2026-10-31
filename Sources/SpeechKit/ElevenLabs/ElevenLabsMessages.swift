@@ -168,25 +168,25 @@ public enum ElevenLabsError: Error, LocalizedError, Sendable {
     /// SpeechKit could not construct a valid ElevenLabs URL.
     case invalidURL
     /// The realtime connection failed.
-    case connectionFailed(String)
+    case connectionFailed(SpeechFailureReason)
     /// SpeechKit could not encode an outgoing realtime message.
     case encodingFailed
     /// SpeechKit could not decode an incoming realtime or file response.
-    case decodingFailed(String)
+    case decodingFailed(SpeechFailureReason)
     /// The realtime WebSocket disconnected.
     case disconnected
     /// The user denied microphone permission.
     case permissionDenied
     /// The audio engine failed.
-    case audioEngineError(String)
+    case audioEngineError(SpeechFailureReason)
     /// The ElevenLabs API key is empty.
     case apiKeyMissing
     /// SpeechKit could not read the audio file.
     case fileReadFailed
     /// ElevenLabs rejected or failed a file upload.
-    case uploadFailed(String)
+    case uploadFailed(SpeechFailureReason)
     /// The selected model is not supported for the requested operation.
-    case unsupportedModel(String)
+    case unsupportedModel(SpeechFailureReason)
     /// SpeechKit could not access a security-scoped file URL.
     case securityScopeDenied
     /// The file exceeds ElevenLabs upload limits.
