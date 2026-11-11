@@ -223,7 +223,8 @@ public final class SpeechService {
         elevenLabsRealtimeService.credentialPolicy = credentialPolicy
         elevenLabsRealtimeService.setCredential(elevenLabs?.credential(for: .realtime) ?? .apiKey(""))
         elevenLabsRealtimeService.realtimeEndpoint = elevenLabs?.realtimeEndpoint
-        elevenLabsRealtimeService.realtimeModelID = elevenLabs?.realtimeModelID ?? .scribeV2Realtime
+        elevenLabsRealtimeService.realtimeModelID = elevenLabs?.realtimeModelID ?? .scribeV3Live
+        elevenLabsRealtimeService.options = elevenLabs?.realtimeOptions ?? ElevenLabsRealtimeOptions()
     }
 
     private func applyOpenAIRealtimeConfig() {

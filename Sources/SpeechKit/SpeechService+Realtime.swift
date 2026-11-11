@@ -67,13 +67,7 @@ extension SpeechService {
     public var partialTranscriptEntry: SpeechTranscriptEntry? {
         switch activeRealtimeProvider {
         case .elevenLabs:
-            guard !elevenLabsRealtimeService.partialTranscriptText.isEmpty else { return nil }
-            return SpeechTranscriptEntry(
-                provider: .elevenLabs,
-                text: elevenLabsRealtimeService.partialTranscriptText,
-                isFinal: false,
-                isUtteranceFinal: false
-            )
+            return elevenLabsRealtimeService.partialTranscriptEntry
         case .openAI:
             guard !openAIRealtimeService.partialTranscriptText.isEmpty else { return nil }
             return SpeechTranscriptEntry(
@@ -218,6 +212,15 @@ extension SpeechService {
         transcriptEntries.map(\.text).joined(separator: " ")
     }
 
+    /// The model's confidence that the open turn has ended, from 0 to 1.
+    ///
+    /// Only ElevenLabs Scribe v3 Live reports a turn probability; other
+    /// providers return `nil`. It resets on each committed segment.
+    public var realtimeTurnProbability: Double? {
+        guard activeRealtimeProvider == .elevenLabs else { return nil }
+        return elevenLabsRealtimeService.turnProbability
+    }
+
     /// Starts realtime microphone transcription with the configured ElevenLabs provider.
     public func startListening() async {
         await startListening(provider: .elevenLabs)
@@ -290,6 +293,7 @@ extension SpeechService {
         elevenLabsRealtimeService.credential = elevenLabs.credential
         elevenLabsRealtimeService.realtimeEndpoint = elevenLabs.realtimeEndpoint
         elevenLabsRealtimeService.realtimeModelID = elevenLabs.realtimeModelID
+        elevenLabsRealtimeService.options = elevenLabs.realtimeOptions
         await elevenLabsRealtimeService.startListening()
     }
 

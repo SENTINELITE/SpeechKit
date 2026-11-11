@@ -64,8 +64,8 @@ struct SpeechServiceTests {
         let service = SpeechService(elevenLabs: ElevenLabsConfiguration(apiKey: "eleven"))
 
         #expect(service.elevenLabs?.credentialKind == .apiKey)
-        #expect(service.elevenLabs?.realtimeModelID == .scribeV2Realtime)
-        #expect(service.elevenLabs?.fileTranscriptionModelID == .scribeV2)
+        #expect(service.elevenLabs?.realtimeModelID == .scribeV3Live)
+        #expect(service.elevenLabs?.fileTranscriptionModelID == .scribeV3)
     }
 
     @MainActor

@@ -59,6 +59,14 @@ Configure provider-specific realtime defaults when creating ``SpeechService``:
 
 ```swift
 let speech = SpeechService(
+    elevenLabs: ElevenLabsConfiguration(
+        credential: .apiKey("<ELEVENLABS_API_KEY>"),
+        realtimeModelID: .scribeV3Live,
+        realtimeOptions: ElevenLabsRealtimeOptions(
+            diarize: true,
+            keyterms: ["SpeechKit"]
+        )
+    ),
     grok: GrokConfiguration(
         credential: .apiKey("<XAI_API_KEY>"),
         realtimeOptions: GrokRealtimeOptions(
@@ -109,6 +117,10 @@ let speech = SpeechService(
 ```
 
 `gpt-live-transcribe` is the low-latency default. Select `gpt-transcribe` for committed WebSocket turns when your app needs OpenAI's detected-language output. Both models use `languages` instead of the legacy singular `language` hint.
+
+ElevenLabs defaults to ``ElevenLabsModelID/scribeV3Live``, whose ``ElevenLabsRealtimeOptions/commitStrategy`` resolves to ``ElevenLabsCommitStrategy/turnPrediction`` under ``ElevenLabsCommitStrategy/automatic``: the model commits a segment once its turn probability reaches ElevenLabs' threshold, and ``SpeechService/realtimeTurnProbability`` reports the running value on every partial. `scribe_v2_realtime` resolves `.automatic` to ``ElevenLabsCommitStrategy/vad``; choose ``ElevenLabsCommitStrategy/manual`` only when your app calls ``ElevenLabsService/commitRealtimeSegment()`` itself, because the session otherwise never commits on its own.
+
+With ``ElevenLabsRealtimeOptions/diarize`` (Scribe v3 Live only), a commit lands as one entry immediately and the server's diarized result then replaces it with one entry per run of the same speaker, carrying `speaker_0`-style labels on the entry and its ``SpeechTranscriptEntry/words``. Later speaker merges rewrite earlier labels in place — an entry's ``SpeechTranscriptEntry/speaker`` can change after it was emitted, while its ``SpeechTranscriptEntry/id`` stays stable, so SwiftUI keeps row identity. Entries split from one segment share a `segment:N` ``SpeechTranscriptEntry/sourceID``. ``ElevenLabsRealtimeOptions/multilingual`` follows mid-sentence language switches, ``ElevenLabsRealtimeOptions/keytermLibrary`` sends the session's term list in the first audio message, ``ElevenLabsRealtimeOptions/previousText`` passes transcript context the same way, and ``ElevenLabsRealtimeOptions/entityDetection`` delivers ``ElevenLabsEntity`` spans through ``ElevenLabsService/entityDetections``. All four, plus diarization, are rejected with ``SpeechError/providerFailure(provider:reason:)`` on `scribe_v2_realtime`.
 
 Meta streams raw PCM and accepts 24 kHz or 16 kHz mono audio only, so ``MetaRealtimeOptions`` rejects ``MetaAudioEncoding/wav``. Use ``MetaPartialMode/cumulative`` when each partial event should carry the full turn text, and ``MetaPartialMode/delta`` when you only want the new words.
 
@@ -167,6 +179,11 @@ await speech.clearCredentials()
 
 ### Provider Realtime Services
 
+- ``ElevenLabsService``
+- ``ElevenLabsRealtimeOptions``
+- ``ElevenLabsCommitStrategy``
+- ``ElevenLabsService/commitRealtimeSegment()``
+- ``SpeechService/realtimeTurnProbability``
 - ``GrokRealtimeService``
 - ``OpenAIRealtimeService``
 - ``MetaRealtimeService``

@@ -16,7 +16,7 @@ extension SpeechService {
                     throw SpeechError.providerNotConfigured(.elevenLabs)
                 }
                 try validate(options: options, for: .elevenLabs)
-                let resolvedModelID = resolvedElevenLabsModelID(from: options, config: elevenLabs)
+                let resolvedOptions = resolvedElevenLabsOptions(from: options, config: elevenLabs)
                 let client = ElevenLabsFileTranscriptionClient(
                     credential: elevenLabs.credential,
                     endpoint: elevenLabs.fileEndpoint,
@@ -24,7 +24,7 @@ extension SpeechService {
                 )
 
                 do {
-                    return try await client.transcribeAudioFile(file: file, modelID: resolvedModelID)
+                    return try await client.transcribeAudioFile(file: file, options: resolvedOptions)
                 } catch {
                     throw wrap(error, for: .elevenLabs)
                 }
@@ -212,37 +212,71 @@ extension SpeechService {
 
     /// Transcribes an audio file with ElevenLabs and returns ElevenLabs's detailed response.
     ///
-    /// - Throws: ``SpeechError`` when ElevenLabs is missing, upload validation fails, or the provider request fails.
+    /// Set ``ElevenLabsFileTranscriptionOptions/diarize`` to label each word
+    /// with its speaker, and ``ElevenLabsFileTranscriptionOptions/entityDetection``
+    /// to collect detected entities.
+    ///
+    /// - Throws: ``SpeechError`` when ElevenLabs is missing, option validation fails, or the provider request fails.
     public func transcribeElevenLabsAudioFile(
         file: URL,
-        modelID: ElevenLabsModelID? = nil
+        options: ElevenLabsFileTranscriptionOptions? = nil
     ) async throws -> ElevenLabsFileTranscriptionResponse {
         return try await withFileOperation { [self] in
             guard let elevenLabs = try await resolvedElevenLabsConfiguration(capability: .fileTranscription) else {
                 throw SpeechError.providerNotConfigured(.elevenLabs)
             }
 
-            let client = ElevenLabsFileTranscriptionClient(
-                credential: elevenLabs.credential,
-                endpoint: elevenLabs.fileEndpoint,
-                urlSession: urlSession
-            )
-            let resolvedModelID = modelID ?? elevenLabs.fileTranscriptionModelID
+            let resolvedOptions = options ?? resolvedElevenLabsOptions(from: nil, config: elevenLabs)
+            return try await transcribeElevenLabsAudioFileDetailed(file: file, options: resolvedOptions, config: elevenLabs)
+        }
+    }
 
-            do {
-                return try await client.transcribeAudioFileDetailed(file: file, modelID: resolvedModelID)
-            } catch {
-                throw wrap(error, for: .elevenLabs)
+    /// Transcribes an audio file with ElevenLabs and returns ElevenLabs's detailed response.
+    ///
+    /// This overload keeps the model-only call shape; use the `options:` overload for the full option set.
+    ///
+    /// - Throws: ``SpeechError`` when ElevenLabs is missing, option validation fails, or the provider request fails.
+    public func transcribeElevenLabsAudioFile(
+        file: URL,
+        modelID: ElevenLabsModelID?
+    ) async throws -> ElevenLabsFileTranscriptionResponse {
+        return try await withFileOperation { [self] in
+            guard let elevenLabs = try await resolvedElevenLabsConfiguration(capability: .fileTranscription) else {
+                throw SpeechError.providerNotConfigured(.elevenLabs)
             }
+            var options = resolvedElevenLabsOptions(from: nil, config: elevenLabs)
+            if let modelID {
+                options.modelID = modelID
+            }
+            return try await transcribeElevenLabsAudioFileDetailed(file: file, options: options, config: elevenLabs)
         }
     }
 
     /// Transcribes a security-scoped audio file URL with ElevenLabs and returns ElevenLabs's detailed response.
     ///
-    /// - Throws: ``SpeechError`` when the file cannot be accessed, ElevenLabs is missing, upload validation fails, or the provider request fails.
+    /// - Throws: ``SpeechError`` when the file cannot be accessed, ElevenLabs is missing, option validation fails, or the provider request fails.
     public func transcribeElevenLabsAudioFile(
         securityScopedURL: URL,
-        modelID: ElevenLabsModelID? = nil
+        options: ElevenLabsFileTranscriptionOptions? = nil
+    ) async throws -> ElevenLabsFileTranscriptionResponse {
+        return try await withFileOperation { [self] in
+            let didStartAccess = securityScopedURL.startAccessingSecurityScopedResource()
+            guard didStartAccess else {
+                throw SpeechError.providerFailure(provider: .elevenLabs, reason: .requestFailed)
+            }
+            defer { securityScopedURL.stopAccessingSecurityScopedResource() }
+            return try await transcribeElevenLabsAudioFile(file: securityScopedURL, options: options)
+        }
+    }
+
+    /// Transcribes a security-scoped audio file URL with ElevenLabs and returns ElevenLabs's detailed response.
+    ///
+    /// This overload keeps the model-only call shape; use the `options:` overload for the full option set.
+    ///
+    /// - Throws: ``SpeechError`` when the file cannot be accessed, ElevenLabs is missing, option validation fails, or the provider request fails.
+    public func transcribeElevenLabsAudioFile(
+        securityScopedURL: URL,
+        modelID: ElevenLabsModelID?
     ) async throws -> ElevenLabsFileTranscriptionResponse {
         return try await withFileOperation { [self] in
             let didStartAccess = securityScopedURL.startAccessingSecurityScopedResource()
@@ -251,6 +285,24 @@ extension SpeechService {
             }
             defer { securityScopedURL.stopAccessingSecurityScopedResource() }
             return try await transcribeElevenLabsAudioFile(file: securityScopedURL, modelID: modelID)
+        }
+    }
+
+    /// Runs a detailed ElevenLabs upload inside an active file operation.
+    private func transcribeElevenLabsAudioFileDetailed(
+        file: URL,
+        options: ElevenLabsFileTranscriptionOptions,
+        config: ElevenLabsConfiguration
+    ) async throws -> ElevenLabsFileTranscriptionResponse {
+        let client = ElevenLabsFileTranscriptionClient(
+            credential: config.credential,
+            endpoint: config.fileEndpoint,
+            urlSession: urlSession
+        )
+        do {
+            return try await client.transcribeAudioFileDetailed(file: file, options: options)
+        } catch {
+            throw wrap(error, for: .elevenLabs)
         }
     }
 
@@ -613,14 +665,49 @@ extension SpeechService {
         }
     }
 
-    func resolvedElevenLabsModelID(
+    /// The ElevenLabs file options a request implies.
+    ///
+    /// ``ElevenLabsConfiguration/fileTranscriptionModelID`` is the single
+    /// source of truth for the model; every other field merges the request's
+    /// overrides over ``ElevenLabsConfiguration/fileOptions``.
+    func resolvedElevenLabsOptions(
         from options: SpeechFileTranscriptionOptions?,
         config: ElevenLabsConfiguration
-    ) -> ElevenLabsModelID {
-        guard case .elevenLabs(let modelID) = options else {
-            return config.fileTranscriptionModelID
+    ) -> ElevenLabsFileTranscriptionOptions {
+        var resolved = config.fileOptions
+        resolved.modelID = config.fileTranscriptionModelID
+        guard
+            case .elevenLabs(
+                let modelID,
+                let language,
+                let secondaryLanguages,
+                let numbersFormat,
+                let diarize,
+                let speakerCount,
+                let diarizationThreshold,
+                let keyterms,
+                let tagAudioEvents,
+                let noVerbatim,
+                let entityDetection,
+                let timeoutInterval
+            ) = options
+        else {
+            return resolved
         }
-        return modelID ?? config.fileTranscriptionModelID
+
+        resolved.modelID = modelID ?? config.fileTranscriptionModelID
+        resolved.language = language ?? resolved.language
+        resolved.secondaryLanguages = secondaryLanguages ?? resolved.secondaryLanguages
+        resolved.numbersFormat = numbersFormat ?? resolved.numbersFormat
+        resolved.diarize = diarize ?? resolved.diarize
+        resolved.speakerCount = speakerCount ?? resolved.speakerCount
+        resolved.diarizationThreshold = diarizationThreshold ?? resolved.diarizationThreshold
+        resolved.keyterms = keyterms ?? resolved.keyterms
+        resolved.tagAudioEvents = tagAudioEvents ?? resolved.tagAudioEvents
+        resolved.noVerbatim = noVerbatim ?? resolved.noVerbatim
+        resolved.entityDetection = entityDetection ?? resolved.entityDetection
+        resolved.timeoutInterval = timeoutInterval ?? resolved.timeoutInterval
+        return resolved
     }
 
     func resolvedAquaOptions(

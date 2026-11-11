@@ -18,6 +18,7 @@ It supports two workflows:
 - Provider-neutral realtime transcript state.
 - Provider-neutral file transcription for simple text results.
 - Provider-specific options and detailed responses when you need timestamps, diarization, usage metadata, or model-specific controls.
+- ElevenLabs Scribe v3 for file uploads and Scribe v3 Live for realtime sessions, with speaker diarization, turn prediction, keyterms, and entity detection.
 - Meta Muse Voice Transcribe and Gemini 3.5 Transcribe for both realtime sessions and file uploads.
 - Mistral Voxtral Transcribe 3 for realtime sessions and file uploads, with speaker diarization you can turn on per request or per session.
 - Fish Audio Transcribe 1 Pro for file uploads and Transcribe Stream 1 (in preview) for realtime sessions, with speaker labels and word timings.
@@ -411,18 +412,24 @@ Realtime state lives on `SpeechService`:
 
 ### Realtime: ElevenLabs
 
-Configure ElevenLabs and call `startListening(provider: .elevenLabs)`. Calling `startListening()` without a provider also starts ElevenLabs.
+ElevenLabs defaults to Scribe v3 Live, which commits each segment with turn prediction. Call `startListening(provider: .elevenLabs)`; calling `startListening()` without a provider also starts ElevenLabs.
 
 ```swift
 let speech = SpeechService(
     elevenLabs: ElevenLabsConfiguration(
         credential: .apiKey("<ELEVENLABS_API_KEY>"),
-        realtimeModelID: .scribeV2Realtime
+        realtimeModelID: .scribeV3Live,
+        realtimeOptions: ElevenLabsRealtimeOptions(
+            diarize: true,
+            keyterms: ["SpeechKit"]
+        )
     )
 )
 
 await speech.startListening(provider: .elevenLabs)
 ```
+
+With diarization on, each committed segment resolves into one entry per run of the same speaker, labeled `speaker_0`, `speaker_1`, and so on. Later speaker merges rewrite earlier labels in place while entry ids stay stable. `realtimeTurnProbability` reports the model's turn-end confidence on every partial. `ElevenLabsRealtimeOptions` also covers the commit strategy (`manual`, `vad`, `turnPrediction`, or the model-aware `automatic`), VAD tuning, language hints with multilingual mode, a session `keytermLibrary`, `previousText` context, `noVerbatim`, and entity detection — all validated before the socket opens.
 
 ### Realtime: OpenAI
 
@@ -617,23 +624,24 @@ let text = try await speech.transcribeAudioFile(
 
 ### File: ElevenLabs
 
-Use ElevenLabs Scribe for straightforward file transcription.
+Use ElevenLabs Scribe v3 for file transcription, with speaker diarization, keyterms, audio-event tagging, number formatting, and entity detection.
 
 ```swift
 let speech = SpeechService(
     elevenLabs: ElevenLabsConfiguration(
         credential: .apiKey("<ELEVENLABS_API_KEY>"),
-        fileTranscriptionModelID: .scribeV2
+        fileTranscriptionModelID: .scribeV3
     )
 )
 
 let text = try await speech.transcribeAudioFile(
     provider: .elevenLabs,
-    file: audioFileURL
+    file: audioFileURL,
+    options: .elevenLabs(diarize: true, keyterms: ["SpeechKit"])
 )
 ```
 
-Call `transcribeElevenLabsAudioFile(file:modelID:)` instead when you need the detailed `ElevenLabsFileTranscriptionResponse`, which carries the detected `languageCode` and word-level timings in `words`.
+Call `transcribeElevenLabsAudioFile(file:options:)` instead when you need the detailed `ElevenLabsFileTranscriptionResponse`, which carries the detected `languageCode` and `languageProbability`, word-level timings with `speakerID` labels, audio events, and detected `entities`.
 
 ### File: Aqua
 

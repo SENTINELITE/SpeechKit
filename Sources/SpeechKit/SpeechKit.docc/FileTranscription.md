@@ -45,6 +45,29 @@ print(elevenLabsResponse.languageCode ?? "")
 print(elevenLabsResponse.words ?? [])
 ```
 
+ElevenLabs defaults to ``ElevenLabsModelID/scribeV3``. ``ElevenLabsFileTranscriptionOptions/diarize`` labels each word with a speaker (`speaker_0`, `speaker_1`, …) in ``ElevenLabsFileTranscriptionResponse/words``; ``ElevenLabsFileTranscriptionOptions/speakerCount`` caps the speaker count, and ``ElevenLabsFileTranscriptionOptions/diarizationThreshold`` tunes how eagerly speakers split — the two cannot be combined. ``ElevenLabsFileTranscriptionOptions/keyterms`` bias spelling toward the right terms, ``ElevenLabsFileTranscriptionOptions/tagAudioEvents`` marks sounds such as laughter as `audio_event` words, and ``ElevenLabsFileTranscriptionOptions/entityDetection`` returns ``ElevenLabsEntity`` spans.
+
+Privacy: this example prints transcript content or error details. Use synthetic or explicitly consented data only; omit these prints from production logs.
+
+```swift
+let scribeResponse = try await speech.transcribeElevenLabsAudioFile(
+    file: audioFileURL,
+    options: ElevenLabsFileTranscriptionOptions(
+        diarize: true,
+        speakerCount: 4,
+        keyterms: ["SpeechKit"],
+        tagAudioEvents: true
+    )
+)
+
+print(scribeResponse.text)
+for word in scribeResponse.words ?? [] {
+    print("\(word.speakerID ?? "-"): \(word.text)")
+}
+```
+
+Scribe v3 adds ``ElevenLabsFileTranscriptionOptions/secondaryLanguages`` and ``ElevenLabsFileTranscriptionOptions/numbersFormat``; both are rejected with ``SpeechError/providerFailure(provider:reason:)`` on `scribe_v2` and `scribe_v2_medical`. ``ElevenLabsFileTranscriptionOptions/noVerbatim`` removes filler words and false starts on every Scribe model.
+
 OpenAI defaults to ``OpenAIFileTranscriptionModelID/gptTranscribe`` for completed recordings. It accepts ``OpenAIFileTranscriptionOptions/prompt``, keyword hints, and multiple expected language codes:
 
 ```swift
@@ -191,6 +214,7 @@ Relay normalization writes canonical PCM16 WAV with a 44-byte header and only `f
 
 | Provider | Formats | Size limit | Duration limit |
 | --- | --- | --- | --- |
+| ElevenLabs | Provider-supported audio | 5 GB | 15 hours |
 | Meta | WAV | 32 MB | 10 minutes |
 | Gemini | WAV, MP3, AIFF, AAC, OGG, Opus, FLAC, M4A, WebM | 20 MB inline, then the Files API | 1 hour, or 30 minutes with diarization or word timestamps |
 | Fish Audio | WAV, MP3, AAC, M4A, MP4, FLAC, Ogg Opus or Vorbis, WebM, MOV; not AIFF or CAF | Not published; send compressed audio | 60 minutes |
@@ -214,6 +238,7 @@ The `options` value must match the selected provider. Passing `.elevenLabs(...)`
 
 ### Detailed Responses
 
+- ``SpeechService/transcribeElevenLabsAudioFile(file:options:)``
 - ``SpeechService/transcribeElevenLabsAudioFile(file:modelID:)``
 - ``SpeechService/transcribeAquaAudioFile(file:options:)``
 - ``SpeechService/transcribeGrokAudioFile(file:options:)``
@@ -223,8 +248,13 @@ The `options` value must match the selected provider. Passing `.elevenLabs(...)`
 - ``SpeechService/transcribeMistralAudioFile(file:options:)``
 - ``SpeechService/transcribeFishAudioAudioFile(file:options:)``
 - ``SpeechService/transcribeAppleAudioFile(file:options:)``
+- ``ElevenLabsFileTranscriptionOptions``
 - ``ElevenLabsFileTranscriptionResponse``
 - ``ElevenLabsWordTimestamp``
+- ``ElevenLabsEntity``
+- ``ElevenLabsEntityDetection``
+- ``ElevenLabsEntityCategory``
+- ``ElevenLabsNumbersFormat``
 - ``AquaFileTranscriptionResponse``
 - ``GrokFileTranscriptionResponse``
 - ``OpenAIFileTranscriptionResponse``

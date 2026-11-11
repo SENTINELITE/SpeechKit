@@ -117,8 +117,11 @@ struct PublicAPISmokeTests {
         ])
         #expect(ElevenLabsModelID.allCases.map(\.rawValue) == [
             "scribe_v2_realtime",
+            "scribe_v3_live",
             "scribe_v1",
             "scribe_v2",
+            "scribe_v3",
+            "scribe_v2_medical",
         ])
     }
 

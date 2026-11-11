@@ -23,6 +23,14 @@ public struct ElevenLabsConfiguration: Sendable, Equatable {
     public var realtimeModelID: ElevenLabsModelID
     /// The ElevenLabs model used by file transcription APIs.
     public var fileTranscriptionModelID: ElevenLabsModelID
+    /// The default ElevenLabs file transcription options.
+    ///
+    /// ``fileTranscriptionModelID`` is the single source of truth for the
+    /// model: it overrides ``ElevenLabsFileTranscriptionOptions/modelID`` on
+    /// the configured options.
+    public var fileOptions: ElevenLabsFileTranscriptionOptions
+    /// The default ElevenLabs realtime session options.
+    public var realtimeOptions: ElevenLabsRealtimeOptions
     /// An override for the ElevenLabs file transcription endpoint, or `nil` to use the vendor default.
     public var fileEndpoint: URL?
     /// An override for the ElevenLabs realtime WebSocket endpoint, or `nil` to use the vendor default.
@@ -31,8 +39,10 @@ public struct ElevenLabsConfiguration: Sendable, Equatable {
     /// Creates an ElevenLabs configuration with a long-lived API key.
     public init(
         apiKey: String = "",
-        realtimeModelID: ElevenLabsModelID = .scribeV2Realtime,
-        fileTranscriptionModelID: ElevenLabsModelID = .scribeV2,
+        realtimeModelID: ElevenLabsModelID = .scribeV3Live,
+        fileTranscriptionModelID: ElevenLabsModelID = .scribeV3,
+        fileOptions: ElevenLabsFileTranscriptionOptions = ElevenLabsFileTranscriptionOptions(),
+        realtimeOptions: ElevenLabsRealtimeOptions = ElevenLabsRealtimeOptions(),
         fileEndpoint: URL? = nil,
         realtimeEndpoint: URL? = nil
     ) {
@@ -40,6 +50,8 @@ public struct ElevenLabsConfiguration: Sendable, Equatable {
             credential: .apiKey(apiKey),
             realtimeModelID: realtimeModelID,
             fileTranscriptionModelID: fileTranscriptionModelID,
+            fileOptions: fileOptions,
+            realtimeOptions: realtimeOptions,
             fileEndpoint: fileEndpoint,
             realtimeEndpoint: realtimeEndpoint
         )
@@ -48,14 +60,18 @@ public struct ElevenLabsConfiguration: Sendable, Equatable {
     /// Creates an ElevenLabs configuration with any credential.
     public init(
         credential: SpeechCredential,
-        realtimeModelID: ElevenLabsModelID = .scribeV2Realtime,
-        fileTranscriptionModelID: ElevenLabsModelID = .scribeV2,
+        realtimeModelID: ElevenLabsModelID = .scribeV3Live,
+        fileTranscriptionModelID: ElevenLabsModelID = .scribeV3,
+        fileOptions: ElevenLabsFileTranscriptionOptions = ElevenLabsFileTranscriptionOptions(),
+        realtimeOptions: ElevenLabsRealtimeOptions = ElevenLabsRealtimeOptions(),
         fileEndpoint: URL? = nil,
         realtimeEndpoint: URL? = nil
     ) {
         self.credential = credential
         self.realtimeModelID = realtimeModelID
         self.fileTranscriptionModelID = fileTranscriptionModelID
+        self.fileOptions = fileOptions
+        self.realtimeOptions = realtimeOptions
         self.fileEndpoint = fileEndpoint
         self.realtimeEndpoint = realtimeEndpoint
     }
@@ -1060,7 +1076,23 @@ public enum SpeechFileTranscriptionProvider: String, Sendable, CaseIterable {
 /// Provider-specific options for a single file transcription request.
 public enum SpeechFileTranscriptionOptions: Sendable, Equatable {
     /// Options for an ElevenLabs file transcription request.
-    case elevenLabs(modelID: ElevenLabsModelID? = nil)
+    ///
+    /// Every field defaults to `nil`, which keeps the configured
+    /// ``ElevenLabsConfiguration/fileOptions`` default.
+    case elevenLabs(
+        modelID: ElevenLabsModelID? = nil,
+        language: String? = nil,
+        secondaryLanguages: [String]? = nil,
+        numbersFormat: ElevenLabsNumbersFormat? = nil,
+        diarize: Bool? = nil,
+        speakerCount: Int? = nil,
+        diarizationThreshold: Double? = nil,
+        keyterms: [String]? = nil,
+        tagAudioEvents: Bool? = nil,
+        noVerbatim: Bool? = nil,
+        entityDetection: ElevenLabsEntityDetection? = nil,
+        timeoutInterval: TimeInterval? = nil
+    )
     /// Options for an Aqua file transcription request.
     case aqua(modelID: AquaModelID? = nil, language: AquaLanguage? = nil)
     /// Options for a Cohere file transcription request.

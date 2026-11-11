@@ -89,6 +89,7 @@ private func elevenLabsSessionStarted(sessionID: String) -> SessionStarted {
             audioFormat: "pcm_s16le_16",
             languageCode: nil,
             modelID: "scribe_v2_realtime",
+            commitStrategy: nil,
             vadCommitStrategy: true,
             vadSilenceThresholdSecs: 0.5,
             vadThreshold: 0.5,

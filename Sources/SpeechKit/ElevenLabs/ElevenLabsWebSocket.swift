@@ -18,12 +18,15 @@ actor ElevenLabsWebSocket {
     ///
     /// An API key goes in the `xi-api-key` header. A short-lived ElevenLabs
     /// token goes in the `token` query parameter, which is where ElevenLabs
-    /// accepts single-use realtime scribe tokens.
+    /// accepts single-use realtime scribe tokens. Every session option is a
+    /// query parameter on the connection URL.
     nonisolated static func makeConnectRequest(
         credential: SpeechResolvedCredential,
         modelID: ElevenLabsModelID,
+        options: ElevenLabsRealtimeOptions = ElevenLabsRealtimeOptions(),
         endpoint: URL? = nil
     ) throws -> URLRequest {
+        try options.validate(modelID: modelID)
         try SpeechEndpointPolicy.validate(endpoint ?? defaultURL, websocket: true)
         try SpeechResolvedCredential.validateSecret(credential.secret)
         guard let baseURL = endpoint ?? defaultURL,
@@ -32,7 +35,50 @@ actor ElevenLabsWebSocket {
         }
 
         var queryItems = components.queryItems ?? []
-        queryItems.append(URLQueryItem(name: "model_id", value: modelID.rawValue))
+        func append(_ name: String, _ value: String?) {
+            queryItems.append(URLQueryItem(name: name, value: value))
+        }
+        append("model_id", modelID.rawValue)
+        append("commit_strategy", options.commitStrategyParameter(for: modelID))
+        if let language = options.language {
+            append("language_code", language)
+        }
+        for code in options.secondaryLanguages {
+            append("secondary_languages", code)
+        }
+        if options.multilingual {
+            append("multilang_mode", "true")
+        }
+        if options.diarize {
+            append("diarize", "true")
+        }
+        if let threshold = options.vadSilenceThresholdSeconds {
+            append("vad_silence_threshold_secs", String(threshold))
+        }
+        if let threshold = options.vadThreshold {
+            append("vad_threshold", String(threshold))
+        }
+        if let milliseconds = options.minSpeechDurationMilliseconds {
+            append("min_speech_duration_ms", String(milliseconds))
+        }
+        if let milliseconds = options.minSilenceDurationMilliseconds {
+            append("min_silence_duration_ms", String(milliseconds))
+        }
+        if options.includeTimestamps {
+            append("include_timestamps", "true")
+        }
+        if options.includeLanguageDetection {
+            append("include_language_detection", "true")
+        }
+        if options.noVerbatim {
+            append("no_verbatim", "true")
+        }
+        for keyterm in options.keyterms {
+            append("keyterms", keyterm)
+        }
+        for value in options.entityDetectionValues {
+            append("entity_detection", value)
+        }
 
         components.queryItems = queryItems
 
@@ -48,9 +94,10 @@ actor ElevenLabsWebSocket {
     func connect(
         credential: SpeechResolvedCredential,
         modelID: ElevenLabsModelID,
+        options: ElevenLabsRealtimeOptions = ElevenLabsRealtimeOptions(),
         endpoint: URL? = nil
     ) async throws -> AsyncThrowingStream<ElevenLabsMessage, Error> {
-        let request = try Self.makeConnectRequest(credential: credential, modelID: modelID, endpoint: endpoint)
+        let request = try Self.makeConnectRequest(credential: credential, modelID: modelID, options: options, endpoint: endpoint)
 
         disconnect()
         let generation = connectionGeneration

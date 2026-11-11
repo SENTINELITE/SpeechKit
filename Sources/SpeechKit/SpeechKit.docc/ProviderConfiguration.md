@@ -39,8 +39,12 @@ Each configuration type supplies provider defaults. Request-level options overri
 let speech = SpeechService(
     elevenLabs: ElevenLabsConfiguration(
         credential: .apiKey("<ELEVENLABS_API_KEY>"),
-        realtimeModelID: .scribeV2Realtime,
-        fileTranscriptionModelID: .scribeV2
+        realtimeModelID: .scribeV3Live,
+        fileTranscriptionModelID: .scribeV3,
+        realtimeOptions: ElevenLabsRealtimeOptions(
+            diarize: true,
+            keyterms: ["SpeechKit"]
+        )
     ),
     grok: GrokConfiguration(
         credential: .apiKey("<XAI_API_KEY>"),
@@ -210,6 +214,15 @@ See <doc:ShippingInProduction> for the dated provider/capability/auth-placement 
 
 ### Request Options
 
+- ``ElevenLabsFileTranscriptionOptions``
+- ``ElevenLabsRealtimeOptions``
+- ``ElevenLabsCommitStrategy``
+- ``ElevenLabsNumbersFormat``
+- ``ElevenLabsEntityDetection``
+- ``ElevenLabsEntityCategory``
+- ``ElevenLabsWordTimestamp``
+- ``ElevenLabsEntity``
+- ``ElevenLabsFileTranscriptionResponse``
 - ``AppleSpeechFileTranscriptionOptions``
 - ``GrokRealtimeOptions``
 - ``GrokRealtimeAudioEncoding``

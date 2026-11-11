@@ -14,7 +14,7 @@ File transcription uploads an audio file and returns text or provider-specific m
 let speech = SpeechService(
     elevenLabs: ElevenLabsConfiguration(
         credential: .apiKey("<ELEVENLABS_API_KEY>"),
-        fileTranscriptionModelID: .scribeV2
+        fileTranscriptionModelID: .scribeV3
     )
 )
 
@@ -22,6 +22,24 @@ let text = try await speech.transcribeAudioFile(
     provider: .elevenLabs,
     file: audioFileURL
 )
+```
+
+Diarization labels each word in ``ElevenLabsFileTranscriptionResponse/words`` with its speaker, and audio-event tagging returns sounds such as laughter as `audio_event` words:
+
+```swift
+let response = try await speech.transcribeElevenLabsAudioFile(
+    file: audioFileURL,
+    options: ElevenLabsFileTranscriptionOptions(
+        diarize: true,
+        speakerCount: 4,
+        keyterms: ["SpeechKit"],
+        tagAudioEvents: true
+    )
+)
+
+for word in response.words ?? [] {
+    print("\(word.speakerID ?? "-") \(word.type): \(word.text)")
+}
 ```
 
 ### Aqua Files
@@ -238,15 +256,25 @@ Realtime transcription streams microphone audio and updates observable transcrip
 
 ### ElevenLabs Realtime
 
+Scribe v3 Live commits each segment when its turn prediction says the turn ended. With diarization on, each committed segment resolves into one entry per run of the same speaker:
+
 ```swift
 let speech = SpeechService(
     elevenLabs: ElevenLabsConfiguration(
         credential: .apiKey("<ELEVENLABS_API_KEY>"),
-        realtimeModelID: .scribeV2Realtime
+        realtimeModelID: .scribeV3Live,
+        realtimeOptions: ElevenLabsRealtimeOptions(
+            diarize: true,
+            keyterms: ["SpeechKit"]
+        )
     )
 )
 
 await speech.startListening(provider: .elevenLabs)
+
+for entry in speech.transcriptEntries {
+    print("\(entry.speaker ?? "-"): \(entry.text)")
+}
 ```
 
 ### OpenAI Realtime
