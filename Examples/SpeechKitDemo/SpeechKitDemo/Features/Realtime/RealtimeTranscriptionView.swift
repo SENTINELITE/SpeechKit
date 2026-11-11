@@ -13,9 +13,24 @@ struct RealtimeTranscriptionView: View {
     let prepareAudioExport: () -> Void
 
     private var displayedTranscript: String {
-        [speech.transcriptText, speech.partialTranscriptText]
+        guard configuration.realtimeProvider == .elevenLabs,
+              speech.transcriptEntries.contains(where: { $0.speaker != nil }) else {
+            return [speech.transcriptText, speech.partialTranscriptText]
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+        }
+        return [speech.transcriptEntries.speakerLabeledText, partialSpeakerText ?? speech.partialTranscriptText]
             .filter { !$0.isEmpty }
-            .joined(separator: " ")
+            .joined(separator: "\n\n")
+    }
+
+    /// The live partial prefixed with its draft speaker, while diarization resolves it.
+    private var partialSpeakerText: String? {
+        guard let entry = speech.partialTranscriptEntry, !entry.text.isEmpty,
+              let speaker = entry.speaker ?? entry.words.last(where: { $0.speaker != nil })?.speaker else {
+            return nil
+        }
+        return "\(speaker): \(entry.text)"
     }
 
     private var isAudioActive: Bool {
@@ -95,6 +110,14 @@ struct RealtimeTranscriptionView: View {
                 }
             )
 
+            if let turnProbability = speech.realtimeTurnProbability, isAudioActive {
+                VStack {
+                    Spacer()
+                    turnProbabilityIndicator(turnProbability)
+                        .padding(.bottom, 150)
+                }
+            }
+
             DemoControlDock(
                 primaryTitle: primaryControlTitle,
                 primaryIcon: microphoneIconName,
@@ -137,6 +160,23 @@ struct RealtimeTranscriptionView: View {
         speech.clearTranscript()
         resetRealtimeWords()
         await speech.startListening(provider: configuration.realtimeProvider.speechProvider)
+    }
+
+    /// Shows ElevenLabs' confidence that the open turn has ended while a session runs.
+    private func turnProbabilityIndicator(_ value: Double) -> some View {
+        HStack(spacing: 8) {
+            Text("Turn")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            ProgressView(value: min(max(value, 0), 1))
+                .frame(width: 72)
+            Text(value, format: .percent.precision(.fractionLength(0)))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .glassSurface(cornerRadius: 14)
     }
 
     /// Presents the current realtime transcript in the shared transcript sheet.

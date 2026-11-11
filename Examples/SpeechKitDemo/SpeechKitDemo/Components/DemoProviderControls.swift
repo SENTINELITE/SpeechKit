@@ -45,10 +45,44 @@ struct FileProviderOptionsView: View {
     var body: some View {
         switch provider ?? configuration.fileProvider {
         case .elevenLabs:
+            let isScribeV3 = configuration.elevenLabsFileModel == .scribeV3
             Picker("Model", selection: $configuration.elevenLabsFileModel) {
-                ForEach(ElevenLabsModelID.allCases.filter { $0 != .scribeV2Realtime }, id: \.self) { model in
+                ForEach([ElevenLabsModelID.scribeV3, .scribeV2, .scribeV2Medical], id: \.self) { model in
                     Text(model.rawValue).tag(model)
                 }
+            }
+
+            Toggle("Diarize", isOn: $configuration.elevenLabsDiarize)
+
+            Toggle("Limit speakers", isOn: $configuration.elevenLabsSpeakerLimit)
+                .disabled(!configuration.elevenLabsDiarize)
+            if configuration.elevenLabsSpeakerLimit {
+                Stepper("Speakers: \(configuration.elevenLabsSpeakerCount)", value: $configuration.elevenLabsSpeakerCount, in: 1...32)
+                    .disabled(!configuration.elevenLabsDiarize)
+            }
+
+            Picker("Numbers", selection: $configuration.elevenLabsNumbersFormat) {
+                ForEach(DemoElevenLabsNumbersFormat.allCases) { format in
+                    Text(format.title).tag(format)
+                }
+            }
+            .disabled(!isScribeV3)
+
+            TextField("Secondary languages (comma separated)", text: $configuration.elevenLabsSecondaryLanguages)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .disabled(!isScribeV3)
+
+            TextField("Keyterms (comma or newline separated)", text: $configuration.elevenLabsKeyterms, axis: .vertical)
+                .lineLimit(2...4)
+
+            Toggle("Tag audio events", isOn: $configuration.elevenLabsTagAudioEvents)
+            Toggle("No verbatim", isOn: $configuration.elevenLabsNoVerbatim)
+
+            if !isScribeV3 {
+                Text("Numbers format and secondary languages need scribe_v3.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         case .aqua:
             Picker("Model", selection: $configuration.aquaModel) {
@@ -231,8 +265,32 @@ struct RealtimeOnlyOptionsView: View {
     var body: some View {
         switch provider {
         case .elevenLabs:
+            let isScribeV3Live = configuration.elevenLabsRealtimeModel == .scribeV3Live
             Picker("Model", selection: $configuration.elevenLabsRealtimeModel) {
+                Text(ElevenLabsModelID.scribeV3Live.rawValue).tag(ElevenLabsModelID.scribeV3Live)
                 Text(ElevenLabsModelID.scribeV2Realtime.rawValue).tag(ElevenLabsModelID.scribeV2Realtime)
+            }
+
+            Picker("Commit strategy", selection: $configuration.elevenLabsRealtimeCommitStrategy) {
+                ForEach(DemoElevenLabsCommitStrategy.allCases) { strategy in
+                    Text(strategy.title)
+                        .tag(strategy)
+                        .disabled(strategy == .turnPrediction && !isScribeV3Live)
+                }
+            }
+
+            Toggle("Speaker labels", isOn: $configuration.elevenLabsRealtimeDiarize)
+                .disabled(!isScribeV3Live)
+            Toggle("Multilingual mode", isOn: $configuration.elevenLabsRealtimeMultilingual)
+                .disabled(!isScribeV3Live)
+
+            TextField("Keyterms (comma or newline separated)", text: $configuration.elevenLabsRealtimeKeyterms, axis: .vertical)
+                .lineLimit(2...4)
+
+            if !isScribeV3Live {
+                Text("Speaker labels, multilingual mode, and turn prediction need scribe_v3_live.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         case .openAI:
             Picker("Session model", selection: $configuration.openAIRealtimeSessionModel) {
@@ -328,6 +386,57 @@ extension GrokLanguage {
 /// a display name.
 extension MetaLanguage {
     var displayName: String { rawValue }
+}
+
+/// Speaker-labeled text for diarized ElevenLabs file transcripts.
+extension ElevenLabsFileTranscriptionResponse {
+    /// One `speaker_0: text` line per speaker turn, merging consecutive words from
+    /// the same speaker. Falls back to ``text`` when no word has a speaker.
+    var speakerLabeledText: String {
+        guard let words, words.contains(where: { $0.speakerID != nil }) else { return text }
+
+        var turns: [(speaker: String?, text: String)] = []
+        for word in words {
+            // A spacing token with no speaker belongs to the turn it sits in.
+            let joinsCurrentTurn = word.speakerID == nil && word.type == "spacing"
+            if let last = turns.last, last.speaker == word.speakerID || joinsCurrentTurn {
+                turns[turns.count - 1].text += word.text
+            } else {
+                turns.append((word.speakerID, word.text))
+            }
+        }
+        return turns
+            .map { turn in
+                let turnText = turn.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                return turn.speaker.map { "\($0): \(turnText)" } ?? turnText
+            }
+            .joined(separator: "\n\n")
+    }
+}
+
+/// Speaker-labeled text for diarized realtime entries, such as ElevenLabs speaker runs.
+extension [SpeechTranscriptEntry] {
+    /// One `speaker_0: text` line per speaker turn, merging consecutive entries
+    /// from the same speaker. Falls back to plain joined text when no entry has a speaker.
+    var speakerLabeledText: String {
+        guard contains(where: { $0.speaker != nil }) else {
+            return map(\.text).joined(separator: " ")
+        }
+
+        var turns: [(speaker: String?, text: String)] = []
+        for entry in self {
+            let entryText = entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !entryText.isEmpty else { continue }
+            if let last = turns.last, last.speaker == entry.speaker {
+                turns[turns.count - 1].text = last.text + " " + entryText
+            } else {
+                turns.append((entry.speaker, entryText))
+            }
+        }
+        return turns
+            .map { turn in turn.speaker.map { "\($0): \(turn.text)" } ?? turn.text }
+            .joined(separator: "\n\n")
+    }
 }
 
 /// Speaker-labeled text for diarized Mistral file transcripts.

@@ -70,6 +70,60 @@ enum DemoMistralStreamingDelay: String, CaseIterable, Identifiable {
     }
 }
 
+/// How Scribe v3 writes numbers, exposed by the ElevenLabs file settings.
+enum DemoElevenLabsNumbersFormat: String, CaseIterable, Identifiable {
+    case automatic
+    case digits
+    case words
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .automatic: "Automatic"
+        case .digits: "Digits"
+        case .words: "Words"
+        }
+    }
+
+    /// The format sent to ElevenLabs, or `nil` to let the model choose.
+    var speechKitValue: ElevenLabsNumbersFormat? {
+        switch self {
+        case .automatic: nil
+        case .digits: .digits
+        case .words: .words
+        }
+    }
+}
+
+/// Commit strategies exposed by the ElevenLabs realtime settings.
+enum DemoElevenLabsCommitStrategy: String, CaseIterable, Identifiable {
+    case automatic
+    case turnPrediction
+    case vad
+    case manual
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .automatic: "Automatic"
+        case .turnPrediction: "Turn prediction"
+        case .vad: "Voice activity"
+        case .manual: "Manual"
+        }
+    }
+
+    var speechKitValue: ElevenLabsCommitStrategy {
+        switch self {
+        case .automatic: .automatic
+        case .turnPrediction: .turnPrediction
+        case .vad: .vad
+        case .manual: .manual
+        }
+    }
+}
+
 /// Apple's on-device `SpeechAnalyzer` needs iOS 26; the demo still runs on iOS 18.
 enum DemoAppleSpeech {
     static var isAvailable: Bool {
@@ -407,6 +461,61 @@ final class DemoConfiguration {
         didSet { set(elevenLabsFileModel.rawValue, for: "elevenLabsFileModel") }
     }
 
+    /// Labels speakers in ElevenLabs file transcripts.
+    var elevenLabsDiarize: Bool {
+        didSet { set(elevenLabsDiarize, for: "elevenLabsDiarize") }
+    }
+
+    /// Whether ElevenLabs file transcription caps the detected speaker count.
+    var elevenLabsSpeakerLimit: Bool {
+        didSet { set(elevenLabsSpeakerLimit, for: "elevenLabsSpeakerLimit") }
+    }
+
+    /// The maximum speaker count sent to ElevenLabs when the limit is on.
+    var elevenLabsSpeakerCount: Int {
+        didSet { set(elevenLabsSpeakerCount, for: "elevenLabsSpeakerCount") }
+    }
+
+    /// How Scribe v3 writes numbers; automatic lets the model choose.
+    var elevenLabsNumbersFormat: DemoElevenLabsNumbersFormat {
+        didSet { set(elevenLabsNumbersFormat.rawValue, for: "elevenLabsNumbersFormat") }
+    }
+
+    /// Additional ISO 639 language codes Scribe v3 expects in the audio.
+    var elevenLabsSecondaryLanguages: String {
+        didSet { set(elevenLabsSecondaryLanguages, for: "elevenLabsSecondaryLanguages") }
+    }
+
+    /// Terms that bias ElevenLabs file transcription; session-only private text.
+    var elevenLabsKeyterms: String
+
+    /// Keeps sound cues such as laughter in ElevenLabs file transcripts.
+    var elevenLabsTagAudioEvents: Bool {
+        didSet { set(elevenLabsTagAudioEvents, for: "elevenLabsTagAudioEvents") }
+    }
+
+    /// Removes filler words and false starts from ElevenLabs transcripts.
+    var elevenLabsNoVerbatim: Bool {
+        didSet { set(elevenLabsNoVerbatim, for: "elevenLabsNoVerbatim") }
+    }
+
+    /// Labels speakers in Scribe v3 Live sessions.
+    var elevenLabsRealtimeDiarize: Bool {
+        didSet { set(elevenLabsRealtimeDiarize, for: "elevenLabsRealtimeDiarize") }
+    }
+
+    /// Lets Scribe v3 Live follow language switches mid-sentence.
+    var elevenLabsRealtimeMultilingual: Bool {
+        didSet { set(elevenLabsRealtimeMultilingual, for: "elevenLabsRealtimeMultilingual") }
+    }
+
+    var elevenLabsRealtimeCommitStrategy: DemoElevenLabsCommitStrategy {
+        didSet { set(elevenLabsRealtimeCommitStrategy.rawValue, for: "elevenLabsRealtimeCommitStrategy") }
+    }
+
+    /// Terms that bias ElevenLabs realtime sessions; session-only private text.
+    var elevenLabsRealtimeKeyterms: String
+
     var aquaModel: AquaModelID {
         didSet { set(aquaModel.rawValue, for: "aquaModel") }
     }
@@ -625,8 +734,20 @@ final class DemoConfiguration {
         realtimeProvider = DemoRealtimeProvider.allCases.contains(savedRealtimeProvider) ? savedRealtimeProvider : .elevenLabs
         let savedFileProvider: DemoFileProvider = Self.enumValue(for: "fileProvider", default: .openAI, defaults: defaults)
         fileProvider = DemoFileProvider.allCases.contains(savedFileProvider) ? savedFileProvider : .openAI
-        elevenLabsRealtimeModel = Self.enumValue(for: "elevenLabsRealtimeModel", default: .scribeV2Realtime, defaults: defaults)
-        elevenLabsFileModel = Self.enumValue(for: "elevenLabsFileModel", default: .scribeV2, defaults: defaults)
+        elevenLabsRealtimeModel = Self.enumValue(for: "elevenLabsRealtimeModel", default: .scribeV3Live, defaults: defaults)
+        elevenLabsFileModel = Self.enumValue(for: "elevenLabsFileModel", default: .scribeV3, defaults: defaults)
+        elevenLabsDiarize = defaults.object(forKey: "elevenLabsDiarize") as? Bool ?? false
+        elevenLabsSpeakerLimit = defaults.object(forKey: "elevenLabsSpeakerLimit") as? Bool ?? false
+        elevenLabsSpeakerCount = defaults.object(forKey: "elevenLabsSpeakerCount") as? Int ?? 2
+        elevenLabsNumbersFormat = Self.enumValue(for: "elevenLabsNumbersFormat", default: .automatic, defaults: defaults)
+        elevenLabsSecondaryLanguages = defaults.string(forKey: "elevenLabsSecondaryLanguages") ?? ""
+        elevenLabsKeyterms = ""
+        elevenLabsTagAudioEvents = defaults.object(forKey: "elevenLabsTagAudioEvents") as? Bool ?? false
+        elevenLabsNoVerbatim = defaults.object(forKey: "elevenLabsNoVerbatim") as? Bool ?? false
+        elevenLabsRealtimeDiarize = defaults.object(forKey: "elevenLabsRealtimeDiarize") as? Bool ?? false
+        elevenLabsRealtimeMultilingual = defaults.object(forKey: "elevenLabsRealtimeMultilingual") as? Bool ?? false
+        elevenLabsRealtimeCommitStrategy = Self.enumValue(for: "elevenLabsRealtimeCommitStrategy", default: .automatic, defaults: defaults)
+        elevenLabsRealtimeKeyterms = ""
         aquaModel = Self.enumValue(for: "aquaModel", default: .avalonV15, defaults: defaults)
         aquaLanguage = Self.optionalEnumValue(for: "aquaLanguage", defaults: defaults)
         cohereModel = Self.enumValue(for: "cohereModel", default: .transcribe032026, defaults: defaults)
@@ -725,6 +846,8 @@ final class DemoConfiguration {
         geminiCustomVocabulary = ""
         mistralContextBias = ""
         fishAudioRealtimeTerms = ""
+        elevenLabsKeyterms = ""
+        elevenLabsRealtimeKeyterms = ""
         appleContextualStrings = ""
         DemoPrivateTextPreferences.clearSavedValues(in: defaults)
     }
@@ -775,7 +898,14 @@ final class DemoConfiguration {
             speech.elevenLabs = ElevenLabsConfiguration(
                 credential: .apiKey(key),
                 realtimeModelID: elevenLabsRealtimeModel,
-                fileTranscriptionModelID: elevenLabsFileModel
+                fileTranscriptionModelID: elevenLabsFileModel,
+                fileOptions: elevenLabsFileOptions,
+                realtimeOptions: ElevenLabsRealtimeOptions(
+                    multilingual: elevenLabsRealtimeMultilingual,
+                    commitStrategy: elevenLabsRealtimeCommitStrategy.speechKitValue,
+                    diarize: elevenLabsRealtimeDiarize,
+                    keyterms: termList(elevenLabsRealtimeKeyterms)
+                )
             )
         }
 
@@ -993,6 +1123,26 @@ final class DemoConfiguration {
         }
     }
 
+    /// ElevenLabs file options for the detailed request the demo makes when diarization is
+    /// on, so the transcript can show who said what.
+    var elevenLabsFileOptions: ElevenLabsFileTranscriptionOptions {
+        ElevenLabsFileTranscriptionOptions(
+            modelID: elevenLabsFileModel,
+            secondaryLanguages: commaSeparatedValues(elevenLabsSecondaryLanguages),
+            numbersFormat: elevenLabsNumbersFormat.speechKitValue,
+            diarize: elevenLabsDiarize,
+            speakerCount: elevenLabsDiarize && elevenLabsSpeakerLimit ? elevenLabsSpeakerCount : nil,
+            keyterms: termList(elevenLabsKeyterms),
+            tagAudioEvents: elevenLabsTagAudioEvents,
+            noVerbatim: elevenLabsNoVerbatim
+        )
+    }
+
+    /// Whether an ElevenLabs file request returns speaker labels worth showing.
+    var elevenLabsReturnsSpeakers: Bool {
+        elevenLabsDiarize
+    }
+
     /// Mistral file options for the detailed request the demo makes when diarization is on,
     /// so the transcript can show who said what.
     var mistralFileOptions: MistralFileTranscriptionOptions {
@@ -1099,6 +1249,11 @@ final class DemoConfiguration {
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+    /// Parses comma- or newline-separated keyterm text without persisting empty entries.
+    private func termList(_ value: String) -> [String] {
+        commaSeparatedValues(value.replacingOccurrences(of: "\n", with: ","))
     }
 
     /// Reads a persisted raw-representable value or returns a default.
