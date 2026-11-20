@@ -231,18 +231,38 @@ struct FishAudioRealtimeMessageTests {
 
     @Test("Fish Audio control messages encode as exact bytes")
     func controlMessageBytes() {
-        // {"type": "keepalive"}
-        #expect(Array(FishAudioRealtimeClientMessage.keepalive.encoded()) == [0x81, 0xa4] + Array("type".utf8) + [0xa9] + Array("keepalive".utf8))
-        // {"type": "audio_done"}
-        #expect(Array(FishAudioRealtimeClientMessage.audioDone.encoded()) == [0x81, 0xa4] + Array("type".utf8) + [0xaa] + Array("audio_done".utf8))
-        // {"type": "finalize"}
-        #expect(Array(FishAudioRealtimeClientMessage.finalize.encoded()) == [0x81, 0xa4] + Array("type".utf8) + [0xa8] + Array("finalize".utf8))
+        let typeKey: [UInt8] = [0xa4] + Array("type".utf8)
+        let singleField: [UInt8] = [0x81] + typeKey
+        let twoFields: [UInt8] = [0x82] + typeKey
+
+        func singleControl(_ name: String, marker: UInt8) -> [UInt8] {
+            var expected = singleField
+            expected.append(marker)
+            expected.append(contentsOf: name.utf8)
+            return expected
+        }
+
+        #expect(Array(FishAudioRealtimeClientMessage.keepalive.encoded()) == singleControl("keepalive", marker: 0xa9))
+        #expect(Array(FishAudioRealtimeClientMessage.audioDone.encoded()) == singleControl("audio_done", marker: 0xaa))
+        #expect(Array(FishAudioRealtimeClientMessage.finalize.encoded()) == singleControl("finalize", marker: 0xa8))
+
         // {"type": "agent_speaking", "speaking": true}
-        #expect(Array(FishAudioRealtimeClientMessage.agentSpeaking(true).encoded()) ==
-            [0x82, 0xa4] + Array("type".utf8) + [0xae] + Array("agent_speaking".utf8) + [0xa8] + Array("speaking".utf8) + [0xc3])
+        var speaking = twoFields
+        speaking.append(0xae)
+        speaking.append(contentsOf: "agent_speaking".utf8)
+        speaking.append(0xa8)
+        speaking.append(contentsOf: "speaking".utf8)
+        speaking.append(0xc3)
+        #expect(Array(FishAudioRealtimeClientMessage.agentSpeaking(true).encoded()) == speaking)
+
         // {"type": "audio", "data": bin8}
-        #expect(Array(FishAudioRealtimeClientMessage.audio(Data([1, 2, 3, 4])).encoded()) ==
-            [0x82, 0xa4] + Array("type".utf8) + [0xa5] + Array("audio".utf8) + [0xa4] + Array("data".utf8) + [0xc4, 0x04, 1, 2, 3, 4])
+        var audio = twoFields
+        audio.append(0xa5)
+        audio.append(contentsOf: "audio".utf8)
+        audio.append(0xa4)
+        audio.append(contentsOf: "data".utf8)
+        audio.append(contentsOf: [0xc4, 0x04, 1, 2, 3, 4])
+        #expect(Array(FishAudioRealtimeClientMessage.audio(Data([1, 2, 3, 4])).encoded()) == audio)
     }
 
     @Test("Fish Audio context_add and configure encode their fields")
