@@ -83,6 +83,13 @@ Then import it where you need speech features:
 import SpeechKit
 ```
 
+## Command-line tool
+
+Use the [speechkit CLI](https://github.com/SENTINELITE/speechkit-cli) to
+transcribe files from the terminal, compare providers, and export text, JSON,
+SRT, or WebVTT. Download the Apple Silicon build for macOS 15 or later from
+[GitHub Releases](https://github.com/SENTINELITE/speechkit-cli/releases).
+
 ## Try the Demo App
 
 This repository includes `SpeechKitDemo`, a SwiftUI iOS app that exercises the package in a real app target. Use it to try realtime transcription, record-and-upload dictation, standalone file transcription, provider selection, and API-key settings.
