@@ -395,28 +395,14 @@ enum SpeechRelayAudioImport {
             wave = try SpeechRelayWAV.Writer(file: wav)
         }
         var frames: Int64 = 0
-        var inputFrames: Int64 = 0
+        let maximumInputDuration = min(Double(workLimits.maxFrames) / 16_000, maxDuration ?? .infinity)
         while true {
             try Task.checkCancellation()
             var error: NSError?
             let status = converter.convert(to: buffer, error: &error) { count, state in
-                do {
-                    try Task.checkCancellation()
-                    let input = try reader.read(min(count, 8192))
-                    inputFrames += Int64(input.frameLength)
-                    if Double(inputFrames) / reader.format.sampleRate > Double(workLimits.maxFrames) / 16_000 {
-                        throw SpeechFailure(.audioTooLong)
-                    }
-                    if let maxDuration, Double(inputFrames) / reader.format.sampleRate > maxDuration {
-                        throw SpeechFailure(.audioTooLong)
-                    }
-                    state.pointee = input.frameLength == 0 ? .endOfStream : .haveData
-                    return input.frameLength == 0 ? nil : input
-                } catch {
-                    reader.error = error
-                    state.pointee = .endOfStream
-                    return nil
-                }
+                let input = reader.nextBuffer(count, maximumDuration: maximumInputDuration)
+                state.pointee = input == nil ? .endOfStream : .haveData
+                return input
             }
             if let error = reader.error { throw error }
             guard status != .error, error == nil else { throw SpeechFailure(.audioNormalizationFailed) }
@@ -447,12 +433,18 @@ enum SpeechRelayAudioImport {
         return output
     }
 
-    private final class Reader {
+    // AVAudioConverter's synchronous input block is @Sendable on older SDKs.
+    // The lock serializes file reads, frame accounting, and error access.
+    private final class Reader: @unchecked Sendable {
         let format: AVAudioFormat
         let length: AVAudioFramePosition
-        let audio: AVAudioFile?
-        let raw: FileHandle?
-        var error: Error?
+        private let audio: AVAudioFile?
+        private let raw: FileHandle?
+        private let lock = NSLock()
+        private var inputFrames: Int64 = 0
+        private var readError: Error?
+
+        var error: Error? { lock.withLock { readError } }
 
         init(file: URL, rawPCM: RawPCM?) throws {
             if let rawPCM {
@@ -479,7 +471,25 @@ enum SpeechRelayAudioImport {
 
         deinit { try? raw?.close() }
 
-        func read(_ count: AVAudioFrameCount) throws -> AVAudioPCMBuffer {
+        func nextBuffer(_ count: AVAudioFrameCount, maximumDuration: TimeInterval) -> AVAudioPCMBuffer? {
+            lock.withLock {
+                guard readError == nil else { return nil }
+                do {
+                    try Task.checkCancellation()
+                    let buffer = try read(min(count, 8192))
+                    inputFrames += Int64(buffer.frameLength)
+                    if Double(inputFrames) / format.sampleRate > maximumDuration {
+                        throw SpeechFailure(.audioTooLong)
+                    }
+                    return buffer.frameLength == 0 ? nil : buffer
+                } catch {
+                    readError = error
+                    return nil
+                }
+            }
+        }
+
+        private func read(_ count: AVAudioFrameCount) throws -> AVAudioPCMBuffer {
             guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count) else {
                 throw SpeechFailure(.audioNormalizationFailed)
             }

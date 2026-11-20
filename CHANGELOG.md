@@ -6,6 +6,12 @@ SpeechKit follows semantic versioning. Source-breaking changes ship in a new maj
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-11-20
+
+- Fix Swift 6.2 builds by synchronizing Relay audio converter input state.
+- Compile the Apple Speech file client diagnostic conformance only where the
+  client is available, restoring the watchOS build.
+
 ## [3.0.0] - 2026-11-20
 
 This release includes the never-published 2.1.0 Mistral and Fish Audio work. The previous release was 2.0.1. Credential access and error payloads change in 3.0.

@@ -3,7 +3,7 @@
 [![CI](https://github.com/SENTINELITE/SpeechKit/actions/workflows/ci.yml/badge.svg)](https://github.com/SENTINELITE/SpeechKit/actions/workflows/ci.yml)
 ![Swift](https://img.shields.io/badge/Swift-6.2-orange.svg)
 ![Platforms](https://img.shields.io/badge/platforms-iOS%2018%20%7C%20macOS%2015%20%7C%20watchOS%2011%20%7C%20visionOS%202-lightgrey.svg)
-![Status](https://img.shields.io/badge/status-3.0.0-blue.svg)
+![Status](https://img.shields.io/badge/status-3.0.1-blue.svg)
 
 SpeechKit is a Swift package for adding speech-to-text to Swift and SwiftUI apps with a small async/await API.
 
@@ -28,7 +28,7 @@ It supports two workflows:
 
 ## Status
 
-SpeechKit `3.0.0` is the release documented here. It includes the never-published 2.1.0 Mistral and Fish Audio work, opaque credentials, explicit auth modes, and the relay client. The previous release was 2.0.1. See [the changelog](CHANGELOG.md) for source breaks and migration steps.
+SpeechKit `3.0.1` is the current release. The 3.0 line includes the never-published 2.1.0 Mistral and Fish Audio work, opaque credentials, explicit auth modes, and the relay client. The previous major version is 2.x. See [the changelog](CHANGELOG.md) for source breaks and migration steps.
 
 ## Sponsor the project
 > <img width="1500" height="500" alt="SpeechKit" src="https://github.com/user-attachments/assets/3f3b68e7-37fb-46c7-a139-2b513b2e184c" />
@@ -69,12 +69,12 @@ Add SpeechKit as a Swift Package dependency in Xcode:
 1. Open your app project.
 2. Select `File > Add Package Dependencies...`.
 3. Enter `https://github.com/SENTINELITE/SpeechKit.git`.
-4. Select version `3.0.0` or later within the 3.x line, then add the `SpeechKit` library to your app target.
+4. Select version `3.0.1` or later within the 3.x line, then add the `SpeechKit` library to your app target.
 
 For a package manifest:
 
 ```swift
-.package(url: "https://github.com/SENTINELITE/SpeechKit.git", from: "3.0.0")
+.package(url: "https://github.com/SENTINELITE/SpeechKit.git", from: "3.0.1")
 ```
 
 Then import it where you need speech features:

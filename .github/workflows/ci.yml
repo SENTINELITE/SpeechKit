@@ -88,7 +88,7 @@ jobs:
             --output-dir '${{ runner.temp }}/SpeechKit.doccarchive' \
             --fallback-display-name SpeechKit \
             --fallback-bundle-identifier com.sentinelite.SpeechKit \
-            --fallback-bundle-version 3.0.0 \
+            --fallback-bundle-version 3.0.1 \
             --warnings-as-errors
 
   platform-build:

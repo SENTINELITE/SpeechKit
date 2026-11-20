@@ -24,9 +24,11 @@ extension MetaConfiguration: SpeechRedactedDiagnostics {}
 extension GeminiConfiguration: SpeechRedactedDiagnostics {}
 extension MistralConfiguration: SpeechRedactedDiagnostics {}
 extension FishAudioConfiguration: SpeechRedactedDiagnostics {}
+#if !os(watchOS)
 @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
 @available(watchOS, unavailable)
 extension AppleSpeechFileTranscriptionClient: SpeechRedactedDiagnostics {}
+#endif
 extension CohereFileTranscriptionClient: SpeechRedactedDiagnostics {}
 extension FishAudioFileTranscriptionClient: SpeechRedactedDiagnostics {}
 extension FishAudioRealtimeService: SpeechRedactedDiagnostics {}
