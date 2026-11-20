@@ -1,5 +1,5 @@
 {
-  "originHash" : "f358e08ca4dfe91defba0d68f3ae1ef65322f1cb9dbbb68a52e35ad6157100d7",
+  "originHash" : "17aac5b8ec22c4c11dd6af7eabb8327f7f5066533c632c8fa6b129907ed786cf",
   "pins" : [
     {
       "identity" : "aurora",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/Desert-Ant-Labs/desert-ant-core.git",
       "state" : {
-        "revision" : "9e11fdf9566df2e34b9516ac76403b1ff0f839d8",
-        "version" : "3.1.0"
+        "revision" : "baf4e6e3b4655c8e54aa8d5a25215b5f35f899a7",
+        "version" : "4.3.0"
       }
     },
     {
@@ -24,8 +24,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/SENTINELITE/SpeechKit-Voz.git",
       "state" : {
-        "revision" : "6c6a05fbb9abc2d49b270f84ce3de46fe98b4cb1",
-        "version" : "1.0.0"
+        "revision" : "fa32a72257234c7ef905495bebc8e797bc60dd71",
+        "version" : "1.1.0"
       }
     },
     {

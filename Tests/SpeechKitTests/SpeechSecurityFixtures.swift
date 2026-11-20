@@ -41,7 +41,17 @@ final class SecurityFixtureRegistry: @unchecked Sendable {
     func get(_ host: String) -> SecurityHTTPFixture? { lock.withLock { fixtures[host]?.fixture } }
 }
 
-final class SecurityURLProtocol: URLProtocol, @unchecked Sendable {
+final class SecurityURLProtocol: URLProtocol {
+    // Only this test fixture's single deferred response crosses the task boundary.
+    // The protocol instance remains owned by URLSession and has no mutable fixture state.
+    private struct DeferredResponse: @unchecked Sendable {
+        let target: SecurityURLProtocol
+
+        func deliver(for request: URLRequest, fixture: SecurityHTTPFixture) {
+            target.deliverResponse(for: request, fixture: fixture)
+        }
+    }
+
     static let registry = SecurityFixtureRegistry()
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -66,9 +76,10 @@ final class SecurityURLProtocol: URLProtocol, @unchecked Sendable {
         fixture.record(captured)
         if let beforeResponse = fixture.beforeResponse {
             let request = captured
-            Task.detached { @Sendable [self, request, fixture, beforeResponse] in
+            let response = DeferredResponse(target: self)
+            Task.detached {
                 await beforeResponse(request)
-                deliverResponse(for: request, fixture: fixture)
+                response.deliver(for: request, fixture: fixture)
             }
         } else { deliverResponse(for: captured, fixture: fixture) }
     }

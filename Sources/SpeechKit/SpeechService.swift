@@ -140,7 +140,7 @@ public final class SpeechService {
     /// Creates a speech service with Apple local Speech configuration.
     ///
     /// Use this initializer only on OS versions that expose `SpeechAnalyzer`
-    /// and `SpeechTranscriber`. The base ``SpeechService/init(elevenLabs:cohere:grok:aqua:openAI:meta:gemini:mistral:fishAudio:)``
+    /// and `SpeechTranscriber`. The base ``SpeechService/init(elevenLabs:cohere:grok:aqua:openAI:meta:gemini:mistral:fishAudio:credentialPolicy:)``
     /// initializer remains available for the package's lower deployment targets.
     @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
     @available(watchOS, unavailable)

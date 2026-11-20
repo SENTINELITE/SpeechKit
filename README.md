@@ -28,7 +28,7 @@ It supports two workflows:
 
 ## Status
 
-SpeechKit `3.0.0` is the release documented here. It includes the never-published 2.1.0 Mistral and Fish Audio work, opaque credentials, explicit auth modes, and the relay client. The last published version is 2.0.1. See [the changelog](CHANGELOG.md) for source breaks and migration steps.
+SpeechKit `3.0.0` is the release documented here. It includes the never-published 2.1.0 Mistral and Fish Audio work, opaque credentials, explicit auth modes, and the relay client. The previous release was 2.0.1. See [the changelog](CHANGELOG.md) for source breaks and migration steps.
 
 ## Sponsor the project
 > <img width="1500" height="500" alt="SpeechKit" src="https://github.com/user-attachments/assets/3f3b68e7-37fb-46c7-a139-2b513b2e184c" />

@@ -36,6 +36,7 @@ struct VozSettingsView: View {
 
     private var statusSection: some View {
         Section {
+            LabeledContent("Version", value: VozModelDetails.revision)
             Label(stateTitle, systemImage: statusImageName)
                 .foregroundStyle(statusColor)
 
@@ -96,7 +97,7 @@ struct VozSettingsView: View {
 
     private var aboutSection: some View {
         Section {
-            Text("VOZ transcribes selected and recorded audio on this device. The first download is about 467 MB.")
+            Text("VOZ transcribes selected and recorded audio on this device. The first download is about \(VozModelDetails.downloadMegabytes) MB.")
                 .font(.callout)
             Link("Powered by Desert Ant Labs", destination: URL(string: "https://desertant.com")!)
             Link("VOZ License", destination: URL(string: "https://license.desertant.com/1.0")!)
@@ -136,7 +137,7 @@ struct VozSettingsView: View {
         case .checkingCache:
             "VOZ checks every cached file's digest before loading. This reports no progress."
         case .loading:
-            "The first load after a download takes about 20 seconds while the Neural Engine specializes the model. Later loads take a fraction of a second. Core ML reports no progress for this step."
+            "The Neural Engine specializes the model on the first load. Core ML reports no progress for this step."
         case .unprepared where isModelCached:
             "The model files are on this device. Loading them does not download anything."
         case .unprepared, .downloading, .ready, .failed:

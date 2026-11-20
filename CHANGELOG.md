@@ -6,9 +6,9 @@ SpeechKit follows semantic versioning. Source-breaking changes ship in a new maj
 
 ## [Unreleased]
 
-## [3.0.0] - 2026-10-30
+## [3.0.0] - 2026-11-20
 
-This release includes the never-published 2.1.0 Mistral and Fish Audio work. The last published version is 2.0.1. Credential access and error payloads change in 3.0.
+This release includes the never-published 2.1.0 Mistral and Fish Audio work. The previous release was 2.0.1. Credential access and error payloads change in 3.0.
 
 ### Added
 
@@ -62,7 +62,7 @@ This release includes the never-published 2.1.0 Mistral and Fish Audio work. The
 
 ### Migrating from 2.x
 
-2.0.1 is the last published release. The unreleased 2.1.0 provider additions ship here, so 3.0.0 includes their exhaustive-switch changes as well as the credential and error breaks.
+2.0.1 is the previous release. The unreleased 2.1.0 provider additions ship here, so 3.0.0 includes their exhaustive-switch changes as well as the credential and error breaks.
 
 1. Replace `SpeechTokenProvider` with `SpeechTokenResolver`; it is removed, not a deprecated alias. Resolver closures now accept a `SpeechTokenContext`, so a closure that ignores it starts with `{ _ in ... }`. The result can be a `String` or `SpeechAccessToken`. `token()` is gone; call your own backend adapter when your application needs a token outside SpeechKit. Resolver equality still uses its UUID `id`.
 2. Replace `.token(...)` with `.vendorToken(resolver)` for supported native tokens or `.bearer(resolver)` for your own proxy and separately authorized Gemini REST OAuth. No public `.relay(...)` factory exists; create `SpeechRelay` instead. Unsupported provider/capability combinations fail before token resolution or vendor I/O. In particular, OpenAI file transcription cannot use a Realtime secret, Fish/Grok STT cannot use agent/voice tokens, and Mistral native-token mode permits only `.voxtralMiniTranscribeRealtime2602`, not Voxtral 3.

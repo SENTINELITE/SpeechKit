@@ -21,7 +21,7 @@ The demo pulls in [SpeechKit-Voz](https://github.com/SENTINELITE/SpeechKit-Voz) 
 
 1. Run the app on iOS 18 or later. A physical device is recommended.
 2. Open Settings and choose VOZ under On-Device.
-3. Choose "Download and Load". The model is roughly 467 MB and needs a network connection only when it is not already cached. The page shows a percentage while downloading. Verifying cached files and loading the model report no progress, so the page shows elapsed time for those steps instead.
+3. Choose "Download and Load". The VOZ v0.5.0 model is about 337 MB and needs a network connection only when it is not already cached. The page shows a percentage while downloading. Verifying cached files and loading the model report no progress, so the page shows elapsed time for those steps instead.
 4. Select "VOZ (On Device)" in File Transcription or Dictation.
 5. Select a file or record audio, then transcribe it. The demo shows the text, timing, speed, and word timestamps.
 
