@@ -17,3 +17,14 @@ units before credentials or HTTP with optimization off, and converts to PCM
 with optimization on. The local conversion intermediate is private ADTS,
 produced at syntax-proven access-unit boundaries with duration and byte caps.
 It is never uploaded and is removed with the prepared directory.
+
+`black-video.mov` contains two synthetic black MJPEG frames and no audio.
+Relay upload tests mux it with their synthetic AAC track to check that the
+video track is removed and the encoded audio packets are preserved. Keeping
+the frames pre-encoded avoids requiring a video encoder on CI runners.
+
+```sh
+ffmpeg -f lavfi -i 'color=c=black:s=64x64:r=1' \
+  -t 2 -an -c:v mjpeg -pix_fmt yuvj420p -threads 1 -fflags +bitexact \
+  -flags:v +bitexact -map_metadata -1 black-video.mov
+```

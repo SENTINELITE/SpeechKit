@@ -59,7 +59,7 @@ struct SpeechRelayUploadOptimizationTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let original = try audio(in: directory, codec: kAudioFormatMPEG4AAC)
         let file = directory.appendingPathComponent("movie.mov")
-        try await movie(audio: original, to: file, directory: directory)
+        try await movie(audio: original, to: file)
         let bytes = try Data(contentsOf: file)
         #expect(throws: SpeechFailure(.unsupportedMediaType)) { try SpeechRelayMP4.duration(file) }
         let prepared = try await SpeechRelayAudioImport.prepare(file: file, provider: .openAI,
@@ -363,7 +363,7 @@ struct SpeechRelayUploadOptimizationTests {
         var file = try audio(in: directory, codec: kind == "alac" ? kAudioFormatAppleLossless : kAudioFormatMPEG4AAC)
         if kind == "video" {
             let target = directory.appendingPathComponent("video.mov")
-            try await movie(audio: file, to: target, directory: directory)
+            try await movie(audio: file, to: target)
             file = target
         } else if kind == "meta" {
             let target = directory.appendingPathComponent("fast.m4a")
@@ -499,30 +499,9 @@ struct SpeechRelayUploadOptimizationTests {
         return result
     }
 
-    private func movie(audio: URL, to output: URL, directory: URL) async throws {
-        let video = directory.appendingPathComponent("silent.mov")
-        let writer = try AVAssetWriter(outputURL: video, fileType: .mov)
-        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.jpeg,
-            AVVideoWidthKey: 64, AVVideoHeightKey: 64])
-        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input,
-            sourcePixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-                kCVPixelBufferWidthKey as String: 64, kCVPixelBufferHeightKey as String: 64])
-        writer.add(input)
-        #expect(writer.startWriting())
-        writer.startSession(atSourceTime: .zero)
-        var pixel: CVPixelBuffer?
-        #expect(CVPixelBufferCreate(kCFAllocatorDefault, 64, 64, kCVPixelFormatType_32BGRA, nil, &pixel) == kCVReturnSuccess)
-        let buffer = try #require(pixel)
-        CVPixelBufferLockBaseAddress(buffer, [])
-        memset(CVPixelBufferGetBaseAddress(buffer), 0, CVPixelBufferGetDataSize(buffer))
-        CVPixelBufferUnlockBaseAddress(buffer, [])
-        for frame in 0..<2 {
-            while !input.isReadyForMoreMediaData { await Task.yield() }
-            #expect(adaptor.append(buffer, withPresentationTime: CMTime(value: Int64(frame), timescale: 1)))
-        }
-        input.markAsFinished()
-        await writer.finishWriting()
-        try #require(writer.status == .completed, "Video fixture writer failed: \(String(describing: writer.error))")
+    private func movie(audio: URL, to output: URL) async throws {
+        // Use pre-encoded frames so virtualized test runners only mux tracks.
+        let video = SpeechRelayMP4Tests.realFixture("black-video.mov")
         let composition = AVMutableComposition()
         var assets = [AVURLAsset]()
         defer { withExtendedLifetime(assets) {} }
